@@ -2,6 +2,13 @@
 
 **QuoteFlow** is a cloud-hosted quotation creation, sharing, real-time tracking, digital approval, and electronic signature SaaS platform.
 
+### 🌐 Live Production Deployment
+- **Production URL**: [https://quoteflow-subesh1.vercel.app](https://quoteflow-subesh1.vercel.app)
+- **GitHub Repository**: [https://github.com/subeshtab-ctrl/quoteflow](https://github.com/subeshtab-ctrl/quoteflow)
+- **Customer Demo Quote**: [https://quoteflow-subesh1.vercel.app/q/demo_token_sent_q002](https://quoteflow-subesh1.vercel.app/q/demo_token_sent_q002)
+- **Company Settings & Logo Upload**: [https://quoteflow-subesh1.vercel.app/settings](https://quoteflow-subesh1.vercel.app/settings)
+- **Executive Dashboard**: [https://quoteflow-subesh1.vercel.app/dashboard](https://quoteflow-subesh1.vercel.app/dashboard)
+
 ---
 
 ## What Was Built & Verified
