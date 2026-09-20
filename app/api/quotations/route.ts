@@ -1,0 +1,50 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { store } from '@/lib/supabase/data-store';
+import { QuotationFormSchema } from '@/lib/validations/quotation';
+import { generateQuotationSentEmail, sendEmail } from '@/lib/email/service';
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const status = searchParams.get('status') || undefined;
+    const search = searchParams.get('search') || undefined;
+
+    const quotations = await store.getQuotations(undefined, { status, search });
+    return NextResponse.json({ success: true, quotations });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const validated = QuotationFormSchema.parse(body);
+
+    const quotation = await store.createQuotation(validated);
+
+    // If quotation status was set to SENT, send email if customer has email
+    if (quotation.status === 'SENT' && quotation.customer?.email) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const emailPayload = generateQuotationSentEmail({
+        customerName: quotation.customer.name,
+        companyName: quotation.organization?.name || 'The Mining Future',
+        quotationNumber: quotation.quotation_number,
+        amount: quotation.grand_total,
+        currency: quotation.currency,
+        validUntil: quotation.valid_until,
+        publicUrl: `${appUrl}/q/${quotation.public_token}`,
+      });
+      emailPayload.to = quotation.customer.email;
+      sendEmail(emailPayload).catch(console.error);
+    }
+
+    return NextResponse.json({ success: true, quotation });
+  } catch (err: any) {
+    console.error('Error creating quotation:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to create quotation' },
+      { status: 400 }
+    );
+  }
+}
