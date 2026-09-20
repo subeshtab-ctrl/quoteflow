@@ -549,6 +549,26 @@ class QuoteFlowStore {
 
   // --- CUSTOMERS ---
   public async getCustomers(orgId: string = DEFAULT_ORG_ID): Promise<Customer[]> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          for (const c of data) {
+            this.customers.set(c.id, c as Customer);
+          }
+          return data as Customer[];
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch customers from Supabase, using local cache:', err);
+    }
+
     return Array.from(this.customers.values())
       .filter((c) => c.organization_id === orgId)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -557,26 +577,108 @@ class QuoteFlowStore {
   public async getCustomerById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Customer | null> {
     const cust = this.customers.get(id);
     if (cust && cust.organization_id === orgId) return cust;
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+
+        if (!error && data) {
+          this.customers.set(data.id, data as Customer);
+          return data as Customer;
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching customer from Supabase:', err);
+    }
+
     return null;
   }
 
   public async createCustomer(data: Omit<Customer, 'id' | 'created_at' | 'updated_at'>): Promise<Customer> {
-    const id = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
+    const now = new Date().toISOString();
     const newCustomer: Customer = {
       ...data,
       id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     };
     this.customers.set(id, newCustomer);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data: inserted, error } = await supabase
+          .from('customers')
+          .insert({
+            id,
+            organization_id: data.organization_id || DEFAULT_ORG_ID,
+            name: data.name,
+            company_name: data.company_name || null,
+            email: data.email,
+            phone: data.phone || null,
+            alternate_phone: data.alternate_phone || null,
+            billing_address: data.billing_address || null,
+            shipping_address: data.shipping_address || null,
+            city: data.city || null,
+            state: data.state || null,
+            country: data.country || 'India',
+            postal_code: data.postal_code || null,
+            tax_number: data.tax_number || null,
+            notes: data.notes || null,
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Supabase customer insert error:', error);
+        } else if (inserted) {
+          this.customers.set(inserted.id, inserted as Customer);
+          return inserted as Customer;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync customer to Supabase:', err);
+    }
+
     return newCustomer;
   }
 
   public async updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
     const existing = this.customers.get(id);
-    if (!existing) throw new Error('Customer not found');
-    const updated = { ...existing, ...data, updated_at: new Date().toISOString() };
+    const updated = { ...(existing || {}), ...data, updated_at: new Date().toISOString() } as Customer;
     this.customers.set(id, updated);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data: updatedRow, error } = await supabase
+          .from('customers')
+          .update({
+            ...data,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Supabase customer update error:', error);
+        } else if (updatedRow) {
+          this.customers.set(id, updatedRow as Customer);
+          return updatedRow as Customer;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update customer in Supabase:', err);
+    }
+
     return updated;
   }
 
@@ -612,6 +714,54 @@ class QuoteFlowStore {
     orgId: string = DEFAULT_ORG_ID,
     filters?: { status?: string; search?: string; customerId?: string }
   ): Promise<Quotation[]> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        let query = supabase
+          .from('quotations')
+          .select('*, customer:customers(*), items:quotation_items(*)')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false });
+
+        if (filters?.status && filters.status !== 'ALL') {
+          query = query.eq('status', filters.status);
+        }
+
+        if (filters?.customerId) {
+          query = query.eq('customer_id', filters.customerId);
+        }
+
+        const { data, error } = await query;
+        if (!error && data && data.length > 0) {
+          for (const q of data) {
+            this.quotations.set(q.id, q as Quotation);
+            if (q.customer) {
+              this.customers.set(q.customer.id, q.customer as Customer);
+            }
+            if (q.items) {
+              this.quotationItems.set(q.id, q.items as QuotationItem[]);
+            }
+          }
+
+          let results = data as Quotation[];
+          if (filters?.search) {
+            const s = filters.search.toLowerCase();
+            results = results.filter((item) => {
+              const cust = item.customer;
+              return (
+                item.quotation_number.toLowerCase().includes(s) ||
+                item.title.toLowerCase().includes(s) ||
+                (cust && (cust.name?.toLowerCase().includes(s) || cust.company_name?.toLowerCase().includes(s)))
+              );
+            });
+          }
+          return results;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch quotations from Supabase, using local cache:', err);
+    }
+
     let list = Array.from(this.quotations.values()).filter((q) => q.organization_id === orgId);
 
     if (filters?.status && filters.status !== 'ALL') {
@@ -645,6 +795,39 @@ class QuoteFlowStore {
   }
 
   public async getQuotationById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Quotation | null> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('quotations')
+          .select('*, customer:customers(*), items:quotation_items(*)')
+          .eq('id', id)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+
+        if (!error && data) {
+          this.quotations.set(data.id, data as Quotation);
+          if (data.customer) {
+            this.customers.set(data.customer.id, data.customer as Customer);
+          }
+          if (data.items) {
+            this.quotationItems.set(data.id, data.items as QuotationItem[]);
+          }
+          return {
+            ...data,
+            organization: this.organizations.get(data.organization_id),
+            signature: this.signatures.get(data.id) || null,
+            events: (this.events.get(data.id) || []).sort(
+              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            ),
+            views: this.views.get(data.id) || [],
+          } as Quotation;
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching quotation from Supabase:', err);
+    }
+
     const quote = this.quotations.get(id);
     if (!quote || quote.organization_id !== orgId) return null;
 
@@ -663,6 +846,35 @@ class QuoteFlowStore {
 
   public async getQuotationByPublicToken(token: string): Promise<Quotation | null> {
     const hashed = hashToken(token);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('quotations')
+          .select('*, customer:customers(*), items:quotation_items(*)')
+          .or(`public_token.eq.${token},public_token_hash.eq.${hashed}`)
+          .maybeSingle();
+
+        if (!error && data) {
+          this.quotations.set(data.id, data as Quotation);
+          if (data.customer) {
+            this.customers.set(data.customer.id, data.customer as Customer);
+          }
+          if (data.items) {
+            this.quotationItems.set(data.id, data.items as QuotationItem[]);
+          }
+          return {
+            ...data,
+            organization: this.organizations.get(data.organization_id),
+            signature: this.signatures.get(data.id) || null,
+          } as Quotation;
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching quotation by token from Supabase:', err);
+    }
+
     // Lookup by raw token or hash
     const quote = Array.from(this.quotations.values()).find(
       (q) => q.public_token === token || q.public_token_hash === hashed
@@ -706,7 +918,7 @@ class QuoteFlowStore {
     });
 
     const quotationNumber = await this.generateNextQuotationNumber(orgId);
-    const id = `quote_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `d0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
     const publicToken = generateSecureToken();
     const publicTokenHash = hashToken(publicToken);
 
@@ -742,7 +954,7 @@ class QuoteFlowStore {
 
     // Save items
     const savedItems: QuotationItem[] = calculation.items.map((item, idx) => ({
-      id: `item_${Date.now()}_${idx}`,
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item_${Date.now()}_${idx}`,
       quotation_id: id,
       product_id: item.product_id || null,
       description: item.description,
@@ -772,12 +984,93 @@ class QuoteFlowStore {
       });
     }
 
+    // Sync to Supabase
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('quotations').insert({
+          id,
+          organization_id: orgId,
+          customer_id: data.customer_id,
+          quotation_number: quotationNumber,
+          revision_number: 1,
+          title: data.title,
+          status: newQuotation.status,
+          issue_date: data.issue_date,
+          valid_until: data.valid_until,
+          currency: newQuotation.currency,
+          subtotal: newQuotation.subtotal,
+          discount_type: newQuotation.discount_type,
+          discount_value: newQuotation.discount_value,
+          discount_amount: newQuotation.discount_amount,
+          tax_rate: newQuotation.tax_rate,
+          tax_amount: newQuotation.tax_amount,
+          grand_total: newQuotation.grand_total,
+          notes: newQuotation.notes,
+          terms_conditions: newQuotation.terms_conditions,
+          public_token: publicToken,
+          public_token_hash: publicTokenHash,
+          is_token_revoked: false,
+          view_count: 0,
+        });
+
+        if (savedItems.length > 0) {
+          await supabase.from('quotation_items').insert(
+            savedItems.map((item) => ({
+              id: item.id,
+              quotation_id: id,
+              product_id: item.product_id || null,
+              description: item.description,
+              quantity: item.quantity,
+              unit: item.unit,
+              unit_price: item.unit_price,
+              discount_type: item.discount_type,
+              discount_value: item.discount_value,
+              discount_amount: item.discount_amount,
+              tax_rate: item.tax_rate,
+              tax_amount: item.tax_amount,
+              line_total: item.line_total,
+              sort_order: item.sort_order,
+            }))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync quotation to Supabase:', err);
+    }
+
     return {
       ...newQuotation,
       items: savedItems,
       customer: this.customers.get(data.customer_id),
       organization: org || undefined,
     };
+  }
+
+  public async deleteQuotation(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { error } = await supabase
+          .from('quotations')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('Supabase quotation delete error:', error);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete quotation from Supabase:', err);
+    }
+
+    this.quotations.delete(id);
+    this.quotationItems.delete(id);
+    this.signatures.delete(id);
+    this.views.delete(id);
+    this.events.delete(id);
+
+    return true;
   }
 
   public async updateQuotation(

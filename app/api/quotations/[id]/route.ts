@@ -33,3 +33,18 @@ export async function PUT(req: NextRequest, { params }: RouteProps) {
     );
   }
 }
+
+export async function DELETE(req: NextRequest, { params }: RouteProps) {
+  try {
+    const { id } = await params;
+    await store.deleteQuotation(id);
+    return NextResponse.json({ success: true, message: 'Quotation deleted successfully' });
+  } catch (err: any) {
+    console.error('Error deleting quotation:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to delete quotation' },
+      { status: 400 }
+    );
+  }
+}
+

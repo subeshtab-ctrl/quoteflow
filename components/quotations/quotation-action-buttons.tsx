@@ -13,6 +13,7 @@ import {
   Edit,
   ExternalLink,
   MessageSquare,
+  Trash2,
 } from 'lucide-react';
 import { QuotationStatus } from '@/types/database';
 
@@ -37,6 +38,7 @@ export function QuotationActionButtons({
   const [copied, setCopied] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const publicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/q/${publicToken}`;
 
@@ -94,6 +96,31 @@ export function QuotationActionButtons({
       alert(err.message || 'Error creating revision');
     } finally {
       setIsRevising(false);
+    }
+  };
+
+  const handleDeleteQuotation = async () => {
+    if (
+      !confirm(
+        `Are you sure you want to permanently delete quotation ${quotationNumber}? This will remove all associated items, history, and signatures.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      const res = await fetch(`/api/quotations/${quotationId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete quotation');
+
+      router.push('/quotations');
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || 'Error deleting quotation');
+      setIsDeleting(false);
     }
   };
 
@@ -179,6 +206,19 @@ export function QuotationActionButtons({
           <span>Client View</span>
         </Button>
       </Link>
+
+      {/* Delete Quotation */}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleDeleteQuotation}
+        isLoading={isDeleting}
+        className="gap-1.5 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 shadow-sm"
+        title="Permanently Delete Quotation"
+      >
+        <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+        <span>Delete</span>
+      </Button>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   FileText,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export function CustomersClientView({
   initialCustomers,
@@ -24,6 +25,7 @@ export function CustomersClientView({
   initialCustomers: Customer[];
   quotations: Quotation[];
 }) {
+  const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
   const [search, setSearch] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -76,6 +78,7 @@ export function CustomersClientView({
       if (!res.ok) throw new Error(data.error || 'Failed to add customer');
 
       setCustomers((prev) => [data.customer, ...prev]);
+      router.refresh();
       setIsAddOpen(false);
       // Reset form
       setName('');

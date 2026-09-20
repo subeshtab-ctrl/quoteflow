@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import {
-  FileCheck,
   Send,
   ShieldCheck,
   Eye,
@@ -64,12 +63,6 @@ export default function HomePage() {
             <Button size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 text-base px-8 shadow-xl shadow-indigo-600/40">
               Enter Business Dashboard
               <ArrowRight className="h-5 w-5" />
-            </Button>
-          </Link>
-          <Link href="/q/demo_token_sent_q002">
-            <Button size="lg" variant="outline" className="bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700 gap-2 text-base px-6">
-              <FileCheck className="h-5 w-5 text-emerald-400" />
-              Test Customer Approval Portal
             </Button>
           </Link>
         </div>
