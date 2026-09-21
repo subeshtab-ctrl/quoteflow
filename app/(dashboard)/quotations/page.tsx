@@ -23,6 +23,8 @@ import { QuotationsFilterTabs } from '@/components/quotations/quotations-filter-
 import { QuotationDeleteButton } from '@/components/quotations/quotation-delete-button';
 import { QuotationInvoiceButton } from '@/components/quotations/quotation-invoice-button';
 
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+
 interface QuotationsPageProps {
   searchParams: Promise<{
     status?: string;
@@ -32,9 +34,12 @@ interface QuotationsPageProps {
 
 export default async function QuotationsPage({ searchParams }: QuotationsPageProps) {
   const { status, search } = await searchParams;
+  const auth = await getAuthenticatedUserContext();
+  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
   const [quotations, organization] = await Promise.all([
-    store.getQuotations(undefined, { status, search }),
-    store.getOrganization(),
+    store.getQuotations(orgId, { status, search }),
+    store.getOrganization(orgId),
   ]);
 
   return (

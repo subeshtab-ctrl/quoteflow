@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { QuotationActionButtons } from '@/components/quotations/quotation-action-buttons';
 
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+
 interface QuotationDetailPageProps {
   params: Promise<{
     id: string;
@@ -36,7 +38,9 @@ interface QuotationDetailPageProps {
 
 export default async function QuotationDetailPage({ params }: QuotationDetailPageProps) {
   const { id } = await params;
-  const quotation = await store.getQuotationById(id);
+  const auth = await getAuthenticatedUserContext();
+  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  const quotation = await store.getQuotationById(id, orgId);
 
   if (!quotation) notFound();
 

@@ -54,12 +54,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Update company / organization name
-    if (companyName && companyName.trim()) {
-      await store.updateOrganization('a0000000-0000-0000-0000-000000000001', {
-        name: companyName.trim(),
-        email: (email || '').trim(),
-      });
+    // 2. Update company / organization name for target user's specific organization
+    if (targetUserId && companyName && companyName.trim() && supabase) {
+      const { data: member } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', targetUserId)
+        .maybeSingle();
+
+      if (member?.organization_id) {
+        await store.updateOrganization(member.organization_id, {
+          name: companyName.trim(),
+          email: (email || '').trim(),
+        });
+      }
     }
 
     return NextResponse.json({

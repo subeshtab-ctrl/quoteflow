@@ -7,13 +7,18 @@ import { formatCurrency } from '@/lib/quotations/calculations';
 import { DashboardCharts } from '@/components/dashboard/dashboard-charts';
 import { BarChart3, TrendingUp, CheckCircle2, Clock, XCircle, Award } from 'lucide-react';
 
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+
 export default async function ReportsPage() {
+  const auth = await getAuthenticatedUserContext();
+  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
   const [analytics, quotations, organization] = await Promise.all([
-    store.getDashboardAnalytics(),
-    store.getQuotations(),
-    store.getOrganization(),
+    store.getDashboardAnalytics(orgId),
+    store.getQuotations(orgId),
+    store.getOrganization(orgId),
   ]);
-  const currency = organization?.default_currency || 'INR';
+  const currency = organization?.default_currency || 'USD';
 
   return (
     <DashboardLayout>

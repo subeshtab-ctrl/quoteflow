@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { QuotationFormSchema } from '@/lib/validations/quotation';
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 interface RouteProps {
   params: Promise<{
@@ -9,8 +10,10 @@ interface RouteProps {
 }
 
 export async function GET(req: NextRequest, { params }: RouteProps) {
+  const auth = await getAuthenticatedUserContext();
+  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
   const { id } = await params;
-  const quote = await store.getQuotationById(id);
+  const quote = await store.getQuotationById(id, orgId);
   if (!quote) {
     return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
   }
@@ -19,11 +22,13 @@ export async function GET(req: NextRequest, { params }: RouteProps) {
 
 export async function PUT(req: NextRequest, { params }: RouteProps) {
   try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
     const { id } = await params;
     const body = await req.json();
     const validated = QuotationFormSchema.parse(body);
 
-    const updated = await store.updateQuotation(id, validated);
+    const updated = await store.updateQuotation(id, validated, orgId);
     return NextResponse.json({ success: true, quotation: updated });
   } catch (err: any) {
     console.error('Error updating quotation:', err);
@@ -36,13 +41,15 @@ export async function PUT(req: NextRequest, { params }: RouteProps) {
 
 export async function PATCH(req: NextRequest, { params }: RouteProps) {
   try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
     const { id } = await params;
     const body = await req.json();
     if (body.status === 'APPROVED') {
-      const updated = await store.markQuotationApproved(id, body.signer_name || 'Admin');
+      const updated = await store.markQuotationApproved(id, body.signer_name || auth?.fullName || 'Admin');
       return NextResponse.json({ success: true, quotation: updated });
     }
-    const updated = await store.updateQuotation(id, body);
+    const updated = await store.updateQuotation(id, body, orgId);
     return NextResponse.json({ success: true, quotation: updated });
   } catch (err: any) {
     console.error('Error in quotation PATCH:', err);
@@ -55,8 +62,10 @@ export async function PATCH(req: NextRequest, { params }: RouteProps) {
 
 export async function DELETE(req: NextRequest, { params }: RouteProps) {
   try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
     const { id } = await params;
-    await store.deleteQuotation(id);
+    await store.deleteQuotation(id, orgId);
     return NextResponse.json({ success: true, message: 'Quotation deleted successfully' });
   } catch (err: any) {
     console.error('Error deleting quotation:', err);

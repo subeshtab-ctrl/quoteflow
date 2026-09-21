@@ -9,6 +9,7 @@ import { formatCurrency } from '@/lib/quotations/calculations';
 import { formatDate } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DashboardCharts } from '@/components/dashboard/dashboard-charts';
 import {
   FileText,
   Clock,
@@ -21,15 +22,18 @@ import {
   Download,
   Share2,
 } from 'lucide-react';
-import { DashboardCharts } from '@/components/dashboard/dashboard-charts';
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 export default async function DashboardPage() {
+  const auth = await getAuthenticatedUserContext();
+  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
   const [analytics, quotations, organization] = await Promise.all([
-    store.getDashboardAnalytics(),
-    store.getQuotations(),
-    store.getOrganization(),
+    store.getDashboardAnalytics(orgId),
+    store.getQuotations(orgId),
+    store.getOrganization(orgId),
   ]);
-  const currency = organization?.default_currency || 'INR';
+  const currency = organization?.default_currency || 'USD';
   const recentQuotations = quotations.slice(0, 6);
 
   return (

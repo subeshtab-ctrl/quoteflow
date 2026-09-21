@@ -16,12 +16,17 @@ import {
   Palette,
   Sparkles,
   Users as UsersIcon,
+  UserPlus,
+  ShieldAlert,
+  X,
 } from 'lucide-react';
 
 export function SettingsClientView({
   initialOrganization,
+  currentUserRole = 'OWNER',
 }: {
   initialOrganization: Organization;
+  currentUserRole?: string;
 }) {
   const router = useRouter();
   const [org, setOrg] = useState<Organization>(initialOrganization);
@@ -33,6 +38,15 @@ export function SettingsClientView({
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Staff creation state
+  const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
+  const [isAddingStaff, setIsAddingStaff] = useState(false);
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState<'STAFF' | 'ADMIN'>('STAFF');
+  const [staffError, setStaffError] = useState<string | null>(null);
 
   const fetchUsers = async () => {
     try {
@@ -46,6 +60,51 @@ export function SettingsClientView({
       console.error('Failed to load users:', err);
     } finally {
       setIsLoadingUsers(false);
+    }
+  };
+
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffError(null);
+
+    if (!newStaffName.trim() || !newStaffEmail.trim() || !newStaffPassword) {
+      setStaffError('Please fill out all fields.');
+      return;
+    }
+
+    if (newStaffPassword.length < 6) {
+      setStaffError('Password must be at least 6 characters.');
+      return;
+    }
+
+    try {
+      setIsAddingStaff(true);
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: newStaffName.trim(),
+          email: newStaffEmail.trim(),
+          password: newStaffPassword,
+          role: newStaffRole,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create team member');
+
+      setSuccessMsg(`Team account "${newStaffEmail}" created successfully! They can now log in.`);
+      setIsAddStaffOpen(false);
+      setNewStaffName('');
+      setNewStaffEmail('');
+      setNewStaffPassword('');
+      setNewStaffRole('STAFF');
+      fetchUsers();
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setStaffError(err.message || 'Error creating staff member');
+    } finally {
+      setIsAddingStaff(false);
     }
   };
 
@@ -189,6 +248,18 @@ export function SettingsClientView({
       {errorMsg && (
         <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-xs font-semibold text-rose-700">
           {errorMsg}
+        </div>
+      )}
+
+      {currentUserRole === 'STAFF' && (
+        <div className="flex items-center gap-3 rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs font-medium text-amber-800">
+          <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
+          <div>
+            <p className="font-semibold text-amber-900">Signed in as Staff</p>
+            <p className="text-amber-700 mt-0.5">
+              You have read-only access to Organization Settings. Adding staff and modifying company settings requires an Owner or Admin account.
+            </p>
+          </div>
         </div>
       )}
 
@@ -429,21 +500,38 @@ export function SettingsClientView({
           />
         </div>
 
-        {/* Team Members & Registered Users Card */}
+        {/* Team Members & Staff Accounts Card */}
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
                 <UsersIcon className="h-5 w-5 text-indigo-600" />
-                <span>Team Accounts & Existing Users</span>
+                <span>Team Accounts & Staff Members</span>
               </h3>
               <p className="text-xs text-slate-500">
-                Manage registered user accounts and remove access when members leave.
+                Manage members belonging to your company workspace. Staff members can create quotes and manage customers.
               </p>
             </div>
-            <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg">
-              {users.length} {users.length === 1 ? 'User' : 'Users'}
-            </span>
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg">
+                {users.length} {users.length === 1 ? 'Member' : 'Members'}
+              </span>
+              {currentUserRole !== 'STAFF' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setStaffError(null);
+                    setIsAddStaffOpen(true);
+                  }}
+                  className="gap-1.5 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  <span>Add Staff Member</span>
+                </Button>
+              )}
+            </div>
           </div>
 
           {isLoadingUsers ? (
@@ -464,9 +552,22 @@ export function SettingsClientView({
                       {(user.full_name?.[0] || user.email?.[0] || 'U').toUpperCase()}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {user.full_name || 'System User'}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-800">
+                          {user.full_name || 'System User'}
+                        </p>
+                        <span
+                          className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                            user.role === 'OWNER'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                              : user.role === 'ADMIN'
+                              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              : 'bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}
+                        >
+                          {user.role || 'STAFF'}
+                        </span>
+                      </div>
                       <p className="text-xs text-slate-400">{user.email}</p>
                     </div>
                   </div>
@@ -482,20 +583,22 @@ export function SettingsClientView({
                       {user.email_confirmed ? 'Verified' : 'Pending Verification'}
                     </span>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteUser(user.id, user.email)}
-                      disabled={deletingUserId === user.id}
-                      className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
-                      title="Delete User Account"
-                    >
-                      {deletingUserId === user.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                      <span>Delete User</span>
-                    </button>
+                    {currentUserRole !== 'STAFF' && user.role !== 'OWNER' && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser(user.id, user.email)}
+                        disabled={deletingUserId === user.id}
+                        className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
+                        title="Delete User Account"
+                      >
+                        {deletingUserId === user.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        <span>Delete</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -504,13 +607,117 @@ export function SettingsClientView({
         </div>
 
         {/* Save CTA */}
-        <div className="flex justify-end pt-2">
-          <Button type="submit" variant="primary" isLoading={isLoading} className="gap-2 shadow-md">
-            <Save className="h-4 w-4" />
-            <span>Save Settings</span>
-          </Button>
-        </div>
+        {currentUserRole !== 'STAFF' && (
+          <div className="flex justify-end pt-2">
+            <Button type="submit" variant="primary" isLoading={isLoading} className="gap-2 shadow-md">
+              <Save className="h-4 w-4" />
+              <span>Save Settings</span>
+            </Button>
+          </div>
+        )}
       </form>
+
+      {/* Add Staff Member Modal */}
+      {isAddStaffOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-900 text-base">Add Team Member</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddStaffOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateStaff} className="p-6 space-y-4">
+              {staffError && (
+                <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-xl">
+                  {staffError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Full Name <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  placeholder="e.g. Rahul Verma"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Email Address (Login ID) <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  type="email"
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  placeholder="rahul@example.com"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Password <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  type="password"
+                  value={newStaffPassword}
+                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Account Role <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newStaffRole}
+                  onChange={(e) => setNewStaffRole(e.target.value as 'STAFF' | 'ADMIN')}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                >
+                  <option value="STAFF">Staff (Can create & manage quotations, customers, products)</option>
+                  <option value="ADMIN">Admin (Full organization access)</option>
+                </select>
+              </div>
+
+              <div className="pt-3 flex justify-end gap-3 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddStaffOpen(false)}
+                  disabled={isAddingStaff}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  isLoading={isAddingStaff}
+                  className="gap-2 shadow-sm"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span>Create Account</span>
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

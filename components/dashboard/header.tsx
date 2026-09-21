@@ -24,6 +24,7 @@ export interface UserProfileInfo {
   fullName?: string;
   companyName?: string;
   initials?: string;
+  role?: string;
 }
 
 export function DashboardHeader({
@@ -252,10 +253,17 @@ export function DashboardHeader({
             <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
               {/* User / Workspace info header */}
               <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50/50 rounded-xl mb-1">
-                <p className="text-xs font-bold text-slate-900 truncate">
-                  {displayCompany}
-                </p>
-                <p className="text-[11px] text-slate-600 font-medium truncate mt-0.5">
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-xs font-bold text-slate-900 truncate">
+                    {displayCompany}
+                  </p>
+                  {userProfile?.role && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0 uppercase tracking-wider">
+                      {userProfile.role}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-600 font-medium truncate mt-1">
                   {displayName}
                 </p>
                 {displayEmail && (

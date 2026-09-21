@@ -540,18 +540,18 @@ class QuoteFlowStore {
           .eq('id', orgId)
           .maybeSingle();
 
-        if (!data) {
-          const { data: anyOrg } = await supabase
+        if (!data && orgId === DEFAULT_ORG_ID) {
+          const { data: fallbackOrg } = await supabase
             .from('organizations')
             .select('*')
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: true })
             .limit(1)
             .maybeSingle();
-          data = anyOrg;
+          data = fallbackOrg;
         }
 
         if (!error && data) {
-          this.organizations.set(orgId, data as Organization);
+          this.organizations.set(data.id, data as Organization);
           return data as Organization;
         }
       }
@@ -559,6 +559,10 @@ class QuoteFlowStore {
       console.warn('Could not fetch organization from Supabase:', err);
     }
     return this.organizations.get(orgId) || null;
+  }
+
+  public setCachedOrganization(orgId: string, org: Organization): void {
+    this.organizations.set(orgId, org);
   }
 
   public async updateOrganization(orgId: string = DEFAULT_ORG_ID, data: Partial<Organization>): Promise<Organization> {
@@ -1396,7 +1400,8 @@ class QuoteFlowStore {
         const { error } = await supabase
           .from('quotations')
           .delete()
-          .eq('id', id);
+          .eq('id', id)
+          .eq('organization_id', orgId);
 
         if (error) {
           console.error('Supabase quotation delete error:', error);
@@ -1430,10 +1435,18 @@ class QuoteFlowStore {
       terms_conditions?: string;
       items?: any[];
       status?: any;
-    }
+    },
+    orgId?: string
   ): Promise<Quotation> {
-    const existing = this.quotations.get(id);
+    let existing = this.quotations.get(id);
+    if (!existing) {
+      existing = (await this.getQuotationById(id, orgId || DEFAULT_ORG_ID)) || undefined;
+    }
     if (!existing) throw new Error('Quotation not found');
+
+    if (orgId && existing.organization_id !== orgId) {
+      throw new Error('Unauthorized to modify quotation from another organization');
+    }
 
     if (existing.status === 'APPROVED') {
       throw new Error('Approved quotation is immutable. Please create a revision.');

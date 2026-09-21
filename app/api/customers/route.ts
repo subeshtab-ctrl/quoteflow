@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { CustomerFormSchema } from '@/lib/validations/quotation';
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 export async function GET() {
-  const customers = await store.getCustomers();
+  const auth = await getAuthenticatedUserContext();
+  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  const customers = await store.getCustomers(orgId);
   return NextResponse.json({ success: true, customers });
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
     const body = await req.json();
     const validated = CustomerFormSchema.parse(body);
 
     const customer = await store.createCustomer({
-      organization_id: 'a0000000-0000-0000-0000-000000000001',
+      organization_id: orgId,
       name: validated.name,
       company_name: validated.company_name,
       email: validated.email,

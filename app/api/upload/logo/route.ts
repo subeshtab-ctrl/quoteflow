@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { createAdminClient } from '@/lib/supabase/service-role';
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import fs from 'fs';
 import path from 'path';
 
@@ -53,8 +54,11 @@ export async function POST(req: NextRequest) {
       logoUrl = `/uploads/${fileName}`;
     }
 
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
     // Update in-memory store
-    await store.updateOrganization('a0000000-0000-0000-0000-000000000001', {
+    await store.updateOrganization(orgId, {
       logo_url: logoUrl,
     });
 
@@ -64,7 +68,7 @@ export async function POST(req: NextRequest) {
       await supabase
         .from('organizations')
         .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
-        .eq('id', 'a0000000-0000-0000-0000-000000000001');
+        .eq('id', orgId);
     }
 
     return NextResponse.json({
@@ -83,8 +87,11 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
     // Reset logo to empty string
-    await store.updateOrganization('a0000000-0000-0000-0000-000000000001', {
+    await store.updateOrganization(orgId, {
       logo_url: '',
     });
 
@@ -93,7 +100,7 @@ export async function DELETE() {
       await supabase
         .from('organizations')
         .update({ logo_url: null, updated_at: new Date().toISOString() })
-        .eq('id', 'a0000000-0000-0000-0000-000000000001');
+        .eq('id', orgId);
     }
 
     return NextResponse.json({
