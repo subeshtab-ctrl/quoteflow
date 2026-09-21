@@ -595,7 +595,13 @@ class QuoteFlowStore {
           .eq('organization_id', orgId)
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
+          const remoteIds = new Set(data.map((c) => c.id));
+          for (const [id, c] of this.customers.entries()) {
+            if (c.organization_id === orgId && !remoteIds.has(id)) {
+              this.customers.delete(id);
+            }
+          }
           for (const c of data) {
             this.customers.set(c.id, c as Customer);
           }
@@ -815,7 +821,16 @@ class QuoteFlowStore {
         }
 
         const { data, error } = await query;
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
+          // Synchronize memory cache with Supabase quotations for this org
+          const remoteIds = new Set(data.map((q) => q.id));
+          for (const [id, q] of this.quotations.entries()) {
+            if (q.organization_id === orgId && !remoteIds.has(id)) {
+              this.quotations.delete(id);
+              this.quotationItems.delete(id);
+            }
+          }
+
           for (const q of data) {
             this.quotations.set(q.id, q as Quotation);
             if (q.customer) {
