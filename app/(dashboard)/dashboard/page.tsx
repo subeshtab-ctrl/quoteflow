@@ -24,8 +24,12 @@ import {
 import { DashboardCharts } from '@/components/dashboard/dashboard-charts';
 
 export default async function DashboardPage() {
-  const analytics = await store.getDashboardAnalytics();
-  const quotations = await store.getQuotations();
+  const [analytics, quotations, organization] = await Promise.all([
+    store.getDashboardAnalytics(),
+    store.getQuotations(),
+    store.getOrganization(),
+  ]);
+  const currency = organization?.default_currency || 'INR';
   const recentQuotations = quotations.slice(0, 6);
 
   return (
@@ -63,7 +67,7 @@ export default async function DashboardPage() {
             </div>
             <div>
               <h3 className="text-2xl font-black text-slate-900">
-                {formatCurrency(analytics.totalValue, 'INR')}
+                {formatCurrency(analytics.totalValue, currency)}
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 {analytics.totalCount} quotations generated
@@ -80,7 +84,7 @@ export default async function DashboardPage() {
             </div>
             <div>
               <h3 className="text-2xl font-black text-emerald-700">
-                {formatCurrency(analytics.approvedValue, 'INR')}
+                {formatCurrency(analytics.approvedValue, currency)}
               </h3>
               <p className="text-xs text-emerald-600/80 font-medium mt-1">
                 {analytics.approvedCount} approved ({analytics.winRate}% win rate)
@@ -97,7 +101,7 @@ export default async function DashboardPage() {
             </div>
             <div>
               <h3 className="text-2xl font-black text-amber-700">
-                {formatCurrency(analytics.pendingValue, 'INR')}
+                {formatCurrency(analytics.pendingValue, currency)}
               </h3>
               <p className="text-xs text-amber-600/80 font-medium mt-1">
                 {analytics.pendingCount} awaiting client decision
@@ -132,7 +136,7 @@ export default async function DashboardPage() {
                 <p className="text-xs text-slate-500">Monthly quote volume vs. closed-won revenue</p>
               </div>
             </div>
-            <DashboardCharts monthlyData={analytics.monthlyData} />
+            <DashboardCharts monthlyData={analytics.monthlyData} currency={currency} />
           </div>
 
           {/* Quick Stats Breakdown */}

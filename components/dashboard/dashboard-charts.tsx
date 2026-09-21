@@ -12,6 +12,8 @@ import {
   Legend,
 } from 'recharts';
 
+import { CurrencyCode } from '@/types/database';
+
 interface DashboardChartsProps {
   monthlyData: Array<{
     month: string;
@@ -19,13 +21,28 @@ interface DashboardChartsProps {
     approved: number;
     count: number;
   }>;
+  currency?: CurrencyCode;
 }
 
-export function DashboardCharts({ monthlyData }: DashboardChartsProps) {
+const getSymbol = (c: CurrencyCode = 'INR') => {
+  switch (c) {
+    case 'USD': return '$';
+    case 'EUR': return '€';
+    case 'GBP': return '£';
+    case 'AED': return 'AED ';
+    case 'INR':
+    default:
+      return '₹';
+  }
+};
+
+export function DashboardCharts({ monthlyData, currency = 'INR' }: DashboardChartsProps) {
+  const sym = getSymbol(currency);
+
   const formatYAxis = (val: number) => {
-    if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-    if (val >= 1000) return `₹${(val / 1000).toFixed(0)}k`;
-    return `₹${val}`;
+    if (val >= 100000) return `${sym}${(val / 1000).toFixed(0)}k`;
+    if (val >= 1000) return `${sym}${(val / 1000).toFixed(0)}k`;
+    return `${sym}${val}`;
   };
 
   return (
@@ -42,7 +59,7 @@ export function DashboardCharts({ monthlyData }: DashboardChartsProps) {
               boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
               fontSize: '12px',
             }}
-            formatter={(value: any) => [`₹${Number(value).toLocaleString('en-IN')}`, '']}
+            formatter={(value: any) => [`${sym}${Number(value).toLocaleString()}`, '']}
           />
           <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
           <Bar dataKey="value" name="Pipeline Created" fill="#818cf8" radius={[4, 4, 0, 0]} />

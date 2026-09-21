@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Organization, CurrencyCode } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -22,6 +23,7 @@ export function SettingsClientView({
 }: {
   initialOrganization: Organization;
 }) {
+  const router = useRouter();
   const [org, setOrg] = useState<Organization>(initialOrganization);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -157,7 +159,8 @@ export function SettingsClientView({
 
       setOrg(data.organization);
       setSuccessMsg('Company settings successfully updated.');
-      setTimeout(() => setSuccessMsg(null), 3000);
+      router.refresh();
+      setTimeout(() => setSuccessMsg(null), 3500);
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {

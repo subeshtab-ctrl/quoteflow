@@ -1,6 +1,7 @@
 import React from 'react';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import { DashboardLayout } from '@/components/dashboard/dashboard-layout';
 import { store } from '@/lib/supabase/data-store';
 import { SettingsClientView } from '@/components/settings/settings-client-view';

@@ -8,8 +8,12 @@ import { DashboardCharts } from '@/components/dashboard/dashboard-charts';
 import { BarChart3, TrendingUp, CheckCircle2, Clock, XCircle, Award } from 'lucide-react';
 
 export default async function ReportsPage() {
-  const analytics = await store.getDashboardAnalytics();
-  const quotations = await store.getQuotations();
+  const [analytics, quotations, organization] = await Promise.all([
+    store.getDashboardAnalytics(),
+    store.getQuotations(),
+    store.getOrganization(),
+  ]);
+  const currency = organization?.default_currency || 'INR';
 
   return (
     <DashboardLayout>
@@ -42,7 +46,7 @@ export default async function ReportsPage() {
             </span>
             <div className="flex items-baseline gap-2">
               <h3 className="text-2xl font-black text-slate-900">
-                {formatCurrency(analytics.approvedValue, 'INR')}
+                {formatCurrency(analytics.approvedValue, currency)}
               </h3>
             </div>
             <p className="text-xs text-slate-400">Total digitally accepted value</p>
@@ -71,7 +75,7 @@ export default async function ReportsPage() {
           </div>
         </div>
 
-        {/* Pipeline Chart */}
+        {/* Monthly Performance Charts */}
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -79,7 +83,7 @@ export default async function ReportsPage() {
               <p className="text-xs text-slate-500">Pipeline vs. executed quotation agreements</p>
             </div>
           </div>
-          <DashboardCharts monthlyData={analytics.monthlyData} />
+          <DashboardCharts monthlyData={analytics.monthlyData} currency={currency} />
         </div>
       </div>
     </DashboardLayout>
