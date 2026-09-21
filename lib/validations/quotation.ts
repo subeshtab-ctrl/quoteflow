@@ -59,11 +59,11 @@ export const CustomerFormSchema = z.object({
 
 export const ProductFormSchema = z.object({
   id: z.string().optional(),
-  name: z.string().min(2, 'Product or service name is required'),
-  sku: z.string().optional(),
-  description: z.string().optional(),
+  name: z.string().min(1, 'Product or service name is required'),
+  sku: z.string().nullish().or(z.literal('')),
+  description: z.string().nullish().or(z.literal('')),
   unit_price: z.coerce.number().min(0, 'Price cannot be negative'),
-  unit: z.string().min(1).default('unit'),
+  unit: z.string().nullish().or(z.literal('')).default('unit'),
   tax_rate: z.coerce.number().min(0).max(100).default(0),
   is_active: z.boolean().default(true),
 });

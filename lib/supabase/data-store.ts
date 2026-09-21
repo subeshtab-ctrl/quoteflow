@@ -833,23 +833,121 @@ class QuoteFlowStore {
   }
 
   public async createProduct(data: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Promise<Product> {
-    const id = `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
     const newProd: Product = {
       ...data,
       id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     };
     this.products.set(id, newProd);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data: saved, error } = await supabase
+          .from('products')
+          .insert({
+            id,
+            organization_id: data.organization_id || DEFAULT_ORG_ID,
+            name: data.name,
+            sku: data.sku || null,
+            description: data.description || null,
+            unit_price: data.unit_price,
+            unit: data.unit || 'unit',
+            tax_rate: data.tax_rate || 0,
+            is_active: data.is_active !== undefined ? data.is_active : true,
+            created_at: now,
+            updated_at: now,
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Supabase product create error:', error);
+        } else if (saved) {
+          this.products.set(id, saved as Product);
+          return saved as Product;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync new product to Supabase:', err);
+    }
+
     return newProd;
   }
 
   public async updateProduct(id: string, data: Partial<Product>): Promise<Product> {
     const existing = this.products.get(id);
-    if (!existing) throw new Error('Product not found');
-    const updated = { ...existing, ...data, updated_at: new Date().toISOString() };
+    const now = new Date().toISOString();
+    const updated: Product = {
+      ...(existing || {}),
+      ...data,
+      id,
+      organization_id: (existing?.organization_id || data.organization_id || DEFAULT_ORG_ID) as string,
+      name: (data.name !== undefined ? data.name : existing?.name) || 'Product',
+      unit_price: data.unit_price !== undefined ? data.unit_price : (existing?.unit_price || 0),
+      unit: (data.unit !== undefined ? data.unit : existing?.unit) || 'unit',
+      tax_rate: data.tax_rate !== undefined ? data.tax_rate : (existing?.tax_rate || 0),
+      is_active: data.is_active !== undefined ? data.is_active : (existing?.is_active ?? true),
+      updated_at: now,
+      created_at: existing?.created_at || now,
+    };
     this.products.set(id, updated);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data: saved, error } = await supabase
+          .from('products')
+          .update({
+            name: updated.name,
+            sku: updated.sku || null,
+            description: updated.description || null,
+            unit_price: updated.unit_price,
+            unit: updated.unit,
+            tax_rate: updated.tax_rate,
+            is_active: updated.is_active,
+            updated_at: now,
+          })
+          .eq('id', id)
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          console.error('Supabase product update error:', error);
+        } else if (saved) {
+          this.products.set(id, saved as Product);
+          return saved as Product;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync updated product to Supabase:', err);
+    }
+
     return updated;
+  }
+
+  public async deleteProduct(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { error } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('Supabase product delete error:', error);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete product from Supabase:', err);
+    }
+
+    this.products.delete(id);
+    return true;
   }
 
   // --- QUOTATIONS ---

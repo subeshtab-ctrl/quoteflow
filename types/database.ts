@@ -89,8 +89,8 @@ export interface Product {
   id: string;
   organization_id: string;
   name: string;
-  sku?: string;
-  description?: string;
+  sku?: string | null;
+  description?: string | null;
   unit_price: number;
   unit: string;
   tax_rate: number;
