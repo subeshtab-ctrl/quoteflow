@@ -504,11 +504,38 @@ class QuoteFlowStore {
 
   // --- ORGANIZATIONS ---
   public async getOrganization(orgId: string = DEFAULT_ORG_ID): Promise<Organization | null> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        let { data, error } = await supabase
+          .from('organizations')
+          .select('*')
+          .eq('id', orgId)
+          .maybeSingle();
+
+        if (!data) {
+          const { data: anyOrg } = await supabase
+            .from('organizations')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          data = anyOrg;
+        }
+
+        if (!error && data) {
+          this.organizations.set(orgId, data as Organization);
+          return data as Organization;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch organization from Supabase:', err);
+    }
     return this.organizations.get(orgId) || null;
   }
 
-  public async updateOrganization(orgId: string, data: Partial<Organization>): Promise<Organization> {
-    const org = this.organizations.get(orgId) || (await this.getOrganization())!;
+  public async updateOrganization(orgId: string = DEFAULT_ORG_ID, data: Partial<Organization>): Promise<Organization> {
+    const org = (await this.getOrganization(orgId)) || this.organizations.get(orgId)!;
     const updated: Organization = {
       ...org,
       ...data,
@@ -519,13 +546,23 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        supabase
+        const { data: saved, error } = await supabase
           .from('organizations')
-          .update({ ...data, updated_at: new Date().toISOString() })
-          .eq('id', orgId)
-          .then(({ error }) => {
-            if (error) console.error('Supabase organization update error:', error);
-          });
+          .upsert({
+            ...updated,
+            ...data,
+            id: orgId,
+            updated_at: new Date().toISOString(),
+          })
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          console.error('Supabase organization update error:', error);
+        } else if (saved) {
+          this.organizations.set(orgId, saved as Organization);
+          return saved as Organization;
+        }
       }
     } catch (err) {
       console.error('Failed to sync organization to Supabase:', err);
@@ -680,6 +717,52 @@ class QuoteFlowStore {
     }
 
     return updated;
+  }
+
+  public async deleteCustomer(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        // Cascade delete quotations belonging to this customer
+        const { data: quotes } = await supabase
+          .from('quotations')
+          .select('id')
+          .eq('customer_id', id);
+
+        if (quotes && quotes.length > 0) {
+          for (const q of quotes) {
+            await this.deleteQuotation(q.id, orgId);
+          }
+        }
+
+        const { error } = await supabase
+          .from('customers')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('Supabase customer delete error:', error);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete customer from Supabase:', err);
+    }
+
+    // Clean up memory
+    const relatedQuoteIds = Array.from(this.quotations.values())
+      .filter((q) => q.customer_id === id)
+      .map((q) => q.id);
+
+    for (const qId of relatedQuoteIds) {
+      this.quotations.delete(qId);
+      this.quotationItems.delete(qId);
+      this.signatures.delete(qId);
+      this.views.delete(qId);
+      this.events.delete(qId);
+    }
+
+    this.customers.delete(id);
+    return true;
   }
 
   // --- PRODUCTS ---
@@ -1051,6 +1134,14 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        // Clean up child tables first to satisfy foreign key constraints
+        await Promise.allSettled([
+          supabase.from('quotation_items').delete().eq('quotation_id', id),
+          supabase.from('signatures').delete().eq('quotation_id', id),
+          supabase.from('quotation_views').delete().eq('quotation_id', id),
+          supabase.from('quotation_events').delete().eq('quotation_id', id),
+        ]);
+
         const { error } = await supabase
           .from('quotations')
           .delete()

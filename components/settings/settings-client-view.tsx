@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Organization, CurrencyCode } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -14,6 +14,7 @@ import {
   Loader2,
   Palette,
   Sparkles,
+  Users as UsersIcon,
 } from 'lucide-react';
 
 export function SettingsClientView({
@@ -26,7 +27,52 @@ export function SettingsClientView({
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [users, setUsers] = useState<any[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchUsers = async () => {
+    try {
+      setIsLoadingUsers(true);
+      const res = await fetch('/api/users');
+      const data = await res.json();
+      if (data.users) {
+        setUsers(data.users);
+      }
+    } catch (err) {
+      console.error('Failed to load users:', err);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleDeleteUser = async (userId: string, email: string) => {
+    if (!confirm(`Are you sure you want to delete user account "${email}"? This will permanently remove their access.`)) {
+      return;
+    }
+
+    setDeletingUserId(userId);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      setSuccessMsg(`User ${email} deleted successfully.`);
+      setTimeout(() => setSuccessMsg(null), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error deleting user');
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
 
   const handleLogoFile = async (file: File) => {
     if (!file) return;
@@ -378,6 +424,80 @@ export function SettingsClientView({
             value={org.invoice_footer || ''}
             onChange={(e) => setOrg({ ...org, invoice_footer: e.target.value })}
           />
+        </div>
+
+        {/* Team Members & Registered Users Card */}
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                <UsersIcon className="h-5 w-5 text-indigo-600" />
+                <span>Team Accounts & Existing Users</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Manage registered user accounts and remove access when members leave.
+              </p>
+            </div>
+            <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg">
+              {users.length} {users.length === 1 ? 'User' : 'Users'}
+            </span>
+          </div>
+
+          {isLoadingUsers ? (
+            <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+              <span>Loading user accounts...</span>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="text-center py-6 text-xs text-slate-400">
+              No registered user accounts found.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {users.map((user) => (
+                <div key={user.id} className="py-3.5 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 font-bold flex items-center justify-center text-sm shadow-xs">
+                      {(user.full_name?.[0] || user.email?.[0] || 'U').toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {user.full_name || 'System User'}
+                      </p>
+                      <p className="text-xs text-slate-400">{user.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                        user.email_confirmed
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}
+                    >
+                      {user.email_confirmed ? 'Verified' : 'Pending Verification'}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteUser(user.id, user.email)}
+                      disabled={deletingUserId === user.id}
+                      className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
+                      title="Delete User Account"
+                    >
+                      {deletingUserId === user.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>Delete User</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Save CTA */}

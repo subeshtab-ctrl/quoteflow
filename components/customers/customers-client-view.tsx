@@ -14,6 +14,8 @@ import {
   Building,
   MapPin,
   FileText,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -30,7 +32,30 @@ export function CustomersClientView({
   const [search, setSearch] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const handleDeleteCustomer = async (id: string, customerName: string) => {
+    if (!confirm(`Are you sure you want to permanently delete customer "${customerName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/customers/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete customer');
+
+      setCustomers((prev) => prev.filter((c) => c.id !== id));
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || 'Error deleting customer');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Form fields
   const [name, setName] = useState('');
@@ -146,8 +171,23 @@ export function CustomersClientView({
                     </p>
                   )}
                 </div>
-                <div className="rounded-xl bg-slate-100 p-2 text-slate-500">
-                  <Building className="h-4 w-4" />
+                <div className="flex items-center gap-1">
+                  <div className="rounded-xl bg-slate-100 p-2 text-slate-500">
+                    <Building className="h-4 w-4" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCustomer(cust.id, cust.name)}
+                    disabled={deletingId === cust.id}
+                    className="rounded-xl p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                    title="Delete Customer"
+                  >
+                    {deletingId === cust.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
                 </div>
               </div>
 
@@ -177,13 +217,25 @@ export function CustomersClientView({
                 <span className="text-slate-400">
                   {custQuotes.length} {custQuotes.length === 1 ? 'quotation' : 'quotations'}
                 </span>
-                <Link
-                  href={`/quotations?search=${encodeURIComponent(cust.name)}`}
-                  className="text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  <span>View Quotes</span>
-                </Link>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href={`/quotations?search=${encodeURIComponent(cust.name)}`}
+                    className="text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>View Quotes</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCustomer(cust.id, cust.name)}
+                    disabled={deletingId === cust.id}
+                    className="text-slate-400 hover:text-rose-600 font-medium text-xs flex items-center gap-1 transition-colors"
+                    title="Delete Customer"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete</span>
+                  </button>
+                </div>
               </div>
             </div>
           );
