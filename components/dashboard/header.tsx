@@ -12,20 +12,78 @@ import {
   LogOut,
   ExternalLink,
   ChevronDown,
+  Loader2,
 } from 'lucide-react';
 import { Notification } from '@/types/database';
-import { formatDate, formatDateTime } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
+import { createClient } from '@/lib/supabase/client';
+
+export interface UserProfileInfo {
+  id?: string;
+  email?: string;
+  fullName?: string;
+  companyName?: string;
+  initials?: string;
+}
 
 export function DashboardHeader({
   initialNotifications = [],
+  initialUser = null,
 }: {
   initialNotifications?: Notification[];
+  initialUser?: UserProfileInfo | null;
 }) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfileInfo | null>(initialUser);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  // Fetch authenticated user profile
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.authenticated && data.user) {
+            setUserProfile(data.user);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch user profile:', err);
+      }
+    };
+
+    fetchProfile();
+
+    // Listen to Supabase auth events
+    const supabase = createClient();
+    if (supabase) {
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT') {
+          if (isMounted) setUserProfile(null);
+        } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          fetchProfile();
+        }
+      });
+
+      return () => {
+        isMounted = false;
+        subscription.unsubscribe();
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Poll notifications
   useEffect(() => {
@@ -43,7 +101,7 @@ export function DashboardHeader({
       }
     };
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 10000);
+    const interval = setInterval(fetchNotifs, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -54,7 +112,7 @@ export function DashboardHeader({
       await fetch('/api/notifications/mark-read', { method: 'POST' });
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch {
-      //
+      // Ignore
     }
   };
 
@@ -64,6 +122,28 @@ export function DashboardHeader({
       router.push(`/quotations?search=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
+
+  const handleSignOut = async () => {
+    try {
+      setIsSigningOut(true);
+      const supabase = createClient();
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+      await fetch('/api/auth/signout', { method: 'POST' });
+    } catch (err) {
+      console.error('Sign out error:', err);
+    } finally {
+      window.location.href = '/login';
+    }
+  };
+
+  const displayName = userProfile?.fullName || 'User';
+  const displayEmail = userProfile?.email || '';
+  const displayCompany = userProfile?.companyName || 'My Workspace';
+  const displayInitials =
+    userProfile?.initials ||
+    (displayName ? displayName.slice(0, 2).toUpperCase() : 'U');
 
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white/90 px-4 sm:px-6 backdrop-blur-md">
@@ -81,7 +161,7 @@ export function DashboardHeader({
 
       {/* Right Navigation & Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Test Public Customer Link */}
+        {/* Public Customer Link */}
         <Link
           href="/q/demo_token_sent_q002"
           target="_blank"
@@ -147,46 +227,67 @@ export function DashboardHeader({
           )}
         </div>
 
-        {/* User / Organization Menu */}
+        {/* Dynamic User Profile / Organization Menu */}
         <div className="relative">
           <button
             onClick={() => setIsProfileOpen(!isProfileOpen)}
-            className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-slate-100 transition-colors"
+            className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-slate-100 transition-colors border border-transparent hover:border-slate-200"
+            aria-label="User profile menu"
           >
-            <div className="h-8 w-8 rounded-xl bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
-              AD
+            <div className="h-8 w-8 rounded-xl bg-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-sm uppercase">
+              {displayInitials}
             </div>
-            <div className="hidden lg:block text-left">
-              <p className="text-xs font-bold text-slate-800 leading-tight">Admin User</p>
-              <p className="text-[10px] text-slate-400">admin@apextechnologies.io</p>
+            <div className="hidden lg:block text-left max-w-[140px]">
+              <p className="text-xs font-bold text-slate-800 leading-tight truncate">
+                {displayName}
+              </p>
+              <p className="text-[10px] text-slate-400 truncate">
+                {displayEmail || displayCompany}
+              </p>
             </div>
             <ChevronDown className="h-3.5 w-3.5 text-slate-400 hidden lg:block" />
           </button>
 
           {isProfileOpen && (
-            <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
-              <div className="px-3 py-2 border-b border-slate-100">
-                <p className="text-xs font-bold text-slate-900">Apex Technologies</p>
-                <p className="text-[11px] text-slate-500">Owner Account</p>
+            <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
+              {/* User / Workspace info header */}
+              <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50/50 rounded-xl mb-1">
+                <p className="text-xs font-bold text-slate-900 truncate">
+                  {displayCompany}
+                </p>
+                <p className="text-[11px] text-slate-600 font-medium truncate mt-0.5">
+                  {displayName}
+                </p>
+                {displayEmail && (
+                  <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                    {displayEmail}
+                  </p>
+                )}
               </div>
 
-              <div className="py-1">
+              <div className="py-1 space-y-0.5">
                 <Link
                   href="/settings"
                   onClick={() => setIsProfileOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg"
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
                 >
-                  <Building className="h-3.5 w-3.5" />
-                  Company Settings
+                  <Building className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Company Settings</span>
                 </Link>
-                <Link
-                  href="/login"
-                  onClick={() => setIsProfileOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg"
+
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={isSigningOut}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg transition-colors text-left disabled:opacity-50"
                 >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Sign Out
-                </Link>
+                  {isSigningOut ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <LogOut className="h-3.5 w-3.5" />
+                  )}
+                  <span>{isSigningOut ? 'Signing out...' : 'Sign Out'}</span>
+                </button>
               </div>
             </div>
           )}

@@ -1,16 +1,33 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import {
-  Send,
   ShieldCheck,
   Eye,
-  TrendingUp,
   FileText,
   ArrowRight,
-  CheckCircle2,
+  LayoutDashboard,
+  User,
 } from 'lucide-react';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
-export default function HomePage() {
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export default async function HomePage() {
+  const supabase = await createServerSupabaseClient();
+  let isAuthenticated = false;
+  let userEmail = '';
+
+  if (supabase) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      isAuthenticated = true;
+      userEmail = user.email || '';
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
       {/* Navigation */}
@@ -24,16 +41,32 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link href="/login">
-              <Button variant="ghost" className="text-slate-300 hover:text-white hover:bg-slate-800">
-                Log In
-              </Button>
-            </Link>
-            <Link href="/dashboard">
-              <Button variant="primary" className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30">
-                Open Dashboard
-              </Button>
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <span className="hidden sm:inline-block text-xs text-slate-400">
+                  Signed in as <span className="font-semibold text-slate-200">{userEmail}</span>
+                </span>
+                <Link href="/dashboard">
+                  <Button variant="primary" className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 gap-2">
+                    <LayoutDashboard className="h-4 w-4" />
+                    <span>Open Dashboard</span>
+                  </Button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link href="/login">
+                  <Button variant="ghost" className="text-slate-300 hover:text-white hover:bg-slate-800">
+                    Log In
+                  </Button>
+                </Link>
+                <Link href="/register">
+                  <Button variant="primary" className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30">
+                    Sign Up
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -57,14 +90,32 @@ export default function HomePage() {
           and secure legally binding signatures with automated audit logs.
         </p>
 
-        {/* Quick Launch CTA Buttons */}
+        {/* Action Buttons */}
         <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
-          <Link href="/dashboard">
-            <Button size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 text-base px-8 shadow-xl shadow-indigo-600/40">
-              Enter Business Dashboard
-              <ArrowRight className="h-5 w-5" />
-            </Button>
-          </Link>
+          {isAuthenticated ? (
+            <Link href="/dashboard">
+              <Button size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 text-base px-8 shadow-xl shadow-indigo-600/40">
+                <LayoutDashboard className="h-5 w-5" />
+                <span>Enter Business Dashboard</span>
+                <ArrowRight className="h-5 w-5 ml-1" />
+              </Button>
+            </Link>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <Link href="/login">
+                <Button size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 text-base px-8 shadow-xl shadow-indigo-600/40">
+                  <User className="h-5 w-5" />
+                  <span>Sign In to Access Dashboard</span>
+                  <ArrowRight className="h-5 w-5" />
+                </Button>
+              </Link>
+              <Link href="/register">
+                <Button size="lg" variant="outline" className="border-slate-700 bg-slate-800/80 text-white hover:bg-slate-700 text-base px-6">
+                  <span>Register Organization</span>
+                </Button>
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Key Features Grid */}

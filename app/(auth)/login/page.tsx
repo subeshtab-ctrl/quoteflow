@@ -24,9 +24,10 @@ function LoginForm() {
   const verified = searchParams.get('verified') === 'true';
   const paramEmail = searchParams.get('email') || '';
   const initialOtpMode = searchParams.get('otp') === 'true';
+  const redirectParam = searchParams.get('redirect') || '/dashboard';
 
-  const [email, setEmail] = useState(paramEmail || 'admin@apextechnologies.io');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState(paramEmail || '');
+  const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [isOtpMode, setIsOtpMode] = useState(initialOtpMode);
 
@@ -43,18 +44,9 @@ function LoginForm() {
     setIsLoading(true);
 
     try {
-      // Demo account shortcut
-      if (email.trim() === 'admin@apextechnologies.io') {
-        setTimeout(() => {
-          setIsLoading(false);
-          router.push('/dashboard');
-        }, 500);
-        return;
-      }
-
       const supabase = createClient();
       if (!supabase) {
-        router.push('/dashboard');
+        router.push(redirectParam);
         return;
       }
 
@@ -91,7 +83,8 @@ function LoginForm() {
         }
       }
 
-      router.push('/dashboard');
+      router.push(redirectParam);
+      router.refresh();
     } catch (err: any) {
       console.error('Login error:', err);
       setError(err.message || 'Invalid email or password.');
@@ -113,7 +106,7 @@ function LoginForm() {
     try {
       const supabase = createClient();
       if (!supabase) {
-        router.push('/dashboard');
+        router.push(redirectParam);
         return;
       }
 
@@ -161,7 +154,8 @@ function LoginForm() {
 
       setOtpSuccess(true);
       setTimeout(() => {
-        router.push('/dashboard');
+        router.push(redirectParam);
+        router.refresh();
       }, 1000);
     } catch (err: any) {
       console.error('OTP verification error:', err);
@@ -375,11 +369,6 @@ function LoginForm() {
                   <KeyRound className="h-3.5 w-3.5" />
                   <span>Have a 6-digit OTP? Verify here</span>
                 </button>
-              </div>
-
-              <div className="rounded-xl bg-indigo-50/70 p-3 text-xs text-indigo-900 border border-indigo-100 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-indigo-600 shrink-0" />
-                <span>Demo account prefilled for immediate evaluation.</span>
               </div>
             </CardContent>
 
