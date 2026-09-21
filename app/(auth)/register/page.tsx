@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getAuthRedirectUrl } from '@/lib/utils/auth';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -46,7 +47,7 @@ export default function RegisterPage() {
         return;
       }
 
-      const redirectUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`;
+      const redirectUrl = getAuthRedirectUrl();
       const { data, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -66,7 +67,7 @@ export default function RegisterPage() {
       if (data.user) {
         setRegisteredUserId(data.user.id);
 
-        // Pre-save user details in database
+        // Pre-save user & company profile in database
         try {
           await fetch('/api/auth/save-user', {
             method: 'POST',
@@ -80,6 +81,17 @@ export default function RegisterPage() {
           });
         } catch (saveErr) {
           console.warn('Pre-save user details note:', saveErr);
+        }
+
+        // Also trigger backend OTP notification dispatch
+        try {
+          await fetch('/api/auth/send-verification-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.trim() }),
+          });
+        } catch (otpErr) {
+          console.warn('Backend OTP dispatch note:', otpErr);
         }
 
         setIsVerificationSent(true);
@@ -100,7 +112,7 @@ export default function RegisterPage() {
 
     const cleanOtp = otpCode.trim().replace(/\D/g, '');
     if (cleanOtp.length < 6) {
-      setError('Please enter the complete 6-digit OTP code.');
+      setError('Please enter the complete verification code (6 to 8 digits).');
       return;
     }
 
@@ -112,24 +124,39 @@ export default function RegisterPage() {
         return;
       }
 
-      // 1. Verify OTP with Supabase Auth
-      const { data, error: verifyErr } = await supabase.auth.verifyOtp({
+      // 1. Verify OTP with Supabase Auth (type: signup)
+      let authUser = null;
+      let { data, error: verifyErr } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token: cleanOtp,
         type: 'signup',
       });
 
       if (verifyErr) {
-        // Fallback check: sometimes Supabase accepts type: 'email'
-        const { data: retryData, error: retryErr } = await supabase.auth.verifyOtp({
+        // Fallback retry with type: email
+        const retryEmail = await supabase.auth.verifyOtp({
           email: email.trim(),
           token: cleanOtp,
           type: 'email',
         });
 
-        if (retryErr) {
-          throw verifyErr;
+        if (retryEmail.error) {
+          // Fallback retry with type: magiclink
+          const retryMagic = await supabase.auth.verifyOtp({
+            email: email.trim(),
+            token: cleanOtp,
+            type: 'magiclink',
+          });
+
+          if (retryMagic.error) {
+            throw verifyErr;
+          }
+          authUser = retryMagic.data?.user;
+        } else {
+          authUser = retryEmail.data?.user;
         }
+      } else {
+        authUser = data?.user;
       }
 
       // 2. Persist user and organization details
@@ -138,7 +165,7 @@ export default function RegisterPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId: data?.user?.id || registeredUserId,
+            userId: authUser?.id || registeredUserId,
             email: email.trim(),
             fullName: fullName.trim(),
             companyName: companyName.trim(),
@@ -151,6 +178,7 @@ export default function RegisterPage() {
       setVerifySuccess(true);
       setTimeout(() => {
         router.push('/dashboard');
+        router.refresh();
       }, 1200);
     } catch (err: any) {
       console.error('OTP verification error:', err);
@@ -169,20 +197,27 @@ export default function RegisterPage() {
 
     try {
       const supabase = createClient();
+      const redirectUrl = getAuthRedirectUrl();
+
       if (supabase) {
-        const redirectUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`;
-        const { error: resendError } = await supabase.auth.resend({
+        await supabase.auth.resend({
           type: 'signup',
           email: email.trim(),
           options: {
             emailRedirectTo: redirectUrl,
           },
         });
-
-        if (resendError) throw resendError;
-        setResendSuccess(true);
-        setTimeout(() => setResendSuccess(false), 5000);
       }
+
+      // Also trigger backend OTP notification
+      await fetch('/api/auth/send-verification-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      setResendSuccess(true);
+      setTimeout(() => setResendSuccess(false), 5000);
     } catch (err: any) {
       setError(err.message || 'Failed to resend verification OTP.');
     } finally {
@@ -202,7 +237,7 @@ export default function RegisterPage() {
           </h1>
           <p className="text-xs text-slate-500">
             {isVerificationSent
-              ? 'Enter the 6-digit confirmation OTP sent to your email.'
+              ? 'Enter the verification code sent to your email.'
               : 'Start issuing digital quotations and capturing client signatures in minutes.'}
           </p>
         </div>
@@ -218,7 +253,7 @@ export default function RegisterPage() {
                 <div>
                   <h2 className="text-lg font-bold text-slate-900">Enter Verification Code</h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    We sent an OTP code to:
+                    We sent a verification code to:
                   </p>
                   <div className="mt-1 inline-block font-mono text-xs font-semibold text-indigo-900 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-lg">
                     {email}
@@ -246,25 +281,25 @@ export default function RegisterPage() {
                   {resendSuccess && (
                     <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 border border-emerald-200 flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                      <span>New OTP sent! Please check your inbox.</span>
+                      <span>New verification code sent! Please check your inbox.</span>
                     </div>
                   )}
 
-                  {/* 6-Digit Monospace OTP Input */}
+                  {/* Monospace OTP Input (Supports 6 to 8 digits) */}
                   <div className="space-y-1.5">
                     <label className="block text-center text-xs font-semibold uppercase tracking-wider text-slate-600">
-                      6-Digit OTP Code
+                      Verification OTP Code
                     </label>
                     <input
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
-                      maxLength={6}
+                      maxLength={8}
                       autoFocus
                       value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      placeholder="••••••"
-                      className="h-14 w-full rounded-xl border-2 border-slate-200 text-center font-mono text-2xl font-extrabold tracking-[0.5em] text-slate-900 placeholder:text-slate-300 focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner bg-slate-50/50"
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                      placeholder="••••••••"
+                      className="h-14 w-full rounded-xl border-2 border-slate-200 text-center font-mono text-2xl font-extrabold tracking-[0.35em] text-slate-900 placeholder:text-slate-300 focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner bg-slate-50/50"
                       required
                     />
                     <p className="text-[11px] text-slate-400 text-center">
@@ -280,7 +315,7 @@ export default function RegisterPage() {
                     className="w-full py-3 shadow-md gap-2 text-sm font-bold"
                   >
                     <ShieldCheck className="h-4 w-4" />
-                    <span>Verify OTP & Activate Workspace</span>
+                    <span>Verify Code & Activate Workspace</span>
                   </Button>
 
                   <div className="pt-2 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100">

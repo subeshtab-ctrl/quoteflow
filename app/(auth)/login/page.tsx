@@ -15,8 +15,10 @@ import {
   KeyRound,
   RefreshCw,
   ShieldCheck,
+  Send,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getAuthRedirectUrl } from '@/lib/utils/auth';
 
 function LoginForm() {
   const router = useRouter();
@@ -25,6 +27,7 @@ function LoginForm() {
   const paramEmail = searchParams.get('email') || '';
   const initialOtpMode = searchParams.get('otp') === 'true';
   const redirectParam = searchParams.get('redirect') || '/dashboard';
+  const urlError = searchParams.get('error');
 
   const [email, setEmail] = useState(paramEmail || '');
   const [password, setPassword] = useState('');
@@ -32,11 +35,12 @@ function LoginForm() {
   const [isOtpMode, setIsOtpMode] = useState(initialOtpMode);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
   const [otpSuccess, setOtpSuccess] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(urlError || null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +62,17 @@ function LoginForm() {
       if (authError) {
         if (authError.message.toLowerCase().includes('email not confirmed')) {
           setIsOtpMode(true);
-          setError('Email is not verified yet. Please enter the 6-digit OTP code sent to your inbox.');
+          setError('Email is not verified yet. We have sent a verification code to your email.');
+          // Auto-trigger sending OTP code
+          try {
+            await fetch('/api/auth/send-verification-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: email.trim() }),
+            });
+          } catch (e) {
+            // Ignore
+          }
           setIsLoading(false);
           return;
         }
@@ -92,13 +106,54 @@ function LoginForm() {
     }
   };
 
+  const handleRequestOtp = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      setError('Please enter a valid email address first.');
+      return;
+    }
+
+    setError(null);
+    setIsSendingOtp(true);
+
+    try {
+      const supabase = createClient();
+      const redirectUrl = getAuthRedirectUrl();
+
+      if (supabase) {
+        await supabase.auth.signInWithOtp({
+          email: email.trim(),
+          options: {
+            emailRedirectTo: redirectUrl,
+            shouldCreateUser: false,
+          },
+        });
+      }
+
+      // Dispatch via backend OTP service as well
+      await fetch('/api/auth/send-verification-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      setIsOtpMode(true);
+      setResendSuccess(true);
+      setTimeout(() => setResendSuccess(false), 6000);
+    } catch (err: any) {
+      console.error('Request OTP error:', err);
+      setError(err.message || 'Failed to send verification code. Please check your email.');
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     const cleanOtp = otpCode.trim().replace(/\D/g, '');
     if (cleanOtp.length < 6) {
-      setError('Please enter the complete 6-digit OTP code.');
+      setError('Please enter the complete verification code (6 to 8 digits).');
       return;
     }
 
@@ -110,26 +165,35 @@ function LoginForm() {
         return;
       }
 
-      // 1. Verify OTP with Supabase Auth
+      // 1. Verify OTP with Supabase Auth (try signup, email, magiclink)
       let authUser = null;
-      const { data, error: verifyErr } = await supabase.auth.verifyOtp({
+      let { data, error: verifyErr } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token: cleanOtp,
         type: 'signup',
       });
 
       if (verifyErr) {
-        // Fallback retry with type: 'email'
-        const { data: retryData, error: retryErr } = await supabase.auth.verifyOtp({
+        const retryEmail = await supabase.auth.verifyOtp({
           email: email.trim(),
           token: cleanOtp,
           type: 'email',
         });
 
-        if (retryErr) {
-          throw verifyErr;
+        if (retryEmail.error) {
+          const retryMagic = await supabase.auth.verifyOtp({
+            email: email.trim(),
+            token: cleanOtp,
+            type: 'magiclink',
+          });
+
+          if (retryMagic.error) {
+            throw verifyErr;
+          }
+          authUser = retryMagic.data?.user;
+        } else {
+          authUser = retryEmail.data?.user;
         }
-        authUser = retryData?.user;
       } else {
         authUser = data?.user;
       }
@@ -160,7 +224,7 @@ function LoginForm() {
     } catch (err: any) {
       console.error('OTP verification error:', err);
       setError(
-        err.message || 'Invalid or expired OTP code. Please check your email or click Resend.'
+        err.message || 'Invalid or expired verification code. Please check your email or click Resend.'
       );
     } finally {
       setIsVerifyingOtp(false);
@@ -174,20 +238,27 @@ function LoginForm() {
 
     try {
       const supabase = createClient();
+      const redirectUrl = getAuthRedirectUrl();
+
       if (supabase) {
-        const redirectUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`;
-        const { error: resendError } = await supabase.auth.resend({
+        await supabase.auth.resend({
           type: 'signup',
           email: email.trim(),
           options: {
             emailRedirectTo: redirectUrl,
           },
         });
-
-        if (resendError) throw resendError;
-        setResendSuccess(true);
-        setTimeout(() => setResendSuccess(false), 5000);
       }
+
+      // Also trigger backend OTP service
+      await fetch('/api/auth/send-verification-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      setResendSuccess(true);
+      setTimeout(() => setResendSuccess(false), 5000);
     } catch (err: any) {
       setError(err.message || 'Failed to resend verification OTP.');
     } finally {
@@ -206,7 +277,7 @@ function LoginForm() {
         </h1>
         <p className="text-xs text-slate-500">
           {isOtpMode
-            ? 'Enter the 6-digit confirmation OTP sent to your email.'
+            ? 'Enter the verification code sent to your email.'
             : 'Enter your credentials to access your organization dashboard.'}
         </p>
       </div>
@@ -231,7 +302,7 @@ function LoginForm() {
             {otpSuccess ? (
               <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-6 text-center space-y-2">
                 <CheckCircle2 className="h-10 w-10 text-emerald-600 mx-auto animate-bounce" />
-                <h3 className="font-bold text-emerald-900 text-base">OTP Verified!</h3>
+                <h3 className="font-bold text-emerald-900 text-base">Code Verified!</h3>
                 <p className="text-xs text-emerald-700">
                   Redirecting to your dashboard...
                 </p>
@@ -248,24 +319,24 @@ function LoginForm() {
                 {resendSuccess && (
                   <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 border border-emerald-200 flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <span>New OTP sent! Please check your inbox.</span>
+                    <span>New verification code sent! Please check your inbox.</span>
                   </div>
                 )}
 
                 <div className="space-y-1.5">
                   <label className="block text-center text-xs font-semibold uppercase tracking-wider text-slate-600">
-                    6-Digit OTP Code
+                    Verification OTP Code
                   </label>
                   <input
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    maxLength={6}
+                    maxLength={8}
                     autoFocus
                     value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="••••••"
-                    className="h-14 w-full rounded-xl border-2 border-slate-200 text-center font-mono text-2xl font-extrabold tracking-[0.5em] text-slate-900 placeholder:text-slate-300 focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner bg-slate-50/50"
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="••••••••"
+                    className="h-14 w-full rounded-xl border-2 border-slate-200 text-center font-mono text-2xl font-extrabold tracking-[0.35em] text-slate-900 placeholder:text-slate-300 focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner bg-slate-50/50"
                     required
                   />
                   <p className="text-[11px] text-slate-400 text-center">
@@ -281,7 +352,7 @@ function LoginForm() {
                   className="w-full py-3 shadow-md gap-2 text-sm font-bold"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  <span>Verify OTP & Sign In</span>
+                  <span>Verify Code & Sign In</span>
                 </Button>
 
                 <div className="pt-2 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100">
@@ -360,14 +431,24 @@ function LoginForm() {
               <div className="flex items-center justify-between text-xs pt-1">
                 <button
                   type="button"
+                  onClick={handleRequestOtp}
+                  disabled={isSendingOtp}
+                  className="text-indigo-600 font-semibold hover:underline flex items-center gap-1 disabled:opacity-50"
+                >
+                  <Send className={`h-3 w-3 ${isSendingOtp ? 'animate-spin' : ''}`} />
+                  <span>{isSendingOtp ? 'Sending code...' : 'Sign in with Email OTP Code'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     setIsOtpMode(true);
                     setError(null);
                   }}
-                  className="text-indigo-600 font-semibold hover:underline flex items-center gap-1"
+                  className="text-slate-500 hover:text-indigo-600 flex items-center gap-1"
                 >
                   <KeyRound className="h-3.5 w-3.5" />
-                  <span>Have a 6-digit OTP? Verify here</span>
+                  <span>Enter Code</span>
                 </button>
               </div>
             </CardContent>
