@@ -8,7 +8,6 @@ import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ApprovalModal } from '@/components/public-quote/approval-modal';
 import { RejectionModal } from '@/components/public-quote/rejection-modal';
-import { InvoiceModal } from '@/components/quotations/invoice-modal';
 import {
   Download,
   CheckCircle2,
@@ -18,7 +17,6 @@ import {
   Building2,
   Calendar,
   AlertTriangle,
-  Receipt,
 } from 'lucide-react';
 
 interface PublicQuoteViewProps {
@@ -30,7 +28,6 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   const [quotation, setQuotation] = useState<Quotation>(initialQuotation);
   const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
-  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const org = quotation.organization;
@@ -115,18 +112,6 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
               <span className="hidden sm:inline">Download</span> PDF
             </Button>
 
-            {quotation.status === 'APPROVED' && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setIsInvoiceOpen(true)}
-                className="gap-1.5 shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
-              >
-                <Receipt className="h-4 w-4" />
-                <span>View Tax Invoice</span>
-              </Button>
-            )}
-
             {canTakeAction && (
               <>
                 <Button
@@ -168,15 +153,6 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
                 </p>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsInvoiceOpen(true)}
-              className="bg-white border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-semibold gap-1.5 shrink-0 shadow-sm"
-            >
-              <Receipt className="h-4 w-4 text-emerald-700" />
-              <span>Generate Tax Invoice</span>
-            </Button>
           </div>
         )}
 
@@ -500,14 +476,6 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         quotationNumber={quotation.quotation_number}
         token={token}
         onRejected={refreshQuotationData}
-      />
-
-      <InvoiceModal
-        isOpen={isInvoiceOpen}
-        onClose={() => setIsInvoiceOpen(false)}
-        quotation={quotation}
-        organization={org}
-        customer={customer}
       />
     </div>
   );

@@ -31,3 +31,22 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #invoice-sheet, #invoice-sheet * {
+    visibility: visible;
+  }
+  #invoice-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 24px;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}

@@ -600,14 +600,49 @@ class QuoteFlowStore {
 
   // --- QUOTATION NUMBER GENERATOR (Atomic sequential per org) ---
   public async generateNextQuotationNumber(orgId: string = DEFAULT_ORG_ID): Promise<string> {
+    let nextCount = 1;
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data } = await supabase
+          .from('quotations')
+          .select('quotation_number')
+          .eq('organization_id', orgId)
+          .order('quotation_number', { ascending: false })
+          .limit(1);
+
+        if (data && data.length > 0) {
+          const match = data[0].quotation_number.match(/\d+$/);
+          if (match) {
+            nextCount = parseInt(match[0], 10) + 1;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error finding latest quotation number from Supabase:', err);
+    }
+
     const org = await this.getOrganization(orgId);
-    if (!org) throw new Error('Organization not found');
+    const orgCount = (org?.current_quotation_counter || 0) + 1;
+    nextCount = Math.max(nextCount, orgCount);
 
-    const nextCount = (org.current_quotation_counter || 0) + 1;
-    org.current_quotation_counter = nextCount;
-    this.organizations.set(orgId, org);
+    if (org) {
+      org.current_quotation_counter = nextCount;
+      this.organizations.set(orgId, org);
+      try {
+        const supabase = createAdminClient();
+        if (supabase) {
+          await supabase
+            .from('organizations')
+            .update({ current_quotation_counter: nextCount })
+            .eq('id', orgId);
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
 
-    const prefix = org.quotation_prefix || 'Q-';
+    const prefix = org?.quotation_prefix || 'Q-';
     return `${prefix}${String(nextCount).padStart(6, '0')}`;
   }
 

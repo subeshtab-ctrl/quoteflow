@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { QuotationsFilterTabs } from '@/components/quotations/quotations-filter-tabs';
 import { QuotationDeleteButton } from '@/components/quotations/quotation-delete-button';
+import { QuotationInvoiceButton } from '@/components/quotations/quotation-invoice-button';
 
 interface QuotationsPageProps {
   searchParams: Promise<{
@@ -31,7 +32,10 @@ interface QuotationsPageProps {
 
 export default async function QuotationsPage({ searchParams }: QuotationsPageProps) {
   const { status, search } = await searchParams;
-  const quotations = await store.getQuotations(undefined, { status, search });
+  const [quotations, organization] = await Promise.all([
+    store.getQuotations(undefined, { status, search }),
+    store.getOrganization(),
+  ]);
 
   return (
     <DashboardLayout>
@@ -139,6 +143,13 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
                         </td>
                         <td className="py-4 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Tax Invoice Option: only rendered for APPROVED quotations */}
+                            <QuotationInvoiceButton
+                              quotation={quote}
+                              organization={organization}
+                              customer={quote.customer}
+                            />
+
                             <Link href={`/quotations/${quote.id}`}>
                               <button
                                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600"
