@@ -44,7 +44,7 @@ export const CustomerFormSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(2, 'Contact name is required'),
   company_name: z.string().optional(),
-  email: z.string().email('Please enter a valid email address'),
+  email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
   phone: z.string().optional(),
   alternate_phone: z.string().optional(),
   billing_address: z.string().optional(),

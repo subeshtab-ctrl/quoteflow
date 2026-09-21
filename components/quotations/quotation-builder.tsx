@@ -53,6 +53,16 @@ export function QuotationBuilder({
 }: QuotationBuilderProps) {
   const router = useRouter();
 
+  // Customer state & Quick Add
+  const [customerList, setCustomerList] = useState<Customer[]>(customers);
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [quickName, setQuickName] = useState('');
+  const [quickCompany, setQuickCompany] = useState('');
+  const [quickEmail, setQuickEmail] = useState('');
+  const [quickPhone, setQuickPhone] = useState('');
+  const [quickCustomerError, setQuickCustomerError] = useState<string | null>(null);
+  const [isSavingQuickCustomer, setIsSavingQuickCustomer] = useState(false);
+
   // Form State
   const [customerId, setCustomerId] = useState<string>(
     initialQuotation?.customer_id || customers[0]?.id || ''
@@ -116,7 +126,58 @@ export function QuotationBuilder({
     tax_rate: overallTaxRate,
   });
 
-  const selectedCustomer = customers.find((c) => c.id === customerId);
+  const selectedCustomer = customerList.find((c) => c.id === customerId);
+
+  // Quick Add Customer Handler
+  const handleQuickAddCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickName.trim()) {
+      setQuickCustomerError('Contact Name is required');
+      return;
+    }
+
+    setIsSavingQuickCustomer(true);
+    setQuickCustomerError(null);
+
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: quickName.trim(),
+          company_name: quickCompany.trim() || undefined,
+          email: quickEmail.trim() || undefined,
+          phone: quickPhone.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save customer');
+
+      setCustomerList((prev) => [data.customer, ...prev]);
+      setCustomerId(data.customer.id);
+      setIsQuickAddOpen(false);
+      setQuickName('');
+      setQuickCompany('');
+      setQuickEmail('');
+      setQuickPhone('');
+    } catch (err: any) {
+      setQuickCustomerError(err.message || 'Error creating customer');
+    } finally {
+      setIsSavingQuickCustomer(false);
+    }
+  };
+
+  // Bulk Rate Adjuster
+  const handleBulkRateAdjust = (percentage: number) => {
+    const factor = 1 + percentage / 100;
+    setItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        unit_price: Math.max(0, Math.round(item.unit_price * factor)),
+      }))
+    );
+  };
 
   // Handlers for Items
   const handleAddItem = () => {
@@ -280,9 +341,112 @@ export function QuotationBuilder({
         <div className="lg:col-span-7 space-y-6">
           {/* Step 1: Customer Selection */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              1. Customer Selection
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                1. Customer Selection
+              </h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsQuickAddOpen(!isQuickAddOpen)}
+                className="gap-1 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {isQuickAddOpen ? 'Cancel' : '+ Add New Customer'}
+              </Button>
+            </div>
+
+            {/* Inline Quick Add Form */}
+            {isQuickAddOpen && (
+              <div className="rounded-xl bg-indigo-50/50 border border-indigo-100 p-4 space-y-3 animate-in fade-in">
+                <div className="flex items-center justify-between pb-1 border-b border-indigo-100">
+                  <span className="text-xs font-bold text-indigo-950">Quick Add Customer</span>
+                  <span className="text-[11px] text-slate-500">Auto-saves to customer directory</span>
+                </div>
+
+                {quickCustomerError && (
+                  <p className="text-xs text-rose-600 font-medium bg-rose-50 p-2 rounded-lg border border-rose-200">
+                    {quickCustomerError}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Customer Name *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Subesh Sharma"
+                      value={quickName}
+                      onChange={(e) => setQuickName(e.target.value)}
+                      className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Company Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Acme Tech Pvt Ltd"
+                      value={quickCompany}
+                      onChange={(e) => setQuickCompany(e.target.value)}
+                      className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Phone (Optional)
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="+91 98765 43210"
+                      value={quickPhone}
+                      onChange={(e) => setQuickPhone(e.target.value)}
+                      className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Email (Optional)
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="client@example.com"
+                      value={quickEmail}
+                      onChange={(e) => setQuickEmail(e.target.value)}
+                      className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsQuickAddOpen(false)}
+                    className="text-xs h-7"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={handleQuickAddCustomer}
+                    isLoading={isSavingQuickCustomer}
+                    className="text-xs h-7 gap-1"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Save & Select Customer
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="block text-xs font-semibold text-slate-700">Client / Company *</label>
               <select
@@ -290,11 +454,17 @@ export function QuotationBuilder({
                 onChange={(e) => setCustomerId(e.target.value)}
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               >
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.company_name ? `${c.name} (${c.company_name})` : c.name} - {c.email}
-                  </option>
-                ))}
+                {customerList.length === 0 ? (
+                  <option value="">-- No Customers. Click "+ Add New Customer" above --</option>
+                ) : (
+                  customerList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.company_name ? `${c.name} (${c.company_name})` : c.name}
+                      {c.email ? ` - ${c.email}` : ''}
+                      {c.phone ? ` [${c.phone}]` : ''}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -348,20 +518,78 @@ export function QuotationBuilder({
 
           {/* Step 3: Unlimited Line Items */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                3. Line Items
-              </h3>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleAddItem}
-                className="gap-1 text-xs"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add Item
-              </Button>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  3. Line Items & Rates
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Set deliverables, quantities, and adjust rates per item or in bulk.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAddItem}
+                  className="gap-1 text-xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Item
+                </Button>
+              </div>
+            </div>
+
+            {/* Bulk Rate Adjuster Toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-200/80 px-3.5 py-2.5 text-xs">
+              <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                Bulk Rate Change:
+              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleBulkRateAdjust(-10)}
+                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-[11px] transition-colors"
+                  title="Reduce all unit prices by 10%"
+                >
+                  -10%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkRateAdjust(-5)}
+                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-[11px] transition-colors"
+                  title="Reduce all unit prices by 5%"
+                >
+                  -5%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkRateAdjust(5)}
+                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-[11px] transition-colors"
+                  title="Increase all unit prices by 5%"
+                >
+                  +5%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkRateAdjust(10)}
+                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-[11px] transition-colors"
+                  title="Increase all unit prices by 10%"
+                >
+                  +10%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkRateAdjust(20)}
+                  className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-[11px] transition-colors"
+                  title="Increase all unit prices by 20%"
+                >
+                  +20%
+                </button>
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -449,8 +677,8 @@ export function QuotationBuilder({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">
-                          Unit Price
+                        <label className="block text-[10px] uppercase font-bold text-indigo-700 mb-1">
+                          Rate ({currency}) *
                         </label>
                         <input
                           type="number"
@@ -460,7 +688,7 @@ export function QuotationBuilder({
                           onChange={(e) =>
                             handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
                           }
-                          className="h-9 w-full rounded-lg border border-slate-300 px-2 text-sm"
+                          className="h-9 w-full rounded-lg border border-indigo-300 bg-indigo-50/20 px-2 text-sm font-semibold text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                       <div>

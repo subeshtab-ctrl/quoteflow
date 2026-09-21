@@ -73,6 +73,9 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
             publicToken={quotation.public_token}
             grandTotalFormatted={grandTotalFormatted}
             customerName={customer?.name}
+            quotation={quotation}
+            organization={org}
+            customer={customer}
           />
         </div>
 

@@ -71,14 +71,14 @@ export function CustomersClientView({
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       (c.company_name && c.company_name.toLowerCase().includes(search.toLowerCase())) ||
-      c.email.toLowerCase().includes(search.toLowerCase())
+      (c.email && c.email.toLowerCase().includes(search.toLowerCase()))
   );
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!name.trim() || !email.trim()) {
-      setError('Name and Email are required.');
+    if (!name.trim()) {
+      setError('Contact Person Name is required.');
       return;
     }
 
@@ -275,12 +275,11 @@ export function CustomersClientView({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
-              label="Email Address *"
+              label="Email Address (Optional)"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="client@example.com"
-              required
             />
             <Input
               label="Phone Number"

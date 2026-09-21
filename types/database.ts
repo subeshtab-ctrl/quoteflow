@@ -70,7 +70,7 @@ export interface Customer {
   organization_id: string;
   name: string;
   company_name?: string;
-  email: string;
+  email?: string;
   phone?: string;
   alternate_phone?: string;
   billing_address?: string;

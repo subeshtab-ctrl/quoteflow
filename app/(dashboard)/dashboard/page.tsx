@@ -194,89 +194,109 @@ export default async function DashboardPage() {
             </Link>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 text-xs font-semibold text-slate-500 bg-slate-50/50">
-                <tr>
-                  <th className="py-3 px-4">Quotation #</th>
-                  <th className="py-3 px-4">Customer</th>
-                  <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Created</th>
-                  <th className="py-3 px-4">Valid Until</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {recentQuotations.map((quote) => (
-                  <tr key={quote.id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="py-3.5 px-4 font-bold text-slate-900">
-                      <Link
-                        href={`/quotations/${quote.id}`}
-                        className="hover:text-indigo-600 hover:underline flex items-center gap-1"
-                      >
-                        {quote.quotation_number}
-                        {quote.revision_number > 1 && (
-                          <span className="text-[10px] text-slate-400 font-normal">
-                            (v{quote.revision_number})
-                          </span>
-                        )}
-                      </Link>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <p className="font-medium text-slate-800">
-                        {quote.customer?.company_name || quote.customer?.name || 'Unknown'}
-                      </p>
-                      {quote.customer?.company_name && (
-                        <p className="text-xs text-slate-400">{quote.customer.name}</p>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 font-semibold text-slate-900">
-                      {formatCurrency(quote.grand_total, quote.currency)}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <StatusBadge status={quote.status} />
-                    </td>
-                    <td className="py-3.5 px-4 text-xs text-slate-500">
-                      {formatDate(quote.issue_date)}
-                    </td>
-                    <td className="py-3.5 px-4 text-xs text-slate-500">
-                      {formatDate(quote.valid_until)}
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Link href={`/quotations/${quote.id}`}>
-                          <button
-                            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600"
-                            title="View Details"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                        </Link>
-                        <a
-                          href={`/api/public/pdf?id=${quote.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                          title="Download PDF"
-                        >
-                          <Download className="h-4 w-4" />
-                        </a>
-                        <Link
-                          href={`/q/${quote.public_token}`}
-                          target="_blank"
-                          className="rounded-lg p-1.5 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600"
-                          title="Open Customer Public Link"
-                        >
-                          <Share2 className="h-4 w-4" />
-                        </Link>
-                      </div>
-                    </td>
+          {recentQuotations.length === 0 ? (
+            <div className="text-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                <FileText className="h-6 w-6" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-800">No quotations found</h4>
+                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                  Your pipeline is currently clear. Create your first quotation to start generating proposals and tracking deals.
+                </p>
+              </div>
+              <Link href="/quotations/new" className="inline-block">
+                <Button size="sm" variant="primary" className="gap-1.5 shadow-sm">
+                  <PlusCircle className="h-4 w-4" />
+                  Create New Quotation
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs font-semibold text-slate-500 bg-slate-50/50">
+                  <tr>
+                    <th className="py-3 px-4">Quotation #</th>
+                    <th className="py-3 px-4">Customer</th>
+                    <th className="py-3 px-4">Amount</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Created</th>
+                    <th className="py-3 px-4">Valid Until</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {recentQuotations.map((quote) => (
+                    <tr key={quote.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-slate-900">
+                        <Link
+                          href={`/quotations/${quote.id}`}
+                          className="hover:text-indigo-600 hover:underline flex items-center gap-1"
+                        >
+                          {quote.quotation_number}
+                          {quote.revision_number > 1 && (
+                            <span className="text-[10px] text-slate-400 font-normal">
+                              (v{quote.revision_number})
+                            </span>
+                          )}
+                        </Link>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-medium text-slate-800">
+                          {quote.customer?.company_name || quote.customer?.name || 'Unknown'}
+                        </p>
+                        {quote.customer?.company_name && (
+                          <p className="text-xs text-slate-400">{quote.customer.name}</p>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900">
+                        {formatCurrency(quote.grand_total, quote.currency)}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <StatusBadge status={quote.status} />
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-slate-500">
+                        {formatDate(quote.issue_date)}
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-slate-500">
+                        {formatDate(quote.valid_until)}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Link href={`/quotations/${quote.id}`}>
+                            <button
+                              className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600"
+                              title="View Details"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          </Link>
+                          <a
+                            href={`/api/public/pdf?id=${quote.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                            title="Download PDF"
+                          >
+                            <Download className="h-4 w-4" />
+                          </a>
+                          <Link
+                            href={`/q/${quote.public_token}`}
+                            target="_blank"
+                            className="rounded-lg p-1.5 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600"
+                            title="Open Customer Public Link"
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </DashboardLayout>

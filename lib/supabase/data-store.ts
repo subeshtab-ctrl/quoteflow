@@ -28,7 +28,34 @@ class QuoteFlowStore {
   private notifications: Map<string, Notification> = new Map();
 
   constructor() {
-    this.seedInitialData();
+    const hasSupabase =
+      process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('your-project') &&
+      process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!hasSupabase) {
+      this.seedInitialData();
+    } else {
+      // Set baseline organization fallback in case remote DB is temporarily unreachable
+      this.organizations.set(DEFAULT_ORG_ID, {
+        id: DEFAULT_ORG_ID,
+        name: 'My Company',
+        slug: 'my-company',
+        business_type: 'Services & Products',
+        email: 'contact@example.com',
+        brand_color: '#4f46e5',
+        default_currency: 'INR',
+        default_tax_rate: 18,
+        default_validity_days: 30,
+        quotation_prefix: 'Q-',
+        quotation_start_number: 1,
+        current_quotation_counter: 0,
+        default_terms: '1. Quotation valid for 30 days.\n2. Payment terms as agreed.',
+        invoice_footer: 'Thank you for your business!',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
   }
 
   private seedInitialData() {
@@ -646,8 +673,13 @@ class QuoteFlowStore {
   public async createCustomer(data: Omit<Customer, 'id' | 'created_at' | 'updated_at'>): Promise<Customer> {
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
     const now = new Date().toISOString();
+    const customerEmail = data.email && data.email.trim()
+      ? data.email.trim()
+      : `${(data.name || 'client').toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@customer.local`;
+
     const newCustomer: Customer = {
       ...data,
+      email: customerEmail,
       id,
       created_at: now,
       updated_at: now,
@@ -664,7 +696,7 @@ class QuoteFlowStore {
             organization_id: data.organization_id || DEFAULT_ORG_ID,
             name: data.name,
             company_name: data.company_name || null,
-            email: data.email,
+            email: customerEmail,
             phone: data.phone || null,
             alternate_phone: data.alternate_phone || null,
             billing_address: data.billing_address || null,
@@ -681,13 +713,15 @@ class QuoteFlowStore {
 
         if (error) {
           console.error('Supabase customer insert error:', error);
+          throw error;
         } else if (inserted) {
           this.customers.set(inserted.id, inserted as Customer);
           return inserted as Customer;
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to sync customer to Supabase:', err);
+      throw new Error(err.message || 'Failed to save customer to database');
     }
 
     return newCustomer;
@@ -773,6 +807,26 @@ class QuoteFlowStore {
 
   // --- PRODUCTS ---
   public async getProducts(orgId: string = DEFAULT_ORG_ID): Promise<Product[]> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('name', { ascending: true });
+
+        if (!error && data) {
+          for (const p of data) {
+            this.products.set(p.id, p as Product);
+          }
+          return data as Product[];
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch products from Supabase:', err);
+    }
+
     return Array.from(this.products.values())
       .filter((p) => p.organization_id === orgId)
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -1598,7 +1652,7 @@ class QuoteFlowStore {
 
   // --- ANALYTICS ---
   public async getDashboardAnalytics(orgId: string = DEFAULT_ORG_ID) {
-    const quotes = Array.from(this.quotations.values()).filter((q) => q.organization_id === orgId);
+    const quotes = await this.getQuotations(orgId);
 
     const totalCount = quotes.length;
     const draftCount = quotes.filter((q) => q.status === 'DRAFT').length;
@@ -1616,15 +1670,32 @@ class QuoteFlowStore {
     const totalViews = quotes.reduce((sum, q) => sum + (q.view_count || 0), 0);
     const winRate = totalCount > 0 ? Math.round((approvedCount / totalCount) * 100) : 0;
 
-    // Monthly chart data (last 6 months)
-    const monthlyData = [
-      { month: 'Apr', value: 145000, approved: 110000, count: 4 },
-      { month: 'May', value: 198000, approved: 165000, count: 6 },
-      { month: 'Jun', value: 240000, approved: 190000, count: 7 },
-      { month: 'Jul', value: 310000, approved: 245000, count: 9 },
-      { month: 'Aug', value: 280000, approved: 220000, count: 8 },
-      { month: 'Sep', value: totalValue, approved: approvedValue, count: totalCount },
-    ];
+    // Monthly chart data: computed dynamically for the last 6 months
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const monthlyData = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mName = monthNames[d.getMonth()];
+      const year = d.getFullYear();
+      const monthIdx = d.getMonth();
+
+      const monthQuotes = quotes.filter((q) => {
+        const qDate = new Date(q.created_at || q.issue_date);
+        return qDate.getFullYear() === year && qDate.getMonth() === monthIdx;
+      });
+
+      const mTotal = monthQuotes.reduce((sum, q) => sum + q.grand_total, 0);
+      const mApproved = monthQuotes.filter((q) => q.status === 'APPROVED').reduce((sum, q) => sum + q.grand_total, 0);
+
+      monthlyData.push({
+        month: mName,
+        value: mTotal,
+        approved: mApproved,
+        count: monthQuotes.length,
+      });
+    }
 
     return {
       totalCount,
