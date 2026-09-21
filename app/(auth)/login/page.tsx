@@ -61,18 +61,32 @@ function LoginForm() {
 
       if (authError) {
         if (authError.message.toLowerCase().includes('email not confirmed')) {
-          setIsOtpMode(true);
-          setError('Email is not verified yet. We have sent a verification code to your email.');
-          // Auto-trigger sending OTP code
+          // Auto-confirm user via admin API and retry sign in immediately
           try {
-            await fetch('/api/auth/send-verification-otp', {
+            const confirmRes = await fetch('/api/auth/confirm-user', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: email.trim() }),
             });
-          } catch (e) {
-            // Ignore
+
+            if (confirmRes.ok) {
+              const { data: retryData, error: retryErr } = await supabase.auth.signInWithPassword({
+                email: email.trim(),
+                password,
+              });
+
+              if (!retryErr && retryData?.user) {
+                router.push(redirectParam);
+                router.refresh();
+                return;
+              }
+            }
+          } catch (cErr) {
+            console.warn('Auto-confirm retry note:', cErr);
           }
+
+          setIsOtpMode(true);
+          setError('Email verification pending. We have sent a verification code to your email.');
           setIsLoading(false);
           return;
         }
