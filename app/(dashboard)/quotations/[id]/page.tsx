@@ -1,6 +1,9 @@
 import React from 'react';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import { DashboardLayout } from '@/components/dashboard/dashboard-layout';
 import { store } from '@/lib/supabase/data-store';
 import { formatCurrency } from '@/lib/quotations/calculations';
@@ -80,19 +83,25 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
         </div>
 
         {/* Rejection / Approval Banner */}
-        {quotation.status === 'APPROVED' && quotation.signature && (
+        {quotation.status === 'APPROVED' && (
           <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-5 shadow-sm space-y-2">
             <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
               <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              <span>Quotation Officially Approved & Digitally Signed</span>
+              <span>Quotation Officially Approved & Ready for Billing</span>
             </div>
-            <p className="text-xs text-emerald-700 leading-relaxed">
-              Approved by <strong>{quotation.signature.signer_name}</strong> ({quotation.signature.signer_email}) on{' '}
-              {formatDateTime(quotation.signature.signed_at)}. Document snapshot hash:{' '}
-              <span className="font-mono text-[11px] bg-emerald-100/80 px-1.5 py-0.5 rounded">
-                {quotation.signature.document_hash.substring(0, 24)}...
-              </span>
-            </p>
+            {quotation.signature ? (
+              <p className="text-xs text-emerald-700 leading-relaxed">
+                Digitally approved and signed by <strong>{quotation.signature.signer_name}</strong> ({quotation.signature.signer_email}) on{' '}
+                {formatDateTime(quotation.signature.signed_at)}. Verification hash:{' '}
+                <span className="font-mono text-[11px] bg-emerald-100/80 px-1.5 py-0.5 rounded">
+                  {quotation.signature.document_hash.substring(0, 24)}...
+                </span>
+              </p>
+            ) : (
+              <p className="text-xs text-emerald-700 leading-relaxed">
+                This quotation has been officially approved. You can generate a Commercial Tax Invoice or download the PDF below.
+              </p>
+            )}
           </div>
         )}
 

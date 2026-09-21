@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import { DashboardLayout } from '@/components/dashboard/dashboard-layout';
 import { store } from '@/lib/supabase/data-store';
 import { formatCurrency } from '@/lib/quotations/calculations';

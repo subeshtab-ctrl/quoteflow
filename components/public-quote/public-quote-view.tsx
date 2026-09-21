@@ -69,6 +69,15 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
     }
   };
 
+  const handleApproved = (updatedQuote?: Quotation) => {
+    if (updatedQuote) {
+      setQuotation(updatedQuote);
+    } else {
+      setQuotation((prev) => ({ ...prev, status: 'APPROVED' }));
+    }
+    refreshQuotationData();
+  };
+
   const refreshQuotationData = async () => {
     try {
       const res = await fetch(`/api/public/quote?token=${encodeURIComponent(token)}`);
@@ -396,7 +405,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
           </div>
 
           {/* Electronic Signature Audit Seal (When Approved) */}
-          {quotation.status === 'APPROVED' && quotation.signature && (
+          {quotation.status === 'APPROVED' && (
             <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-6 space-y-3">
               <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
                 <ShieldCheck className="h-5 w-5 text-emerald-600" />
@@ -405,28 +414,32 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-700">
                 <div>
-                  <p><span className="text-slate-500">Signer Name:</span> <strong>{quotation.signature.signer_name}</strong></p>
-                  <p><span className="text-slate-500">Signer Email:</span> {quotation.signature.signer_email}</p>
-                  {quotation.signature.signer_company && (
+                  <p><span className="text-slate-500">Signer Name:</span> <strong>{quotation.signature?.signer_name || 'Authorized Approver'}</strong></p>
+                  <p><span className="text-slate-500">Signer Email:</span> {quotation.signature?.signer_email || customer?.email || 'Registered Contact'}</p>
+                  {quotation.signature?.signer_company && (
                     <p><span className="text-slate-500">Company:</span> {quotation.signature.signer_company}</p>
                   )}
-                  <p><span className="text-slate-500">Signed At:</span> {formatDateTime(quotation.signature.signed_at)}</p>
-                  <p className="text-[10px] text-slate-400 font-mono mt-1">
-                    Document SHA-256: {quotation.signature.document_hash.substring(0, 32)}...
-                  </p>
+                  <p><span className="text-slate-500">Signed At:</span> {formatDateTime(quotation.signature?.signed_at || quotation.approved_at || quotation.updated_at)}</p>
+                  {quotation.approved_document_hash && (
+                    <p className="text-[10px] text-slate-400 font-mono mt-1">
+                      Document SHA-256: {quotation.approved_document_hash.substring(0, 32)}...
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex flex-col items-center sm:items-end justify-center">
-                  <span className="text-[11px] text-slate-400 mb-1">Signature Image</span>
-                  <div className="rounded-lg bg-white p-2 border border-emerald-200 shadow-sm">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={quotation.signature.signature_data_url}
-                      alt="Customer Signature"
-                      className="h-12 w-auto max-w-[200px] object-contain"
-                    />
+                {quotation.signature?.signature_data_url && (
+                  <div className="flex flex-col items-center sm:items-end justify-center">
+                    <span className="text-[11px] text-slate-400 mb-1">Signature Image</span>
+                    <div className="rounded-lg bg-white p-2 border border-emerald-200 shadow-sm">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={quotation.signature.signature_data_url}
+                        alt="Customer Signature"
+                        className="h-12 w-auto max-w-[200px] object-contain"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -478,7 +491,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         customerName={customer?.name}
         customerEmail={customer?.email}
         customerCompany={customer?.company_name}
-        onApproved={refreshQuotationData}
+        onApproved={handleApproved}
       />
 
       <RejectionModal

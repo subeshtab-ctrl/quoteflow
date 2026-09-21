@@ -34,6 +34,25 @@ export async function PUT(req: NextRequest, { params }: RouteProps) {
   }
 }
 
+export async function PATCH(req: NextRequest, { params }: RouteProps) {
+  try {
+    const { id } = await params;
+    const body = await req.json();
+    if (body.status === 'APPROVED') {
+      const updated = await store.markQuotationApproved(id, body.signer_name || 'Admin');
+      return NextResponse.json({ success: true, quotation: updated });
+    }
+    const updated = await store.updateQuotation(id, body);
+    return NextResponse.json({ success: true, quotation: updated });
+  } catch (err: any) {
+    console.error('Error in quotation PATCH:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to update quotation' },
+      { status: 400 }
+    );
+  }
+}
+
 export async function DELETE(req: NextRequest, { params }: RouteProps) {
   try {
     const { id } = await params;

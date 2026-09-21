@@ -47,9 +47,37 @@ export function QuotationActionButtons({
   const [isRevising, setIsRevising] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   const publicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/q/${publicToken}`;
+
+  const handleMarkApproved = async () => {
+    if (
+      !confirm(
+        `Mark quotation ${quotationNumber} as APPROVED? This will register official approval and enable invoice generation.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsApproving(true);
+      const res = await fetch(`/api/quotations/${quotationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'APPROVED', approver_name: 'Admin' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to mark quotation as approved');
+
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || 'Error approving quotation');
+    } finally {
+      setIsApproving(false);
+    }
+  };
 
   const handleCopyLink = async () => {
     try {
@@ -150,6 +178,20 @@ export function QuotationActionButtons({
           >
             <Receipt className="h-3.5 w-3.5" />
             <span>Generate Tax Invoice</span>
+          </Button>
+        )}
+
+        {/* Mark Approved Option for Unapproved Quotes */}
+        {status !== 'APPROVED' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleMarkApproved}
+            isLoading={isApproving}
+            className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 shadow-sm font-semibold"
+          >
+            <Check className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Mark Approved</span>
           </Button>
         )}
 

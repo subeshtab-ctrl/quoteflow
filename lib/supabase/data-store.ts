@@ -965,10 +965,45 @@ class QuoteFlowStore {
           if (data.items) {
             this.quotationItems.set(data.id, data.items as QuotationItem[]);
           }
+
+          // Fetch signature from Supabase
+          const { data: sigData } = await supabase
+            .from('quotation_signatures')
+            .select('*')
+            .eq('quotation_id', data.id)
+            .order('signed_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (sigData) {
+            this.signatures.set(data.id, sigData as QuotationSignature);
+          }
+
+          // Fetch events from Supabase
+          const { data: eventsData } = await supabase
+            .from('quotation_events')
+            .select('*')
+            .eq('quotation_id', data.id)
+            .order('created_at', { ascending: false });
+
+          if (eventsData && eventsData.length > 0) {
+            this.events.set(data.id, eventsData as QuotationEvent[]);
+          }
+
+          // Fetch views from Supabase
+          const { data: viewsData } = await supabase
+            .from('quotation_views')
+            .select('*')
+            .eq('quotation_id', data.id);
+
+          if (viewsData && viewsData.length > 0) {
+            this.views.set(data.id, viewsData as QuotationView[]);
+          }
+
           return {
             ...data,
             organization: this.organizations.get(data.organization_id),
-            signature: this.signatures.get(data.id) || null,
+            signature: (sigData as QuotationSignature) || this.signatures.get(data.id) || null,
             events: (this.events.get(data.id) || []).sort(
               (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             ),
@@ -1016,10 +1051,24 @@ class QuoteFlowStore {
           if (data.items) {
             this.quotationItems.set(data.id, data.items as QuotationItem[]);
           }
+
+          // Fetch signature from Supabase
+          const { data: sigData } = await supabase
+            .from('quotation_signatures')
+            .select('*')
+            .eq('quotation_id', data.id)
+            .order('signed_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (sigData) {
+            this.signatures.set(data.id, sigData as QuotationSignature);
+          }
+
           return {
             ...data,
             organization: this.organizations.get(data.organization_id),
-            signature: this.signatures.get(data.id) || null,
+            signature: (sigData as QuotationSignature) || this.signatures.get(data.id) || null,
           } as Quotation;
         }
       }
@@ -1309,6 +1358,59 @@ class QuoteFlowStore {
 
     this.quotations.set(id, updated);
 
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('quotations')
+          .update({
+            customer_id: updated.customer_id,
+            title: updated.title,
+            issue_date: updated.issue_date,
+            valid_until: updated.valid_until,
+            currency: updated.currency,
+            subtotal: updated.subtotal,
+            discount_type: updated.discount_type,
+            discount_value: updated.discount_value,
+            discount_amount: updated.discount_amount,
+            tax_rate: updated.tax_rate,
+            tax_amount: updated.tax_amount,
+            grand_total: updated.grand_total,
+            notes: updated.notes,
+            terms_conditions: updated.terms_conditions,
+            status: updated.status,
+            updated_at: updated.updated_at,
+          })
+          .eq('id', id);
+
+        if (data.items) {
+          await supabase.from('quotation_items').delete().eq('quotation_id', id);
+          if (newItems.length > 0) {
+            await supabase.from('quotation_items').insert(
+              newItems.map((item: any, idx: number) => ({
+                id: item.id && !item.id.startsWith('item_') ? item.id : undefined,
+                quotation_id: id,
+                product_id: item.product_id || null,
+                description: item.description,
+                quantity: item.quantity,
+                unit: item.unit,
+                unit_price: item.unit_price,
+                discount_type: item.discount_type,
+                discount_value: item.discount_value,
+                discount_amount: item.discount_amount,
+                tax_rate: item.tax_rate,
+                tax_amount: item.tax_amount,
+                line_total: item.line_total,
+                sort_order: idx,
+              }))
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync updated quotation to Supabase:', err);
+    }
+
     this.logEvent(existing.organization_id, id, 'USER', 'EDITED', {
       status: updated.status,
       grand_total: updated.grand_total,
@@ -1381,13 +1483,13 @@ class QuoteFlowStore {
     quotationId: string,
     meta: { ip?: string; userAgent?: string }
   ): Promise<{ quotation: Quotation; firstView: boolean }> {
-    const quote = this.quotations.get(quotationId);
+    const quote = this.quotations.get(quotationId) || (await this.getQuotationById(quotationId));
     if (!quote) throw new Error('Quotation not found');
 
     const now = new Date().toISOString();
-    const firstView = quote.view_count === 0;
+    const firstView = (quote.view_count || 0) === 0;
 
-    quote.view_count += 1;
+    quote.view_count = (quote.view_count || 0) + 1;
     if (!quote.first_viewed_at) {
       quote.first_viewed_at = now;
     }
@@ -1420,7 +1522,6 @@ class QuoteFlowStore {
     });
 
     if (firstView) {
-      // In-app notification
       this.createNotification(
         quote.organization_id,
         quote.id,
@@ -1428,6 +1529,50 @@ class QuoteFlowStore {
         `Customer has opened and viewed quotation ${quote.quotation_number}.`,
         'VIEWED'
       );
+    }
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('quotations')
+          .update({
+            status: quote.status,
+            view_count: quote.view_count,
+            first_viewed_at: quote.first_viewed_at,
+            last_viewed_at: quote.last_viewed_at,
+            updated_at: now,
+          })
+          .eq('id', quotationId);
+
+        await supabase
+          .from('quotation_views')
+          .insert({
+            quotation_id: quotationId,
+            ip_address: meta.ip || null,
+            user_agent: meta.userAgent || null,
+            viewed_at: now,
+          });
+
+        if (firstView) {
+          await supabase
+            .from('quotation_events')
+            .insert({
+              organization_id: quote.organization_id,
+              quotation_id: quotationId,
+              actor_type: 'CUSTOMER',
+              actor_name: quote.customer?.name || 'Customer',
+              event_type: 'VIEWED',
+              metadata: {
+                userAgent: meta.userAgent,
+                ip: meta.ip,
+              },
+              created_at: now,
+            });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to sync quotation view to Supabase:', err);
     }
 
     return { quotation: quote, firstView };
@@ -1504,7 +1649,7 @@ class QuoteFlowStore {
     this.signatures.set(quote.id, sig);
 
     // 2. Update Quotation Status
-    const rawQuote = this.quotations.get(quote.id)!;
+    const rawQuote = this.quotations.get(quote.id) || quote;
     rawQuote.status = 'APPROVED';
     rawQuote.approved_at = now;
     rawQuote.approved_document_hash = documentHash;
@@ -1529,6 +1674,169 @@ class QuoteFlowStore {
       'APPROVED'
     );
 
+    // 5. Persist to Supabase Database
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { error: qErr } = await supabase
+          .from('quotations')
+          .update({
+            status: 'APPROVED',
+            approved_at: now,
+            approved_document_hash: documentHash,
+            updated_at: now,
+          })
+          .eq('id', quote.id);
+
+        if (qErr) console.error('Supabase quotation status update error:', qErr);
+
+        const { error: sErr } = await supabase
+          .from('quotation_signatures')
+          .insert({
+            quotation_id: quote.id,
+            signer_name: params.signer_name,
+            signer_email: params.signer_email,
+            signer_company: params.signer_company || null,
+            signature_data_url: params.signature_data_url,
+            signature_type: params.signature_type,
+            ip_address: params.ip_address || null,
+            user_agent: params.user_agent || null,
+            signed_at: now,
+            document_hash: documentHash,
+          });
+
+        if (sErr) console.error('Supabase signature insert error:', sErr);
+
+        const { error: eErr } = await supabase
+          .from('quotation_events')
+          .insert({
+            organization_id: quote.organization_id,
+            quotation_id: quote.id,
+            actor_type: 'CUSTOMER',
+            actor_name: params.signer_name,
+            event_type: 'APPROVED',
+            metadata: {
+              signer_name: params.signer_name,
+              signer_email: params.signer_email,
+              signer_company: params.signer_company,
+              document_hash: documentHash,
+              ip_address: params.ip_address,
+            },
+            created_at: now,
+          });
+
+        if (eErr) console.error('Supabase approval event insert error:', eErr);
+      }
+    } catch (err) {
+      console.error('Failed to sync approval to Supabase:', err);
+    }
+
+    return {
+      ...rawQuote,
+      signature: sig,
+      items: quote.items,
+      customer: quote.customer,
+      organization: quote.organization,
+    };
+  }
+
+  // --- BUSINESS / ADMIN MANUAL APPROVAL ---
+  public async markQuotationApproved(id: string, approverName: string = 'Admin'): Promise<Quotation> {
+    const quote = await this.getQuotationById(id);
+    if (!quote) throw new Error('Quotation not found');
+
+    const now = new Date().toISOString();
+    const documentHash = generateDocumentHash({
+      quotation_id: quote.id,
+      quotation_number: quote.quotation_number,
+      customer_id: quote.customer_id,
+      grand_total: quote.grand_total,
+      currency: quote.currency,
+      issue_date: quote.issue_date,
+      valid_until: quote.valid_until,
+      items: (quote.items || []).map((i) => ({
+        description: i.description,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        line_total: i.line_total,
+      })),
+      approved_at: now,
+      signer_name: approverName,
+      signer_email: quote.customer?.email || 'admin@quoteflow.local',
+    });
+
+    const sig: QuotationSignature = {
+      id: `sig_${Date.now()}`,
+      quotation_id: quote.id,
+      signer_name: approverName,
+      signer_email: quote.customer?.email || 'admin@quoteflow.local',
+      signer_company: quote.customer?.company_name || quote.customer?.name,
+      signature_data_url:
+        'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="50"><text x="10" y="32" font-family="sans-serif" font-weight="bold" font-size="16" fill="%23059669">✓ Approved (' +
+        encodeURIComponent(approverName) +
+        ')</text></svg>',
+      signature_type: 'TYPED',
+      signed_at: now,
+      document_hash: documentHash,
+    };
+    this.signatures.set(quote.id, sig);
+
+    const rawQuote = this.quotations.get(quote.id) || quote;
+    rawQuote.status = 'APPROVED';
+    rawQuote.approved_at = now;
+    rawQuote.approved_document_hash = documentHash;
+    rawQuote.updated_at = now;
+    this.quotations.set(quote.id, rawQuote);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('quotations')
+          .update({
+            status: 'APPROVED',
+            approved_at: now,
+            approved_document_hash: documentHash,
+            updated_at: now,
+          })
+          .eq('id', quote.id);
+
+        await supabase
+          .from('quotation_signatures')
+          .insert({
+            quotation_id: quote.id,
+            signer_name: approverName,
+            signer_email: quote.customer?.email || 'admin@quoteflow.local',
+            signer_company: quote.customer?.company_name || null,
+            signature_data_url: sig.signature_data_url,
+            signature_type: 'TYPED',
+            signed_at: now,
+            document_hash: documentHash,
+          });
+
+        await supabase
+          .from('quotation_events')
+          .insert({
+            organization_id: quote.organization_id,
+            quotation_id: quote.id,
+            actor_type: 'USER',
+            actor_name: approverName,
+            event_type: 'APPROVED',
+            metadata: {
+              approved_by: approverName,
+              document_hash: documentHash,
+            },
+            created_at: now,
+          });
+      }
+    } catch (err) {
+      console.error('Failed to sync admin approval to Supabase:', err);
+    }
+
+    this.logEvent(quote.organization_id, quote.id, 'USER', 'APPROVED', {
+      approved_by: approverName,
+    });
+
     return {
       ...rawQuote,
       signature: sig,
@@ -1552,7 +1860,7 @@ class QuoteFlowStore {
     }
 
     const now = new Date().toISOString();
-    const rawQuote = this.quotations.get(quote.id)!;
+    const rawQuote = this.quotations.get(quote.id) || quote;
     rawQuote.status = 'REJECTED';
     rawQuote.rejected_at = now;
     rawQuote.rejection_reason = params.reason;
@@ -1574,6 +1882,39 @@ class QuoteFlowStore {
       `Customer rejected reason: "${params.reason}". Feedback: ${params.comments}`,
       'REJECTED'
     );
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('quotations')
+          .update({
+            status: 'REJECTED',
+            rejected_at: now,
+            rejection_reason: params.reason,
+            rejection_comments: params.comments,
+            updated_at: now,
+          })
+          .eq('id', quote.id);
+
+        await supabase
+          .from('quotation_events')
+          .insert({
+            organization_id: quote.organization_id,
+            quotation_id: quote.id,
+            actor_type: 'CUSTOMER',
+            actor_name: quote.customer?.name || 'Customer',
+            event_type: 'REJECTED',
+            metadata: {
+              reason: params.reason,
+              comments: params.comments,
+            },
+            created_at: now,
+          });
+      }
+    } catch (err) {
+      console.error('Failed to sync rejection to Supabase:', err);
+    }
 
     return {
       ...rawQuote,

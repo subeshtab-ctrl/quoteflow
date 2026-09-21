@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { SignaturePad } from '@/components/signature/signature-pad';
 import { CheckCircle2, ShieldCheck, AlertCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { Quotation } from '@/types/database';
 
 interface ApprovalModalProps {
   isOpen: boolean;
@@ -17,7 +18,7 @@ interface ApprovalModalProps {
   customerName?: string;
   customerEmail?: string;
   customerCompany?: string;
-  onApproved: () => void;
+  onApproved: (updatedQuote?: Quotation) => void;
 }
 
 export function ApprovalModal({
@@ -94,7 +95,7 @@ export function ApprovalModal({
         // Ignore in environments without canvas
       }
 
-      onApproved();
+      onApproved(data.quotation);
       onClose();
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred. Please try again.');
