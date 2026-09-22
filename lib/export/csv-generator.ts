@@ -94,8 +94,8 @@ export function generateFinancialCsv({
       ]);
     }
 
-    // 2. Invoice Row (for approved quotes, if documentType is ALL or INVOICES)
-    if ((documentType === 'ALL' || documentType === 'INVOICES') && isApproved) {
+    // 2. Invoice Row (only for approved AND paid quotes, if documentType is ALL or INVOICES)
+    if ((documentType === 'ALL' || documentType === 'INVOICES') && isApproved && isPaid) {
       const invoiceNumber = `INV-${quote.quotation_number.replace(/^Q-/, '')}`;
       rows.push([
         'Commercial Tax Invoice',

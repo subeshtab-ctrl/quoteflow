@@ -58,7 +58,7 @@ export function QuotationActionButtons({
   const handleMarkApproved = async () => {
     if (
       !confirm(
-        `Mark quotation ${quotationNumber} as APPROVED? This will register official approval and enable invoice generation.`
+        `Mark quotation ${quotationNumber} as APPROVED? This will register official approval. (Tax Invoices are generated once marked as PAID).`
       )
     ) {
       return;
@@ -171,33 +171,45 @@ export function QuotationActionButtons({
   return (
     <>
       <div className="flex items-center gap-2 flex-wrap">
-        {/* View Invoice Option for Approved Quotes */}
+        {/* Approved Quotation Actions: Invoice is ONLY shown when marked as PAID */}
         {status === 'APPROVED' && quotation && (
           <>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setIsInvoiceOpen(true)}
-              className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
-            >
-              <Receipt className="h-3.5 w-3.5" />
-              <span>Generate Tax Invoice</span>
-            </Button>
+            {quotation.is_paid ? (
+              <>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setIsInvoiceOpen(true)}
+                  className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+                  title="Generate & View Commercial Tax Invoice"
+                >
+                  <Receipt className="h-3.5 w-3.5" />
+                  <span>Generate Tax Invoice</span>
+                </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsPaymentOpen(true)}
-              className={`gap-1.5 text-xs font-semibold shadow-sm ${
-                quotation.is_paid
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900'
-                  : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900'
-              }`}
-              title={quotation.is_paid ? 'Payment received - click to view/edit' : 'Payment pending - click to mark as paid'}
-            >
-              <CreditCard className="h-3.5 w-3.5" />
-              <span>{quotation.is_paid ? 'Paid' : 'Mark as Paid'}</span>
-            </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsPaymentOpen(true)}
+                  className="gap-1.5 text-xs font-semibold shadow-sm bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                  title="Payment received - click to view/edit details"
+                >
+                  <CreditCard className="h-3.5 w-3.5" />
+                  <span>Paid</span>
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPaymentOpen(true)}
+                className="gap-1.5 text-xs font-semibold shadow-sm bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900"
+                title="Mark as paid to unlock invoice generation"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>Mark as Paid</span>
+              </Button>
+            )}
           </>
         )}
 
@@ -307,8 +319,8 @@ export function QuotationActionButtons({
         </Button>
       </div>
 
-      {/* Commercial Tax Invoice Modal */}
-      {quotation && (
+      {/* Commercial Tax Invoice Modal - Only accessible when quotation is marked as PAID */}
+      {quotation && quotation.is_paid && (
         <InvoiceModal
           isOpen={isInvoiceOpen}
           onClose={() => setIsInvoiceOpen(false)}

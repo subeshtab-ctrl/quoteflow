@@ -421,8 +421,16 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
           )}
 
           {/* Footer Note */}
-          <div className="pt-6 border-t border-slate-100 text-center text-xs text-slate-400">
-            <p>{org?.invoice_footer || 'Thank you for your business!'}</p>
+          <div className="pt-6 border-t border-slate-100 text-center text-xs text-slate-500">
+            <p className="font-medium">
+              {(() => {
+                const companyName = org?.name || 'our company';
+                if (!org?.invoice_footer) {
+                  return `Thank you for partnering with ${companyName}.`;
+                }
+                return org.invoice_footer.replace(/The Mining Future/gi, companyName);
+              })()}
+            </p>
             <p className="mt-1 text-[11px] text-slate-400">
               Powered by QuoteFlow Digital Approval Platform
             </p>

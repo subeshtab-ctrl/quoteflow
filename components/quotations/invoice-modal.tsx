@@ -100,9 +100,9 @@ export function InvoiceModal({
   const [accountName, setAccountName] = useState(organization?.name || 'QuoteFlow');
   const [accountNumber, setAccountNumber] = useState('50200012345678');
   const [ifscCode, setIfscCode] = useState('HDFC0001234');
-  const [footerNotes, setFooterNotes] = useState(
-    organization?.invoice_footer || 'Thank you for your business!'
-  );
+  const orgCompName = organization?.name || 'our company';
+  const defaultCleanFooter = (organization?.invoice_footer || `Thank you for partnering with ${orgCompName}.`).replace(/The Mining Future/gi, orgCompName);
+  const [footerNotes, setFooterNotes] = useState(defaultCleanFooter);
 
   // Line Items
   const [items, setItems] = useState<InvoiceItem[]>(() =>
@@ -253,6 +253,11 @@ export function InvoiceModal({
   const handleDownloadPdf = () => {
     window.open(`/api/public/pdf?id=${quotation.id}`, '_blank');
   };
+
+  // Business rule: Tax invoice is ONLY available when the quotation is APPROVED and marked as PAID
+  if (!isOpen || quotation.status !== 'APPROVED' || !quotation.is_paid) {
+    return null;
+  }
 
   return (
     <>

@@ -108,8 +108,8 @@ async function handleExport(params: ExportParams) {
       if (q.status !== 'APPROVED' || q.is_paid) return false;
     }
 
-    // 4. Document type filter (if strictly invoices, only approved quotes apply)
-    if (params.documentType === 'INVOICES' && q.status !== 'APPROVED') {
+    // 4. Document type filter (strictly invoices: only approved AND paid quotes apply)
+    if (params.documentType === 'INVOICES' && (q.status !== 'APPROVED' || !q.is_paid)) {
       return false;
     }
 

@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
       const emailPayload = generateQuotationSentEmail({
         customerName: quotation.customer.name,
-        companyName: quotation.organization?.name || 'The Mining Future',
+        companyName: quotation.organization?.name || 'QuoteFlow',
         quotationNumber: quotation.quotation_number,
         amount: quotation.grand_total,
         currency: quotation.currency,

@@ -18,8 +18,8 @@ export function QuotationInvoiceButton({
 }: QuotationInvoiceButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  // If the quotation is not approved, DO NOT show the invoice option!
-  if (quotation.status !== 'APPROVED') {
+  // Business rule: Generate invoice ONLY when marked as PAID. Otherwise do not show invoice!
+  if (quotation.status !== 'APPROVED' || !quotation.is_paid) {
     return null;
   }
 

@@ -43,12 +43,34 @@ describe('Financial Export & Payment Tracking System', () => {
     expect(unpaidQuotation.paid_at).toBeNull();
   });
 
-  it('generates an RFC 4180 CSV document with UTF-8 BOM, Quotations, and Tax Invoices', async () => {
+  it('generates an RFC 4180 CSV document with UTF-8 BOM, Quotations, and Tax Invoices only when paid', async () => {
     const orgId = 'a0000000-0000-0000-0000-000000000001';
-    const quotations = await store.getQuotations(orgId);
+    const quoteId = 'd0000000-0000-0000-0000-000000000003';
     const org = await store.getOrganization(orgId);
 
-    const csvOutput = generateFinancialCsv({
+    // 1. When approved quotation is unpaid, it must NOT generate an invoice row
+    let quotations = await store.getQuotations(orgId);
+    let csvOutput = generateFinancialCsv({
+      quotations,
+      documentType: 'ALL',
+      organization: org,
+    });
+    expect(csvOutput).toContain('Quotation');
+    expect(csvOutput).not.toContain('Commercial Tax Invoice');
+
+    // 2. Mark as PAID -> Now it MUST generate a Commercial Tax Invoice row
+    await store.updateQuotationPayment(
+      quoteId,
+      {
+        is_paid: true,
+        paid_at: '2026-09-22T10:00:00.000Z',
+        payment_method: 'BANK_TRANSFER',
+      },
+      orgId
+    );
+
+    quotations = await store.getQuotations(orgId);
+    csvOutput = generateFinancialCsv({
       quotations,
       documentType: 'ALL',
       organization: org,
@@ -64,7 +86,7 @@ describe('Financial Export & Payment Tracking System', () => {
     expect(csvOutput).toContain('Payment Method');
     expect(csvOutput).toContain('Payment Notes');
 
-    // Verify rows exist
+    // Verify rows exist for both Quotation and Commercial Tax Invoice
     expect(csvOutput).toContain('Quotation');
     expect(csvOutput).toContain('Commercial Tax Invoice');
   });

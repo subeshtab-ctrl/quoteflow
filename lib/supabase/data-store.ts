@@ -555,6 +555,13 @@ class QuoteFlowStore {
         }
 
         if (!error && data) {
+          const compName = data.name || 'us';
+          if (data.invoice_footer && data.invoice_footer.includes('The Mining Future')) {
+            data.invoice_footer = `Thank you for partnering with ${compName}.`;
+            supabase.from('organizations').update({ invoice_footer: data.invoice_footer }).eq('id', data.id).then();
+          } else if (!data.invoice_footer) {
+            data.invoice_footer = `Thank you for partnering with ${compName}.`;
+          }
           this.organizations.set(data.id, data as Organization);
           return data as Organization;
         }
@@ -562,7 +569,15 @@ class QuoteFlowStore {
     } catch (err) {
       console.warn('Could not fetch organization from Supabase:', err);
     }
-    return this.organizations.get(orgId) || null;
+    const cached = this.organizations.get(orgId);
+    if (cached) {
+      const compName = cached.name || 'us';
+      if (cached.invoice_footer && cached.invoice_footer.includes('The Mining Future')) {
+        cached.invoice_footer = `Thank you for partnering with ${compName}.`;
+      }
+      return cached;
+    }
+    return null;
   }
 
   public setCachedOrganization(orgId: string, org: Organization): void {
@@ -571,9 +586,15 @@ class QuoteFlowStore {
 
   public async updateOrganization(orgId: string = DEFAULT_ORG_ID, data: Partial<Organization>): Promise<Organization> {
     const org = (await this.getOrganization(orgId)) || this.organizations.get(orgId)!;
+    const compName = data.name || org.name || 'us';
+    let cleanFooter = data.invoice_footer !== undefined ? data.invoice_footer : org.invoice_footer;
+    if (cleanFooter && cleanFooter.includes('The Mining Future')) {
+      cleanFooter = `Thank you for partnering with ${compName}.`;
+    }
     const updated: Organization = {
       ...org,
       ...data,
+      invoice_footer: cleanFooter,
       updated_at: new Date().toISOString(),
     };
     this.organizations.set(orgId, updated);

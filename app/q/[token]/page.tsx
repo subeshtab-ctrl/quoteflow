@@ -21,12 +21,12 @@ export async function generateMetadata({ params }: PublicQuotePageProps): Promis
 
   if (!quote) {
     return {
-      title: 'Quotation Not Found | The Mining Future',
+      title: 'Quotation Not Found | QuoteFlow',
     };
   }
 
   return {
-    title: `Quotation ${quote.quotation_number} - ${quote.organization?.name || 'The Mining Future'}`,
+    title: `Quotation ${quote.quotation_number} - ${quote.organization?.name || 'QuoteFlow'}`,
     description: `Review and approve quotation ${quote.quotation_number} for ${quote.title}`,
   };
 }

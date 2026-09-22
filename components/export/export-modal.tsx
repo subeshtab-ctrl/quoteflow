@@ -251,7 +251,7 @@ export function ExportModal({
             {[
               { id: 'ALL', label: 'Quotations & Invoices' },
               { id: 'QUOTATIONS', label: 'Quotations Only' },
-              { id: 'INVOICES', label: 'Invoices Only' },
+              { id: 'INVOICES', label: 'Invoices (Paid Only)' },
             ].map((opt) => (
               <button
                 key={opt.id}

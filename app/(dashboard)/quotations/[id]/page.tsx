@@ -104,7 +104,10 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
               </p>
             ) : (
               <p className="text-xs text-emerald-700 leading-relaxed">
-                This quotation has been officially approved. You can generate a Commercial Tax Invoice or download the PDF below.
+                This quotation has been officially approved.{' '}
+                {quotation.is_paid
+                  ? 'Commercial Tax Invoice is generated and available for viewing and printing.'
+                  : 'Commercial Tax Invoice will be generated once payment is marked as PAID.'}
               </p>
             )}
 
@@ -121,6 +124,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                       {quotation.paid_at ? ` on ${formatDate(quotation.paid_at)}` : ''}
                       {quotation.payment_method ? ` via ${quotation.payment_method}` : ''}
                       {quotation.payment_notes ? ` (${quotation.payment_notes})` : ''}
+                      {' — Tax invoice unlocked.'}
                     </span>
                   </>
                 ) : (
@@ -129,7 +133,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                       Payment Pending (UNPAID)
                     </span>
                     <span className="text-xs text-slate-600">
-                      Outstanding balance: {grandTotalFormatted}
+                      Outstanding balance: {grandTotalFormatted} — <strong className="text-amber-800 font-semibold">Mark as paid to generate invoice</strong>
                     </span>
                   </>
                 )}

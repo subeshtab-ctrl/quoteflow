@@ -258,8 +258,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   // 9. Document Footer
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text(org.invoice_footer || 'Thank you for your business!', pageWidth / 2, pageHeight - 8, { align: 'center' });
+  const compName = org.name || 'our company';
+  const footerText = (org.invoice_footer || `Thank you for partnering with ${compName}.`).replace(/The Mining Future/gi, compName);
+  doc.text(footerText, pageWidth / 2, pageHeight - 8, { align: 'center' });
 
   // Output as Uint8Array
   const arrayBuffer = doc.output('arraybuffer');
