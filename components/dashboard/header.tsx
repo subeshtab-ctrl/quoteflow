@@ -162,17 +162,6 @@ export function DashboardHeader({
 
       {/* Right Navigation & Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Public Customer Link */}
-        <Link
-          href="/q/demo_token_sent_q002"
-          target="_blank"
-          className="hidden md:inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
-          title="Open live customer approval view in a new tab"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          <span>Client Approval Portal</span>
-        </Link>
-
         {/* Notifications Popover */}
         <div className="relative">
           <button

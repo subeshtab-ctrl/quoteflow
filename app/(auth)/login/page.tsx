@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { getAuthRedirectUrl } from '@/lib/utils/auth';
+import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 
 function LoginForm() {
   const router = useRouter();
@@ -32,6 +33,7 @@ function LoginForm() {
   const [email, setEmail] = useState(paramEmail || '');
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
+  const [devOtpCode, setDevOtpCode] = useState<string | null>(null);
   const [isOtpMode, setIsOtpMode] = useState(initialOtpMode);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -144,11 +146,15 @@ function LoginForm() {
       }
 
       // Dispatch via backend OTP service as well
-      await fetch('/api/auth/send-verification-otp', {
+      const otpRes = await fetch('/api/auth/send-verification-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() }),
       });
+      const otpData = await otpRes.json();
+      if (otpData.otpCode) {
+        setDevOtpCode(otpData.otpCode);
+      }
 
       setIsOtpMode(true);
       setResendSuccess(true);
@@ -265,11 +271,15 @@ function LoginForm() {
       }
 
       // Also trigger backend OTP service
-      await fetch('/api/auth/send-verification-otp', {
+      const otpRes = await fetch('/api/auth/send-verification-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() }),
       });
+      const otpData = await otpRes.json();
+      if (otpData.otpCode) {
+        setDevOtpCode(otpData.otpCode);
+      }
 
       setResendSuccess(true);
       setTimeout(() => setResendSuccess(false), 5000);
@@ -337,6 +347,19 @@ function LoginForm() {
                   </div>
                 )}
 
+                {devOtpCode && (
+                  <button
+                    type="button"
+                    onClick={() => setOtpCode(devOtpCode)}
+                    className="w-full rounded-xl bg-indigo-50 border border-indigo-200 p-2.5 text-center text-xs text-indigo-900 font-medium hover:bg-indigo-100 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                    title="Click to auto-fill code"
+                  >
+                    <span>Instant Code:</span>
+                    <span className="font-mono text-sm font-bold tracking-widest text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">{devOtpCode}</span>
+                    <span className="text-[11px] text-indigo-600 underline font-normal">(Click to fill)</span>
+                  </button>
+                )}
+
                 <div className="space-y-1.5">
                   <label className="block text-center text-xs font-semibold uppercase tracking-wider text-slate-600">
                     Verification OTP Code
@@ -397,6 +420,20 @@ function LoginForm() {
         ) : (
           <form onSubmit={handleLogin}>
             <CardContent className="p-6 space-y-4">
+              {/* Google Sign In Option */}
+              <GoogleSignInButton mode="signin" />
+
+              <div className="relative py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200" />
+                </div>
+                <div className="relative flex justify-center text-[10px] uppercase">
+                  <span className="bg-white px-2.5 text-slate-400 font-bold tracking-wider">
+                    Or continue with email
+                  </span>
+                </div>
+              </div>
+
               {verified && (
                 <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 border border-emerald-200 flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />

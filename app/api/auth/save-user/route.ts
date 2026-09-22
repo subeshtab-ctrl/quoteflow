@@ -54,15 +54,71 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Update company / organization name for target user's specific organization
-    if (targetUserId && companyName && companyName.trim() && supabase) {
+    // 2. Ensure user has a private organization workspace (especially for Google OAuth new signups)
+    if (targetUserId && supabase) {
       const { data: member } = await supabase
         .from('organization_members')
         .select('organization_id')
         .eq('user_id', targetUserId)
+        .limit(1)
         .maybeSingle();
 
-      if (member?.organization_id) {
+      if (!member?.organization_id) {
+        // Automatically provision a new isolated organization workspace for this user
+        const newOrgId = crypto.randomUUID();
+        const effectiveCompanyName =
+          (companyName || '').trim() ||
+          (fullName ? `${fullName}'s Workspace` : 'My Organization');
+        const orgSlug =
+          effectiveCompanyName.toLowerCase().replace(/[^a-z0-9]+/g, '-') +
+          '-' +
+          Date.now().toString().slice(-4);
+
+        const { data: newOrg } = await supabase
+          .from('organizations')
+          .insert({
+            id: newOrgId,
+            name: effectiveCompanyName,
+            slug: orgSlug,
+            business_type: 'Services & Products',
+            email: (email || '').trim(),
+            default_currency: 'USD',
+            default_tax_rate: 0,
+            default_validity_days: 30,
+            quotation_prefix: 'Q-',
+            quotation_start_number: 1,
+            current_quotation_counter: 0,
+            default_terms: '1. Quotation valid for 30 days.\n2. Payment terms as agreed.',
+            invoice_footer: `Thank you for choosing ${effectiveCompanyName}!`,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        // Assign user as OWNER of their new organization
+        await supabase.from('organization_members').insert({
+          organization_id: newOrgId,
+          user_id: targetUserId,
+          role: 'OWNER',
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        // Update auth user metadata
+        await supabase.auth.admin.updateUserById(targetUserId, {
+          user_metadata: {
+            organization_id: newOrgId,
+            role: 'OWNER',
+            company_name: effectiveCompanyName,
+          },
+        });
+
+        if (newOrg) {
+          store.setCachedOrganization(newOrgId, newOrg);
+        }
+      } else if (companyName && companyName.trim()) {
         await store.updateOrganization(member.organization_id, {
           name: companyName.trim(),
           email: (email || '').trim(),

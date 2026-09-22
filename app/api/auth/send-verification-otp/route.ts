@@ -9,6 +9,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const email = (body.email || '').trim().toLowerCase();
+    const fullName = (body.fullName || '').trim();
+    const companyName = (body.companyName || '').trim();
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'A valid email address is required.' }, { status: 400 });
@@ -20,9 +22,16 @@ export async function POST(req: NextRequest) {
 
     if (admin) {
       try {
+        const metadata: Record<string, any> = {};
+        if (fullName) metadata.full_name = fullName;
+        if (companyName) metadata.company_name = companyName;
+
         const { data, error } = await admin.auth.admin.generateLink({
           type: 'magiclink',
           email,
+          options: {
+            data: metadata,
+          },
         });
 
         if (!error && data?.properties) {
@@ -93,9 +102,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const hasExternalSmtp = Boolean(process.env.RESEND_API_KEY);
+
     return NextResponse.json({
       success: true,
-      message: 'Verification code sent to your email.',
+      message: hasExternalSmtp
+        ? 'Verification code sent to your email.'
+        : 'Verification code generated.',
+      otpCode: otpCode,
+      hasExternalSmtp,
     });
   } catch (err: any) {
     console.error('Send verification OTP error:', err);
