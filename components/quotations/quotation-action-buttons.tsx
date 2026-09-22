@@ -15,9 +15,11 @@ import {
   MessageSquare,
   Trash2,
   Receipt,
+  CreditCard,
 } from 'lucide-react';
 import { Quotation, Organization, Customer, QuotationStatus } from '@/types/database';
 import { InvoiceModal } from '@/components/quotations/invoice-modal';
+import { PaymentModal } from '@/components/quotations/payment-modal';
 
 interface QuotationActionButtonsProps {
   quotationId: string;
@@ -49,6 +51,7 @@ export function QuotationActionButtons({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
   const publicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/q/${publicToken}`;
 
@@ -170,15 +173,32 @@ export function QuotationActionButtons({
       <div className="flex items-center gap-2 flex-wrap">
         {/* View Invoice Option for Approved Quotes */}
         {status === 'APPROVED' && quotation && (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setIsInvoiceOpen(true)}
-            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
-          >
-            <Receipt className="h-3.5 w-3.5" />
-            <span>Generate Tax Invoice</span>
-          </Button>
+          <>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setIsInvoiceOpen(true)}
+              className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+            >
+              <Receipt className="h-3.5 w-3.5" />
+              <span>Generate Tax Invoice</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPaymentOpen(true)}
+              className={`gap-1.5 text-xs font-semibold shadow-sm ${
+                quotation.is_paid
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900'
+                  : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900'
+              }`}
+              title={quotation.is_paid ? 'Payment received - click to view/edit' : 'Payment pending - click to mark as paid'}
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              <span>{quotation.is_paid ? 'Paid' : 'Mark as Paid'}</span>
+            </Button>
+          </>
         )}
 
         {/* Mark Approved Option for Unapproved Quotes */}
@@ -295,6 +315,15 @@ export function QuotationActionButtons({
           quotation={quotation}
           organization={organization}
           customer={customer}
+        />
+      )}
+
+      {/* Payment Status Modal */}
+      {quotation && (
+        <PaymentModal
+          isOpen={isPaymentOpen}
+          onClose={() => setIsPaymentOpen(false)}
+          quotation={quotation}
         />
       )}
     </>

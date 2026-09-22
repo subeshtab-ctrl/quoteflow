@@ -363,8 +363,12 @@ class QuoteFlowStore {
       last_viewed_at: new Date(Date.now() - 2 * 86400000).toISOString(),
       approved_at: new Date(Date.now() - 2 * 86400000).toISOString(),
       approved_document_hash: 'sha256_mock_hash_approved_doc_3',
+      is_paid: true,
+      paid_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+      payment_method: 'UPI',
+      payment_notes: 'UPI Ref #UPI-9988-7766 - Received in Axis Bank',
       created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
-      updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
     };
     this.quotations.set(q3.id, q3);
     this.quotationItems.set(q3.id, [
@@ -1023,7 +1027,16 @@ class QuoteFlowStore {
           }
 
           for (const q of data) {
-            this.quotations.set(q.id, q as Quotation);
+            const existing = this.quotations.get(q.id);
+            const merged: Quotation = {
+              ...(existing || {}),
+              ...q,
+              is_paid: q.is_paid !== undefined && q.is_paid !== null ? Boolean(q.is_paid) : (existing?.is_paid ?? false),
+              paid_at: q.paid_at !== undefined && q.paid_at !== null ? q.paid_at : (existing?.paid_at ?? null),
+              payment_method: q.payment_method !== undefined && q.payment_method !== null ? q.payment_method : (existing?.payment_method ?? null),
+              payment_notes: q.payment_notes !== undefined && q.payment_notes !== null ? q.payment_notes : (existing?.payment_notes ?? null),
+            };
+            this.quotations.set(q.id, merged);
             if (q.customer) {
               this.customers.set(q.customer.id, q.customer as Customer);
             }
@@ -1032,7 +1045,7 @@ class QuoteFlowStore {
             }
           }
 
-          let results = data as Quotation[];
+          let results = data.map((q) => this.quotations.get(q.id) as Quotation);
           if (filters?.search) {
             const s = filters.search.toLowerCase();
             results = results.filter((item) => {
@@ -1095,7 +1108,16 @@ class QuoteFlowStore {
           .maybeSingle();
 
         if (!error && data) {
-          this.quotations.set(data.id, data as Quotation);
+          const existing = this.quotations.get(data.id);
+          const merged: Quotation = {
+            ...(existing || {}),
+            ...data,
+            is_paid: data.is_paid !== undefined && data.is_paid !== null ? Boolean(data.is_paid) : (existing?.is_paid ?? false),
+            paid_at: data.paid_at !== undefined && data.paid_at !== null ? data.paid_at : (existing?.paid_at ?? null),
+            payment_method: data.payment_method !== undefined && data.payment_method !== null ? data.payment_method : (existing?.payment_method ?? null),
+            payment_notes: data.payment_notes !== undefined && data.payment_notes !== null ? data.payment_notes : (existing?.payment_notes ?? null),
+          };
+          this.quotations.set(data.id, merged);
           if (data.customer) {
             this.customers.set(data.customer.id, data.customer as Customer);
           }
@@ -1989,6 +2011,83 @@ class QuoteFlowStore {
       items: quote.items,
       customer: quote.customer,
       organization: quote.organization,
+    };
+  }
+
+  // --- PAYMENT WORKFLOW (PAID / UNPAID STATUS TRACKING) ---
+  public async updateQuotationPayment(
+    id: string,
+    paymentData: {
+      is_paid: boolean;
+      paid_at?: string | null;
+      payment_method?: string | null;
+      payment_notes?: string | null;
+    },
+    orgId?: string
+  ): Promise<Quotation> {
+    let quote = this.quotations.get(id);
+    if (!quote) {
+      quote = (await this.getQuotationById(id, orgId || DEFAULT_ORG_ID)) || undefined;
+    }
+    if (!quote) throw new Error('Quotation not found');
+
+    if (orgId && quote.organization_id !== orgId) {
+      throw new Error('Unauthorized to modify quotation from another organization');
+    }
+
+    const now = new Date().toISOString();
+    const paidAt = paymentData.is_paid
+      ? (paymentData.paid_at || quote.paid_at || now)
+      : null;
+
+    quote.is_paid = paymentData.is_paid;
+    quote.paid_at = paidAt;
+    quote.payment_method = paymentData.is_paid ? (paymentData.payment_method ?? quote.payment_method ?? null) : null;
+    quote.payment_notes = paymentData.is_paid ? (paymentData.payment_notes ?? quote.payment_notes ?? null) : null;
+    quote.updated_at = now;
+
+    this.quotations.set(id, quote);
+
+    // Audit Log Event
+    this.logEvent(
+      quote.organization_id,
+      id,
+      'USER',
+      paymentData.is_paid ? 'MARKED_PAID' : 'MARKED_UNPAID',
+      {
+        is_paid: quote.is_paid,
+        paid_at: quote.paid_at,
+        payment_method: quote.payment_method,
+        payment_notes: quote.payment_notes,
+      }
+    );
+
+    // Sync to Supabase
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('quotations')
+          .update({
+            is_paid: quote.is_paid,
+            paid_at: quote.paid_at,
+            payment_method: quote.payment_method,
+            payment_notes: quote.payment_notes,
+            updated_at: now,
+          })
+          .eq('id', id);
+      }
+    } catch (err) {
+      console.warn('Failed to sync quotation payment update to Supabase:', err);
+    }
+
+    return {
+      ...quote,
+      items: this.quotationItems.get(id) || quote.items || [],
+      customer: this.customers.get(quote.customer_id) || quote.customer,
+      organization: this.organizations.get(quote.organization_id) || quote.organization,
+      signature: this.signatures.get(id) || quote.signature || null,
+      events: this.events.get(id) || quote.events || [],
     };
   }
 

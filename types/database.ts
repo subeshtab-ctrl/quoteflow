@@ -14,6 +14,13 @@ export type DiscountType = 'PERCENTAGE' | 'FIXED';
 export type ActorType = 'USER' | 'CUSTOMER' | 'SYSTEM';
 export type SignatureType = 'DRAWN' | 'TYPED';
 export type CurrencyCode = 'INR' | 'USD' | 'AED' | 'EUR' | 'GBP';
+export type PaymentMethod =
+  | 'BANK_TRANSFER'
+  | 'UPI'
+  | 'CASH'
+  | 'CHEQUE'
+  | 'CARD'
+  | 'OTHER';
 
 export interface Organization {
   id: string;
@@ -199,6 +206,12 @@ export interface Quotation {
   created_by?: string | null;
   created_at: string;
   updated_at: string;
+
+  // Payment Tracking
+  is_paid?: boolean;
+  paid_at?: string | null;
+  payment_method?: PaymentMethod | string | null;
+  payment_notes?: string | null;
 
   // Joined fields
   customer?: Customer;

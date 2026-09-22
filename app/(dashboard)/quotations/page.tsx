@@ -22,6 +22,8 @@ import {
 import { QuotationsFilterTabs } from '@/components/quotations/quotations-filter-tabs';
 import { QuotationDeleteButton } from '@/components/quotations/quotation-delete-button';
 import { QuotationInvoiceButton } from '@/components/quotations/quotation-invoice-button';
+import { QuotationPaymentButton } from '@/components/quotations/quotation-payment-button';
+import { ExportButton } from '@/components/export/export-button';
 
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
@@ -57,6 +59,7 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
           </div>
 
           <div className="flex items-center gap-3">
+            <ExportButton defaultDateFilter="THIS_MONTH" />
             <Link href="/quotations/new">
               <Button className="gap-2 shadow-md">
                 <PlusCircle className="h-4 w-4" />
@@ -129,7 +132,12 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
                           {formatCurrency(quote.grand_total, quote.currency)}
                         </td>
                         <td className="py-4 px-4">
-                          <StatusBadge status={quote.status} />
+                          <div className="flex flex-col gap-1 items-start">
+                            <StatusBadge status={quote.status} />
+                            {quote.status === 'APPROVED' && (
+                              <QuotationPaymentButton quotation={quote} variant="badge" />
+                            )}
+                          </div>
                         </td>
                         <td className="py-4 px-4 text-center">
                           <span

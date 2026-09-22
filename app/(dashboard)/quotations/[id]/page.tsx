@@ -27,6 +27,7 @@ import {
   History,
 } from 'lucide-react';
 import { QuotationActionButtons } from '@/components/quotations/quotation-action-buttons';
+import { QuotationPaymentButton } from '@/components/quotations/quotation-payment-button';
 
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
@@ -106,6 +107,35 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 This quotation has been officially approved. You can generate a Commercial Tax Invoice or download the PDF below.
               </p>
             )}
+
+            {/* Payment Received or Pending Status Row */}
+            <div className="pt-3 border-t border-emerald-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                {quotation.is_paid ? (
+                  <>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black tracking-wider uppercase shadow-xs">
+                      ✓ PAID
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-800">
+                      Payment received
+                      {quotation.paid_at ? ` on ${formatDate(quotation.paid_at)}` : ''}
+                      {quotation.payment_method ? ` via ${quotation.payment_method}` : ''}
+                      {quotation.payment_notes ? ` (${quotation.payment_notes})` : ''}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold uppercase">
+                      Payment Pending (UNPAID)
+                    </span>
+                    <span className="text-xs text-slate-600">
+                      Outstanding balance: {grandTotalFormatted}
+                    </span>
+                  </>
+                )}
+              </div>
+              <QuotationPaymentButton quotation={quotation} variant="button" />
+            </div>
           </div>
         )}
 

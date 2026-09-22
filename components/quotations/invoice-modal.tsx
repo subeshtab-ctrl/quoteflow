@@ -22,7 +22,9 @@ import {
   CreditCard,
   Building2,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
+import { PaymentModal } from '@/components/quotations/payment-modal';
 
 interface InvoiceItem {
   id: string;
@@ -64,6 +66,20 @@ export function InvoiceModal({
   const [poNumber, setPoNumber] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('Net 30 Days');
   const [paymentMode, setPaymentMode] = useState('Electronic Funds Transfer / UPI');
+
+  // Payment Tracking State
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isPaidState, setIsPaidState] = useState(Boolean(quotation.is_paid));
+  const [paidAtState, setPaidAtState] = useState(quotation.paid_at || null);
+  const [paymentMethodState, setPaymentMethodState] = useState(quotation.payment_method || null);
+  const [paymentNotesState, setPaymentNotesState] = useState(quotation.payment_notes || null);
+
+  useEffect(() => {
+    setIsPaidState(Boolean(quotation.is_paid));
+    setPaidAtState(quotation.paid_at || null);
+    setPaymentMethodState(quotation.payment_method || null);
+    setPaymentNotesState(quotation.payment_notes || null);
+  }, [quotation]);
 
   // Customer override details
   const [clientName, setClientName] = useState(
@@ -239,6 +255,7 @@ export function InvoiceModal({
   };
 
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={onClose}
@@ -281,6 +298,21 @@ export function InvoiceModal({
           <div className="flex items-center gap-2 flex-wrap">
             {activeTab === 'preview' ? (
               <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsPaymentModalOpen(true)}
+                  className={`gap-1.5 text-xs font-bold shadow-sm ${
+                    isPaidState
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900'
+                      : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900'
+                  }`}
+                  title={isPaidState ? 'Payment received - click to edit' : 'Payment pending - click to mark as paid'}
+                >
+                  <CreditCard className="h-3.5 w-3.5" />
+                  <span>{isPaidState ? 'Paid' : 'Mark as Paid'}</span>
+                </Button>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -668,11 +700,40 @@ export function InvoiceModal({
                 <p className="text-xs text-slate-500">
                   Due Date: <span className="font-semibold text-slate-800">{formatDate(dueDate)}</span>
                 </p>
-                <div className="pt-1">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
-                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                    <span>Approved & Billed</span>
-                  </span>
+                <div className="pt-1 flex flex-col items-start sm:items-end gap-1">
+                  {isPaidState ? (
+                    <div className="flex flex-col items-start sm:items-end gap-1">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 text-white px-3 py-1 text-xs font-black tracking-wider shadow-sm uppercase">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>PAID IN FULL</span>
+                      </span>
+                      {paidAtState && (
+                        <span className="text-[11px] text-emerald-700 font-bold">
+                          Paid on {formatDate(paidAtState)}
+                          {paymentMethodState ? ` via ${paymentMethodState}` : ''}
+                        </span>
+                      )}
+                      {paymentNotesState && (
+                        <span className="text-[10px] text-slate-500 italic max-w-xs truncate">
+                          Ref: {paymentNotesState}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-start sm:items-end gap-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-800 border border-amber-300">
+                        <AlertCircle className="h-3 w-3 text-amber-600" />
+                        <span>UNPAID • Payment Pending</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsPaymentModalOpen(true)}
+                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold underline print:hidden"
+                      >
+                        Click to record payment
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -796,5 +857,24 @@ export function InvoiceModal({
         )}
       </div>
     </Modal>
+
+    <PaymentModal
+      isOpen={isPaymentModalOpen}
+      onClose={() => setIsPaymentModalOpen(false)}
+      quotation={{
+        ...quotation,
+        is_paid: isPaidState,
+        paid_at: paidAtState,
+        payment_method: paymentMethodState,
+        payment_notes: paymentNotesState,
+      }}
+      onPaymentUpdated={(updated) => {
+        setIsPaidState(Boolean(updated.is_paid));
+        setPaidAtState(updated.paid_at || null);
+        setPaymentMethodState(updated.payment_method || null);
+        setPaymentNotesState(updated.payment_notes || null);
+      }}
+    />
+    </>
   );
 }

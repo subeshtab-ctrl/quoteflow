@@ -102,6 +102,16 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.setFontSize(7.5);
   doc.text(status, pageWidth - margin - 16, 44.2, { align: 'center' });
 
+  // Paid Badge (if approved and paid)
+  if (status === 'APPROVED' && quotation.is_paid) {
+    doc.setFillColor(16, 185, 129); // Emerald 500
+    doc.roundedRect(pageWidth - margin - 60, 40, 25, 6, 1.5, 1.5, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.text('✓ PAID', pageWidth - margin - 47.5, 44.2, { align: 'center' });
+  }
+
   // 4. Client Info Box (Bill To)
   const clientBoxY = 52;
   doc.setFillColor(248, 250, 252); // slate-50

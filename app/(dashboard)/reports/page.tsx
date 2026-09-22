@@ -5,7 +5,8 @@ import { DashboardLayout } from '@/components/dashboard/dashboard-layout';
 import { store } from '@/lib/supabase/data-store';
 import { formatCurrency } from '@/lib/quotations/calculations';
 import { DashboardCharts } from '@/components/dashboard/dashboard-charts';
-import { BarChart3, TrendingUp, CheckCircle2, Clock, XCircle, Award } from 'lucide-react';
+import { BarChart3, TrendingUp, CheckCircle2, Clock, XCircle, Award, Download, FileSpreadsheet, FileText } from 'lucide-react';
+import { ExportButton } from '@/components/export/export-button';
 
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
@@ -23,13 +24,19 @@ export default async function ReportsPage() {
   return (
     <DashboardLayout>
       <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
-            Reports & Analytics
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Analyze quote-to-close metrics, customer velocity, and deal conversion rates.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+              Reports & Analytics
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Analyze quote-to-close metrics, customer velocity, and deal conversion rates.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <ExportButton label="Export Financial Reports" variant="primary" defaultDateFilter="THIS_MONTH" />
+          </div>
         </div>
 
         {/* Top KPI Cards */}
@@ -89,6 +96,29 @@ export default async function ReportsPage() {
             </div>
           </div>
           <DashboardCharts monthlyData={analytics.monthlyData} currency={currency} />
+        </div>
+
+        {/* Financial Export & Billing Statement Hub */}
+        <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-indigo-50/60 via-white to-slate-50 p-6 shadow-sm">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="space-y-1.5 max-w-xl">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
+                <h3 className="font-bold text-base text-slate-900">
+                  Export Financial Statements & Quotation Records
+                </h3>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Download spreadsheet (CSV/Excel) or executive summary PDF statements. Filter by monthly billing cycles (This Month, Last Month, Quarter), custom date ranges, approval status, and paid vs. unpaid remittance status.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <ExportButton label="Export This Month" variant="outline" defaultDateFilter="THIS_MONTH" />
+              <ExportButton label="Custom Date Range" variant="primary" defaultDateFilter="CUSTOM" />
+              <ExportButton label="All Records" variant="secondary" defaultDateFilter="ALL" />
+            </div>
+          </div>
         </div>
       </div>
     </DashboardLayout>
