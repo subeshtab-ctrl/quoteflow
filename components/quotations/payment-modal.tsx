@@ -44,7 +44,9 @@ export function PaymentModal({
 }: PaymentModalProps) {
   const router = useRouter();
 
-  const [isPaid, setIsPaid] = useState<boolean>(Boolean(quotation.is_paid));
+  const [isPaid, setIsPaid] = useState<boolean>(
+    quotation.is_paid !== undefined ? Boolean(quotation.is_paid) : true
+  );
   const [paidAt, setPaidAt] = useState<string>(
     quotation.paid_at
       ? quotation.paid_at.split('T')[0]
@@ -60,15 +62,18 @@ export function PaymentModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsPaid(Boolean(quotation.is_paid));
-    setPaidAt(
-      quotation.paid_at
-        ? quotation.paid_at.split('T')[0]
-        : new Date().toISOString().split('T')[0]
-    );
-    setPaymentMethod(quotation.payment_method || 'BANK_TRANSFER');
-    setPaymentNotes(quotation.payment_notes || '');
-    setError(null);
+    if (isOpen) {
+      // Default to true so opening modal immediately records as paid unless explicitly changed
+      setIsPaid(quotation.is_paid ? true : true);
+      setPaidAt(
+        quotation.paid_at
+          ? quotation.paid_at.split('T')[0]
+          : new Date().toISOString().split('T')[0]
+      );
+      setPaymentMethod(quotation.payment_method || 'BANK_TRANSFER');
+      setPaymentNotes(quotation.payment_notes || '');
+      setError(null);
+    }
   }, [quotation, isOpen]);
 
   const handleSavePayment = async () => {
@@ -98,6 +103,13 @@ export function PaymentModal({
 
       router.refresh();
       onClose();
+
+      // Ensure mobile browser reloads with fresh server state
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+      }, 250);
     } catch (err: any) {
       setError(err.message || 'An error occurred while saving payment details');
     } finally {
@@ -133,6 +145,12 @@ export function PaymentModal({
 
       router.refresh();
       onClose();
+
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+      }, 250);
     } catch (err: any) {
       setError(err.message || 'An error occurred');
     } finally {

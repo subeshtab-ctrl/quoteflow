@@ -31,6 +31,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     gst_vat_number: '29ABCDE1234F1Z5',
     brand_color: '#4f46e5',
     invoice_footer: 'Thank you for choosing us!',
+    logo_url: null,
   };
 
   const customer = quotation.customer || {
@@ -49,11 +50,31 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.setFillColor(79, 70, 229); // Brand Indigo
   doc.rect(0, 0, pageWidth, 5, 'F');
 
-  // 2. Company Name & Title
+  // 2. Company Logo, Name & Title
+  let compY = 18;
+  if (org.logo_url) {
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const cleanUrl = org.logo_url.startsWith('/') ? org.logo_url.substring(1) : org.logo_url;
+      const logoPath = path.join(process.cwd(), 'public', cleanUrl);
+      if (fs.existsSync(logoPath)) {
+        const imgBuffer = fs.readFileSync(logoPath);
+        const ext = logoPath.endsWith('.png') ? 'PNG' : 'JPEG';
+        const base64Img = `data:image/${ext.toLowerCase()};base64,${imgBuffer.toString('base64')}`;
+        doc.addImage(base64Img, ext, margin, compY - 4, 28, 12);
+        compY += 14;
+      }
+    } catch (e) {
+      // Graceful fallback to text header
+    }
+  }
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
+  doc.setFontSize(16);
   doc.setTextColor(30, 41, 59); // Slate-800
-  doc.text(org.name || 'QuoteFlow', margin, 18);
+  doc.text(org.name || 'QuoteFlow', margin, compY);
+  compY += 5;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
@@ -65,7 +86,6 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     org.gst_vat_number ? `Tax / GST: ${org.gst_vat_number}` : '',
   ].filter(Boolean) as string[];
 
-  let compY = 23;
   compLines.forEach((line: string) => {
     doc.text(line, margin, compY);
     compY += 4;

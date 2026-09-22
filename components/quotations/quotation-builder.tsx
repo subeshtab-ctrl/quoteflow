@@ -786,10 +786,17 @@ export function QuotationBuilder({
         <div className="lg:col-span-5 sticky top-20 space-y-4">
           <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-lg space-y-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <div>
+              <div className="space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                   Live Preview
                 </span>
+                {organization?.logo_url && (
+                  <img
+                    src={organization.logo_url}
+                    alt={organization.name || 'Company Logo'}
+                    className="h-9 w-auto max-w-[160px] object-contain my-1 rounded"
+                  />
+                )}
                 <h4 className="text-sm font-bold text-slate-900 mt-1">{organization.name}</h4>
               </div>
               <div className="text-right">

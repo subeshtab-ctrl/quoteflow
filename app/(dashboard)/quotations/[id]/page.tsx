@@ -87,6 +87,19 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
           />
         </div>
 
+        {/* Draft Notice Banner */}
+        {quotation.status === 'DRAFT' && (
+          <div className="rounded-2xl bg-amber-50 border border-amber-200 p-5 shadow-sm space-y-1 text-amber-900">
+            <div className="flex items-center gap-2 font-bold text-sm">
+              <Clock className="h-5 w-5 text-amber-600" />
+              <span>Draft Mode • Customer Approval Link Inactive</span>
+            </div>
+            <p className="text-xs text-amber-700 leading-relaxed">
+              This quotation is currently saved as a draft. Customer approval links and online signing are hidden. Click <strong>&ldquo;Save &amp; Generate Approval Link&rdquo;</strong> above to issue this quotation and generate approval links for your client.
+            </p>
+          </div>
+        )}
+
         {/* Rejection / Approval Banner */}
         {quotation.status === 'APPROVED' && (
           <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-5 shadow-sm space-y-2">
@@ -166,7 +179,14 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
           <div className="lg:col-span-8 rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-sm space-y-8">
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between gap-6 pb-6 border-b border-slate-100">
-              <div className="space-y-1">
+              <div className="space-y-2">
+                {org?.logo_url && (
+                  <img
+                    src={org.logo_url}
+                    alt={org.name || 'Company Logo'}
+                    className="h-12 sm:h-14 w-auto max-w-[220px] object-contain rounded mb-1"
+                  />
+                )}
                 <h3 className="text-xl font-bold text-slate-900">{org?.name}</h3>
                 <p className="text-xs text-slate-500 leading-relaxed">
                   {org?.address_line1}, {org?.city}, {org?.state} {org?.postal_code}

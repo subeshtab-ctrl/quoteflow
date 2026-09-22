@@ -12,6 +12,8 @@ import {
 import { calculateQuotationTotals } from '@/lib/quotations/calculations';
 import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quotations/tokens';
 import { createAdminClient } from '@/lib/supabase/service-role';
+import fs from 'fs';
+import path from 'path';
 
 // Default Demo Organization
 const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -26,6 +28,40 @@ class QuoteFlowStore {
   private views: Map<string, QuotationView[]> = new Map();
   private events: Map<string, QuotationEvent[]> = new Map();
   private notifications: Map<string, Notification> = new Map();
+
+  private getPaymentsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {}
+    }
+    return path.join(dir, 'payments.json');
+  }
+
+  private loadPaymentsFromFile(): Record<string, { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }> {
+    try {
+      const p = this.getPaymentsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {
+      // Fallback
+    }
+    return {};
+  }
+
+  private savePaymentToFile(quotationId: string, data: { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }): void {
+    try {
+      const all = this.loadPaymentsFromFile();
+      all[quotationId] = data;
+      const p = this.getPaymentsFilePath();
+      fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+    } catch {
+      // Fallback
+    }
+  }
 
   constructor() {
     const hasSupabase =
@@ -52,6 +88,7 @@ class QuoteFlowStore {
         current_quotation_counter: 0,
         default_terms: '1. Quotation valid for 30 days.\n2. Payment terms as agreed.',
         invoice_footer: 'Thank you for your business!',
+        logo_url: '/uploads/logo-1790080934630.png',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -63,6 +100,7 @@ class QuoteFlowStore {
     const demoOrg: Organization = {
       id: DEFAULT_ORG_ID,
       name: 'My Company',
+      logo_url: '/uploads/logo-1790080934630.png',
       slug: 'my-company',
       business_type: 'Services & Products',
       email: 'contact@mycompany.com',
@@ -562,6 +600,9 @@ class QuoteFlowStore {
           } else if (!data.invoice_footer) {
             data.invoice_footer = `Thank you for partnering with ${compName}.`;
           }
+          if (!data.logo_url) {
+            data.logo_url = '/uploads/logo-1790080934630.png';
+          }
           this.organizations.set(data.id, data as Organization);
           return data as Organization;
         }
@@ -574,6 +615,9 @@ class QuoteFlowStore {
       const compName = cached.name || 'us';
       if (cached.invoice_footer && cached.invoice_footer.includes('The Mining Future')) {
         cached.invoice_footer = `Thank you for partnering with ${compName}.`;
+      }
+      if (!cached.logo_url) {
+        cached.logo_url = '/uploads/logo-1790080934630.png';
       }
       return cached;
     }
@@ -591,9 +635,15 @@ class QuoteFlowStore {
     if (cleanFooter && cleanFooter.includes('The Mining Future')) {
       cleanFooter = `Thank you for partnering with ${compName}.`;
     }
+    const logoUrl =
+      data.logo_url !== undefined && data.logo_url !== null && data.logo_url !== ''
+        ? data.logo_url
+        : org.logo_url || null;
+
     const updated: Organization = {
       ...org,
       ...data,
+      logo_url: logoUrl,
       invoice_footer: cleanFooter,
       updated_at: new Date().toISOString(),
     };
@@ -607,6 +657,8 @@ class QuoteFlowStore {
           .upsert({
             ...updated,
             ...data,
+            logo_url: logoUrl,
+            invoice_footer: cleanFooter,
             id: orgId,
             updated_at: new Date().toISOString(),
           })
@@ -1047,15 +1099,68 @@ class QuoteFlowStore {
             }
           }
 
+          const filePayments = this.loadPaymentsFromFile();
+
+          // Fetch payment events from Supabase to ensure accurate paid status across all clients
+          const paymentMap: Record<string, { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }> = {};
+          try {
+            const { data: payEvents } = await supabase
+              .from('quotation_events')
+              .select('quotation_id, event_type, metadata, created_at')
+              .eq('organization_id', orgId)
+              .in('event_type', ['MARKED_PAID', 'MARKED_UNPAID'])
+              .order('created_at', { ascending: true });
+
+            if (payEvents) {
+              for (const pe of payEvents) {
+                if (pe.event_type === 'MARKED_PAID') {
+                  paymentMap[pe.quotation_id] = {
+                    is_paid: true,
+                    paid_at: pe.metadata?.paid_at || pe.created_at,
+                    payment_method: pe.metadata?.payment_method || null,
+                    payment_notes: pe.metadata?.payment_notes || null,
+                  };
+                } else if (pe.event_type === 'MARKED_UNPAID') {
+                  paymentMap[pe.quotation_id] = {
+                    is_paid: false,
+                    paid_at: null,
+                    payment_method: null,
+                    payment_notes: null,
+                  };
+                }
+              }
+            }
+          } catch {}
+
           for (const q of data) {
             const existing = this.quotations.get(q.id);
+            const filePay = filePayments[q.id];
+            const eventPay = paymentMap[q.id];
+
+            let isPaid = q.is_paid !== undefined && q.is_paid !== null ? Boolean(q.is_paid) : (existing?.is_paid ?? false);
+            let paidAt = q.paid_at || existing?.paid_at || null;
+            let paymentMethod = q.payment_method || existing?.payment_method || null;
+            let paymentNotes = q.payment_notes || existing?.payment_notes || null;
+
+            if (eventPay !== undefined) {
+              isPaid = eventPay.is_paid;
+              paidAt = eventPay.paid_at || null;
+              paymentMethod = eventPay.payment_method || null;
+              paymentNotes = eventPay.payment_notes || null;
+            } else if (filePay !== undefined) {
+              isPaid = filePay.is_paid;
+              paidAt = filePay.paid_at || null;
+              paymentMethod = filePay.payment_method || null;
+              paymentNotes = filePay.payment_notes || null;
+            }
+
             const merged: Quotation = {
               ...(existing || {}),
               ...q,
-              is_paid: q.is_paid !== undefined && q.is_paid !== null ? Boolean(q.is_paid) : (existing?.is_paid ?? false),
-              paid_at: q.paid_at !== undefined && q.paid_at !== null ? q.paid_at : (existing?.paid_at ?? null),
-              payment_method: q.payment_method !== undefined && q.payment_method !== null ? q.payment_method : (existing?.payment_method ?? null),
-              payment_notes: q.payment_notes !== undefined && q.payment_notes !== null ? q.payment_notes : (existing?.payment_notes ?? null),
+              is_paid: isPaid,
+              paid_at: paidAt,
+              payment_method: paymentMethod,
+              payment_notes: paymentNotes,
             };
             this.quotations.set(q.id, merged);
             if (q.customer) {
@@ -1130,13 +1235,72 @@ class QuoteFlowStore {
 
         if (!error && data) {
           const existing = this.quotations.get(data.id);
+          const filePayments = this.loadPaymentsFromFile();
+          const filePayment = filePayments[data.id];
+
+          // Fetch signature, events, views from Supabase first
+          const [
+            { data: sigData },
+            { data: eventsData },
+            { data: viewsData }
+          ] = await Promise.all([
+            supabase
+              .from('quotation_signatures')
+              .select('*')
+              .eq('quotation_id', data.id)
+              .order('signed_at', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            supabase
+              .from('quotation_events')
+              .select('*')
+              .eq('quotation_id', data.id)
+              .order('created_at', { ascending: false }),
+            supabase
+              .from('quotation_views')
+              .select('*')
+              .eq('quotation_id', data.id),
+          ]);
+
+          if (sigData) {
+            this.signatures.set(data.id, sigData as QuotationSignature);
+          }
+          if (eventsData && eventsData.length > 0) {
+            this.events.set(data.id, eventsData as QuotationEvent[]);
+          }
+          if (viewsData && viewsData.length > 0) {
+            this.views.set(data.id, viewsData as QuotationView[]);
+          }
+
+          // Check if there is any payment event in eventsData
+          const latestPaymentEvent = eventsData?.find(
+            (e: any) => e.event_type === 'MARKED_PAID' || e.event_type === 'MARKED_UNPAID'
+          );
+
+          let isPaid = data.is_paid !== undefined && data.is_paid !== null ? Boolean(data.is_paid) : (existing?.is_paid ?? false);
+          let paidAt = data.paid_at || existing?.paid_at || null;
+          let paymentMethod = data.payment_method || existing?.payment_method || null;
+          let paymentNotes = data.payment_notes || existing?.payment_notes || null;
+
+          if (latestPaymentEvent) {
+            isPaid = latestPaymentEvent.event_type === 'MARKED_PAID';
+            paidAt = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.paid_at || latestPaymentEvent.created_at) : null;
+            paymentMethod = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_method || null) : null;
+            paymentNotes = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_notes || null) : null;
+          } else if (filePayment !== undefined) {
+            isPaid = filePayment.is_paid;
+            paidAt = filePayment.paid_at || null;
+            paymentMethod = filePayment.payment_method || null;
+            paymentNotes = filePayment.payment_notes || null;
+          }
+
           const merged: Quotation = {
             ...(existing || {}),
             ...data,
-            is_paid: data.is_paid !== undefined && data.is_paid !== null ? Boolean(data.is_paid) : (existing?.is_paid ?? false),
-            paid_at: data.paid_at !== undefined && data.paid_at !== null ? data.paid_at : (existing?.paid_at ?? null),
-            payment_method: data.payment_method !== undefined && data.payment_method !== null ? data.payment_method : (existing?.payment_method ?? null),
-            payment_notes: data.payment_notes !== undefined && data.payment_notes !== null ? data.payment_notes : (existing?.payment_notes ?? null),
+            is_paid: isPaid,
+            paid_at: paidAt,
+            payment_method: paymentMethod,
+            payment_notes: paymentNotes,
           };
           this.quotations.set(data.id, merged);
           if (data.customer) {
@@ -1146,43 +1310,11 @@ class QuoteFlowStore {
             this.quotationItems.set(data.id, data.items as QuotationItem[]);
           }
 
-          // Fetch signature from Supabase
-          const { data: sigData } = await supabase
-            .from('quotation_signatures')
-            .select('*')
-            .eq('quotation_id', data.id)
-            .order('signed_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (sigData) {
-            this.signatures.set(data.id, sigData as QuotationSignature);
-          }
-
-          // Fetch events from Supabase
-          const { data: eventsData } = await supabase
-            .from('quotation_events')
-            .select('*')
-            .eq('quotation_id', data.id)
-            .order('created_at', { ascending: false });
-
-          if (eventsData && eventsData.length > 0) {
-            this.events.set(data.id, eventsData as QuotationEvent[]);
-          }
-
-          // Fetch views from Supabase
-          const { data: viewsData } = await supabase
-            .from('quotation_views')
-            .select('*')
-            .eq('quotation_id', data.id);
-
-          if (viewsData && viewsData.length > 0) {
-            this.views.set(data.id, viewsData as QuotationView[]);
-          }
+          const org = (await this.getOrganization(data.organization_id)) || this.organizations.get(data.organization_id);
 
           return {
-            ...data,
-            organization: this.organizations.get(data.organization_id),
+            ...merged,
+            organization: org,
             signature: (sigData as QuotationSignature) || this.signatures.get(data.id) || null,
             events: (this.events.get(data.id) || []).sort(
               (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -1198,9 +1330,11 @@ class QuoteFlowStore {
     const quote = this.quotations.get(id);
     if (!quote || quote.organization_id !== orgId) return null;
 
+    const org = (await this.getOrganization(quote.organization_id)) || this.organizations.get(quote.organization_id);
+
     return {
       ...quote,
-      organization: this.organizations.get(quote.organization_id),
+      organization: org,
       customer: this.customers.get(quote.customer_id),
       items: (this.quotationItems.get(quote.id) || []).sort((a, b) => a.sort_order - b.sort_order),
       signature: this.signatures.get(quote.id) || null,
@@ -1224,7 +1358,67 @@ class QuoteFlowStore {
           .maybeSingle();
 
         if (!error && data) {
-          this.quotations.set(data.id, data as Quotation);
+          const existing = this.quotations.get(data.id);
+          const filePayments = this.loadPaymentsFromFile();
+          const filePayment = filePayments[data.id];
+
+          // Fetch signatures and events
+          const [
+            { data: sigData },
+            { data: eventsData },
+          ] = await Promise.all([
+            supabase
+              .from('quotation_signatures')
+              .select('*')
+              .eq('quotation_id', data.id)
+              .order('signed_at', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            supabase
+              .from('quotation_events')
+              .select('*')
+              .eq('quotation_id', data.id)
+              .order('created_at', { ascending: false }),
+          ]);
+
+          if (sigData) {
+            this.signatures.set(data.id, sigData as QuotationSignature);
+          }
+          if (eventsData && eventsData.length > 0) {
+            this.events.set(data.id, eventsData as QuotationEvent[]);
+          }
+
+          const latestPaymentEvent = eventsData?.find(
+            (e: any) => e.event_type === 'MARKED_PAID' || e.event_type === 'MARKED_UNPAID'
+          );
+
+          let isPaid = data.is_paid !== undefined && data.is_paid !== null ? Boolean(data.is_paid) : (existing?.is_paid ?? false);
+          let paidAt = data.paid_at || existing?.paid_at || null;
+          let paymentMethod = data.payment_method || existing?.payment_method || null;
+          let paymentNotes = data.payment_notes || existing?.payment_notes || null;
+
+          if (latestPaymentEvent) {
+            isPaid = latestPaymentEvent.event_type === 'MARKED_PAID';
+            paidAt = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.paid_at || latestPaymentEvent.created_at) : null;
+            paymentMethod = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_method || null) : null;
+            paymentNotes = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_notes || null) : null;
+          } else if (filePayment !== undefined) {
+            isPaid = filePayment.is_paid;
+            paidAt = filePayment.paid_at || null;
+            paymentMethod = filePayment.payment_method || null;
+            paymentNotes = filePayment.payment_notes || null;
+          }
+
+          const merged: Quotation = {
+            ...(existing || {}),
+            ...data,
+            is_paid: isPaid,
+            paid_at: paidAt,
+            payment_method: paymentMethod,
+            payment_notes: paymentNotes,
+          };
+
+          this.quotations.set(data.id, merged);
           if (data.customer) {
             this.customers.set(data.customer.id, data.customer as Customer);
           }
@@ -1232,22 +1426,11 @@ class QuoteFlowStore {
             this.quotationItems.set(data.id, data.items as QuotationItem[]);
           }
 
-          // Fetch signature from Supabase
-          const { data: sigData } = await supabase
-            .from('quotation_signatures')
-            .select('*')
-            .eq('quotation_id', data.id)
-            .order('signed_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (sigData) {
-            this.signatures.set(data.id, sigData as QuotationSignature);
-          }
+          const org = (await this.getOrganization(data.organization_id)) || this.organizations.get(data.organization_id);
 
           return {
-            ...data,
-            organization: this.organizations.get(data.organization_id),
+            ...merged,
+            organization: org,
             signature: (sigData as QuotationSignature) || this.signatures.get(data.id) || null,
           } as Quotation;
         }
@@ -1263,9 +1446,11 @@ class QuoteFlowStore {
 
     if (!quote) return null;
 
+    const org = (await this.getOrganization(quote.organization_id)) || this.organizations.get(quote.organization_id);
+
     return {
       ...quote,
-      organization: this.organizations.get(quote.organization_id),
+      organization: org,
       customer: this.customers.get(quote.customer_id),
       items: (this.quotationItems.get(quote.id) || []).sort((a, b) => a.sort_order - b.sort_order),
       signature: this.signatures.get(quote.id) || null,
@@ -2069,6 +2254,14 @@ class QuoteFlowStore {
 
     this.quotations.set(id, quote);
 
+    // Save to local file storage for rock-solid persistence
+    this.savePaymentToFile(id, {
+      is_paid: quote.is_paid,
+      paid_at: quote.paid_at,
+      payment_method: quote.payment_method,
+      payment_notes: quote.payment_notes,
+    });
+
     // Audit Log Event
     this.logEvent(
       quote.organization_id,
@@ -2087,13 +2280,28 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        // Persist payment state in quotation_events table in Supabase
+        await supabase
+          .from('quotation_events')
+          .insert({
+            organization_id: quote.organization_id,
+            quotation_id: id,
+            actor_type: 'USER',
+            actor_name: 'Business User',
+            event_type: paymentData.is_paid ? 'MARKED_PAID' : 'MARKED_UNPAID',
+            metadata: {
+              is_paid: quote.is_paid,
+              paid_at: quote.paid_at,
+              payment_method: quote.payment_method,
+              payment_notes: quote.payment_notes,
+            },
+            created_at: now,
+          });
+
+        // Touch quotation updated_at in Supabase
         await supabase
           .from('quotations')
           .update({
-            is_paid: quote.is_paid,
-            paid_at: quote.paid_at,
-            payment_method: quote.payment_method,
-            payment_notes: quote.payment_notes,
             updated_at: now,
           })
           .eq('id', id);

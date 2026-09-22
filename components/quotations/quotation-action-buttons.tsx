@@ -9,6 +9,7 @@ import {
   Share2,
   Copy,
   Check,
+  CheckCircle2,
   RotateCcw,
   Edit,
   ExternalLink,
@@ -45,7 +46,10 @@ export function QuotationActionButtons({
   customer,
 }: QuotationActionButtonsProps) {
   const router = useRouter();
+  const [currentQuotation, setCurrentQuotation] = useState<Quotation | undefined>(quotation);
+  const [currentStatus, setCurrentStatus] = useState<QuotationStatus>(status);
   const [copied, setCopied] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -53,7 +57,44 @@ export function QuotationActionButtons({
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
+  React.useEffect(() => {
+    setCurrentQuotation(quotation);
+    setCurrentStatus(status);
+  }, [quotation, status]);
+
+  const handlePaymentUpdated = (updatedQuote: Quotation) => {
+    setCurrentQuotation(updatedQuote);
+    if (updatedQuote.status) {
+      setCurrentStatus(updatedQuote.status);
+    }
+    router.refresh();
+  };
+
   const publicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/q/${publicToken}`;
+
+  const handleFinalizeDraft = async () => {
+    try {
+      setIsFinalizing(true);
+      const res = await fetch(`/api/quotations/${quotationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'SENT' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save and finalize quotation');
+
+      if (data.quotation) {
+        setCurrentQuotation(data.quotation);
+        setCurrentStatus(data.quotation.status);
+      }
+
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || 'Error finalizing quotation');
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   const handleMarkApproved = async () => {
     if (
@@ -73,6 +114,11 @@ export function QuotationActionButtons({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to mark quotation as approved');
+
+      if (data.quotation) {
+        setCurrentQuotation(data.quotation);
+        setCurrentStatus('APPROVED');
+      }
 
       router.refresh();
     } catch (err: any) {
@@ -172,9 +218,9 @@ export function QuotationActionButtons({
     <>
       <div className="flex items-center gap-2 flex-wrap">
         {/* Approved Quotation Actions: Invoice is ONLY shown when marked as PAID */}
-        {status === 'APPROVED' && quotation && (
+        {currentStatus === 'APPROVED' && currentQuotation && (
           <>
-            {quotation.is_paid ? (
+            {currentQuotation.is_paid ? (
               <>
                 <Button
                   variant="primary"
@@ -214,7 +260,7 @@ export function QuotationActionButtons({
         )}
 
         {/* Mark Approved Option for Unapproved Quotes */}
-        {status !== 'APPROVED' && (
+        {currentStatus !== 'APPROVED' && (
           <Button
             variant="outline"
             size="sm"
@@ -227,6 +273,21 @@ export function QuotationActionButtons({
           </Button>
         )}
 
+        {/* If Draft: Show Save & Generate Approval Link Button */}
+        {currentStatus === 'DRAFT' && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleFinalizeDraft}
+            isLoading={isFinalizing}
+            className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm font-semibold"
+            title="Finalize draft and generate official customer approval link"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            <span>Save & Generate Approval Link</span>
+          </Button>
+        )}
+
         {/* Change Rates / Edit */}
         <Link href={`/quotations/${quotationId}/edit`}>
           <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
@@ -235,41 +296,56 @@ export function QuotationActionButtons({
           </Button>
         </Link>
 
-        {/* Copy Public Link */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleCopyLink}
-          className="gap-1.5 text-xs shadow-sm"
-        >
-          {copied ? (
-            <>
-              <Check className="h-3.5 w-3.5 text-emerald-600" />
-              <span className="text-emerald-700 font-semibold">Copied!</span>
-            </>
-          ) : (
-            <>
-              <Copy className="h-3.5 w-3.5 text-slate-500" />
-              <span>Copy Link</span>
-            </>
-          )}
-        </Button>
+        {/* Customer Approval Links: ONLY generated & accessible after quotation is finalized/saved (status !== 'DRAFT') */}
+        {currentStatus !== 'DRAFT' && (
+          <>
+            {/* Copy Public Link */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyLink}
+              className="gap-1.5 text-xs shadow-sm"
+              title="Copy customer approval link"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  <span className="text-emerald-700 font-semibold">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5 text-slate-500" />
+                  <span>Copy Link</span>
+                </>
+              )}
+            </Button>
 
-        {/* WhatsApp Share */}
-        <a
-          href={`https://wa.me/?text=${whatsappMsg}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 shadow-sm"
-          >
-            <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
-            <span>WhatsApp</span>
-          </Button>
-        </a>
+            {/* WhatsApp Share */}
+            <a
+              href={`https://wa.me/?text=${whatsappMsg}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 shadow-sm"
+                title="Send customer approval link via WhatsApp"
+              >
+                <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                <span>WhatsApp</span>
+              </Button>
+            </a>
+
+            {/* Open Public Portal View in New Tab */}
+            <Link href={`/q/${publicToken}`} target="_blank">
+              <Button variant="primary" size="sm" className="gap-1.5 text-xs shadow-sm">
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>Client View</span>
+              </Button>
+            </Link>
+          </>
+        )}
 
         {/* Download PDF */}
         <Button
@@ -284,7 +360,7 @@ export function QuotationActionButtons({
         </Button>
 
         {/* Create Revision (for approved quotations) */}
-        {status === 'APPROVED' && (
+        {currentStatus === 'APPROVED' && (
           <Button
             variant="secondary"
             size="sm"
@@ -296,14 +372,6 @@ export function QuotationActionButtons({
             <span>Create Revision</span>
           </Button>
         )}
-
-        {/* Open Public Portal View in New Tab */}
-        <Link href={`/q/${publicToken}`} target="_blank">
-          <Button variant="primary" size="sm" className="gap-1.5 text-xs shadow-sm">
-            <ExternalLink className="h-3.5 w-3.5" />
-            <span>Client View</span>
-          </Button>
-        </Link>
 
         {/* Delete Quotation */}
         <Button
@@ -320,22 +388,23 @@ export function QuotationActionButtons({
       </div>
 
       {/* Commercial Tax Invoice Modal - Only accessible when quotation is marked as PAID */}
-      {quotation && quotation.is_paid && (
+      {currentQuotation && currentQuotation.is_paid && (
         <InvoiceModal
           isOpen={isInvoiceOpen}
           onClose={() => setIsInvoiceOpen(false)}
-          quotation={quotation}
+          quotation={currentQuotation}
           organization={organization}
           customer={customer}
         />
       )}
 
       {/* Payment Status Modal */}
-      {quotation && (
+      {currentQuotation && (
         <PaymentModal
           isOpen={isPaymentOpen}
           onClose={() => setIsPaymentOpen(false)}
-          quotation={quotation}
+          quotation={currentQuotation}
+          onPaymentUpdated={handlePaymentUpdated}
         />
       )}
     </>

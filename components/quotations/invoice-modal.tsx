@@ -665,11 +665,18 @@ export function InvoiceModal({
           >
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-6 border-b border-slate-200">
-              <div>
+              <div className="space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
                   Commercial Tax Invoice
                 </span>
-                <h2 className="text-2xl font-black text-slate-900 mt-2">
+                {organization?.logo_url && (
+                  <img
+                    src={organization.logo_url}
+                    alt={organization.name || 'Company Logo'}
+                    className="h-10 sm:h-12 w-auto max-w-[220px] object-contain rounded mt-2 mb-1"
+                  />
+                )}
+                <h2 className="text-2xl font-black text-slate-900 mt-1">
                   {organization?.name || 'QuoteFlow Organization'}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">

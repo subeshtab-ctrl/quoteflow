@@ -42,7 +42,8 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
     !isExpired &&
     !quotation.is_token_revoked &&
     quotation.status !== 'APPROVED' &&
-    quotation.status !== 'CANCELLED';
+    quotation.status !== 'CANCELLED' &&
+    quotation.status !== 'DRAFT';
 
   const handleDownloadPdf = async () => {
     try {
@@ -138,6 +139,18 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         </div>
 
         {/* Status Alerts */}
+        {quotation.status === 'DRAFT' && (
+          <div className="flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-200 p-4 text-amber-900 shadow-sm">
+            <Clock className="h-6 w-6 text-amber-600 shrink-0" />
+            <div>
+              <h4 className="font-bold text-sm">Draft Preview Mode</h4>
+              <p className="text-xs text-amber-700">
+                This quotation is currently saved in draft mode and has not yet been finalized or issued for customer approval. Customer sign-off is disabled.
+              </p>
+            </div>
+          </div>
+        )}
+
         {quotation.status === 'APPROVED' && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 shadow-sm animate-in fade-in">
             <div className="flex items-center gap-3">

@@ -130,4 +130,53 @@ describe('End-to-End Quotation Workflow & Audit Lifecycle', () => {
     expect(rejected.rejection_reason).toBe('Price too high');
     expect(rejected.rejection_comments).toContain('enterprise volume discount');
   });
+
+  it('correctly handles draft status gating and transitioning to sent', async () => {
+    // 1. Create a draft quotation
+    const draftQuote = await store.createQuotation({
+      customer_id: 'b0000000-0000-0000-0000-000000000001',
+      title: 'Draft Test Quotation',
+      issue_date: new Date().toISOString().split('T')[0],
+      valid_until: new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
+      currency: 'INR',
+      discount_type: 'PERCENTAGE',
+      discount_value: 0,
+      tax_rate: 18,
+      items: [
+        {
+          description: 'Initial scoping consultation',
+          quantity: 1,
+          unit: 'hrs',
+          unit_price: 5000,
+          discount_type: 'PERCENTAGE',
+          discount_value: 0,
+          tax_rate: 18,
+          sort_order: 0,
+        },
+      ],
+      status: 'DRAFT',
+    });
+
+    expect(draftQuote.status).toBe('DRAFT');
+
+    // 2. Transition from DRAFT to SENT (Save & Generate Approval Link)
+    const finalized = await store.updateQuotation(draftQuote.id, { status: 'SENT' });
+    expect(finalized.status).toBe('SENT');
+  });
+
+  it('preserves organization logo_url when updating settings', async () => {
+    const orgId = 'a0000000-0000-0000-0000-000000000001';
+    // Ensure initial logo exists
+    await store.updateOrganization(orgId, {
+      logo_url: '/uploads/logo-1790062784938.jpg',
+    });
+
+    // Update another setting without passing logo_url
+    const updated = await store.updateOrganization(orgId, {
+      phone: '+91 99999 88888',
+    });
+
+    expect(updated.logo_url).toBe('/uploads/logo-1790062784938.jpg');
+    expect(updated.phone).toBe('+91 99999 88888');
+  });
 });

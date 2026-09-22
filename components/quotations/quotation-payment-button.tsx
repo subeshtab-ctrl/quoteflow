@@ -17,13 +17,26 @@ export function QuotationPaymentButton({
   onUpdated,
 }: QuotationPaymentButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const isApproved = quotation.status === 'APPROVED';
+  const [currentQuotation, setCurrentQuotation] = useState<Quotation>(quotation);
+
+  React.useEffect(() => {
+    setCurrentQuotation(quotation);
+  }, [quotation]);
+
+  const isApproved = currentQuotation.status === 'APPROVED';
 
   if (!isApproved) {
     return null;
   }
 
-  const isPaid = Boolean(quotation.is_paid);
+  const isPaid = Boolean(currentQuotation.is_paid);
+
+  const handlePaymentUpdated = (updated: Quotation) => {
+    setCurrentQuotation(updated);
+    if (onUpdated) {
+      onUpdated(updated);
+    }
+  };
 
   return (
     <>
@@ -68,8 +81,8 @@ export function QuotationPaymentButton({
       <PaymentModal
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
-        quotation={quotation}
-        onPaymentUpdated={onUpdated}
+        quotation={currentQuotation}
+        onPaymentUpdated={handlePaymentUpdated}
       />
     </>
   );
