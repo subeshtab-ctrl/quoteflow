@@ -153,8 +153,10 @@ export default async function HomePage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 py-6 px-6 text-center text-xs text-slate-500">
-        <p>QuoteFlow SaaS Platform © 2026. Built with Next.js, Supabase, Tailwind CSS, and TypeScript.</p>
+      <footer className="border-t border-slate-800/80 py-6 px-6 text-center text-xs text-slate-400">
+        <p>
+          QuoteFlow SaaS Platform © 2026. Developed by <span className="font-semibold text-slate-300">SUBESH</span> using AI agent. Built with Next.js, Supabase, Tailwind CSS, and TypeScript.
+        </p>
       </footer>
     </div>
   );
