@@ -63,7 +63,22 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle();
 
-      if (!member?.organization_id) {
+      const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
+      const cleanEmail = (email || '').trim().toLowerCase();
+
+      // Check if user has an existing membership other than the rogue default org
+      const isRogueDefaultMember = member?.organization_id === DEFAULT_ORG_ID && cleanEmail !== 'subeshtab@gmail.com';
+
+      if (!member?.organization_id || isRogueDefaultMember) {
+        // If rogue default org membership exists, remove it first
+        if (isRogueDefaultMember) {
+          await supabase
+            .from('organization_members')
+            .delete()
+            .eq('organization_id', DEFAULT_ORG_ID)
+            .eq('user_id', targetUserId);
+        }
+
         // Automatically provision a new isolated organization workspace for this user
         const newOrgId = crypto.randomUUID();
         const effectiveCompanyName =
@@ -81,7 +96,7 @@ export async function POST(req: NextRequest) {
             name: effectiveCompanyName,
             slug: orgSlug,
             business_type: 'Services & Products',
-            email: (email || '').trim(),
+            email: cleanEmail,
             default_currency: 'USD',
             default_tax_rate: 0,
             default_validity_days: 30,
@@ -121,7 +136,7 @@ export async function POST(req: NextRequest) {
       } else if (companyName && companyName.trim()) {
         await store.updateOrganization(member.organization_id, {
           name: companyName.trim(),
-          email: (email || '').trim(),
+          email: cleanEmail,
         });
       }
     }

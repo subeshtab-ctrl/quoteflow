@@ -32,3 +32,4 @@ cloudflared.exe
 *.njsproj
 *.sln
 *.sw?
+scratch/

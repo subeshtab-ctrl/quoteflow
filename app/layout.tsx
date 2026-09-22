@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ThemeProvider } from '@/components/theme/theme-provider';
 
 export const metadata: Metadata = {
   title: 'QuoteFlow - Modern Quotation Management & Customer Approval SaaS',
@@ -13,10 +14,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full">
-      <body className="min-h-full font-sans antialiased text-slate-900 bg-slate-50/50">
-        {children}
+    <html lang="en" className="h-full" suppressHydrationWarning>
+      <body className="min-h-full font-sans antialiased text-slate-900 bg-slate-50/50 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-150">
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
 }
+

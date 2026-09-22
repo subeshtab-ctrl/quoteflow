@@ -58,7 +58,7 @@ export function DashboardSidebar({
   return (
     <aside
       className={cn(
-        'flex h-full w-64 flex-col justify-between border-r border-slate-200 bg-white p-4 shadow-sm',
+        'flex h-full w-64 flex-col justify-between border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm transition-colors',
         className
       )}
     >
@@ -66,25 +66,25 @@ export function DashboardSidebar({
         {/* Company Header */}
         <div className="flex items-center gap-3 px-2 py-1">
           {orgData.logoUrl ? (
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white p-1 border border-slate-200 shadow-sm overflow-hidden">
-              <img src={orgData.logoUrl} alt={orgData.name} className="h-full w-full object-contain" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+              <img src={orgData.logoUrl} alt={orgData.name} className="max-h-full max-w-full object-contain" />
             </div>
           ) : (
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white font-black text-lg shadow-md shadow-indigo-200">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--brand-color,#4f46e5)] text-white font-black text-lg shadow-md">
               Q
             </div>
           )}
           <div className="overflow-hidden">
-            <h2 className="text-sm font-bold text-slate-900 truncate">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
               {orgData.name}
             </h2>
-            <p className="text-[11px] font-medium text-slate-400">Quotation Management</p>
+            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">Quotation Management</p>
           </div>
         </div>
 
         {/* Create Quotation Button */}
         <Link href="/quotations/new">
-          <button className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 text-sm font-semibold shadow-md shadow-indigo-100 active:scale-[0.98] transition-all">
+          <button className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand-color,#4f46e5)] hover:brightness-105 active:brightness-95 text-white px-4 py-2.5 text-sm font-semibold shadow-md active:scale-[0.98] transition-all">
             <PlusCircle className="h-4 w-4" />
             <span>Create Quotation</span>
           </button>
@@ -104,14 +104,14 @@ export function DashboardSidebar({
                 className={cn(
                   'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-indigo-50/90 text-indigo-700 font-semibold shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+                    ? 'bg-indigo-50/90 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
                 )}
               >
                 <item.icon
                   className={cn(
                     'h-5 w-5',
-                    isActive ? 'text-indigo-600' : 'text-slate-400'
+                    isActive ? 'text-[var(--brand-color,#4f46e5)] dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500'
                   )}
                 />
                 <span>{item.name}</span>
@@ -122,9 +122,9 @@ export function DashboardSidebar({
       </div>
 
       {/* Footer Info */}
-      <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500 border border-slate-100">
-        <p className="font-semibold text-slate-700">Multi-Tenant Cloud</p>
-        <p className="text-[11px] text-slate-400 mt-0.5">Role: Organization Owner</p>
+      <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-xs text-slate-500 dark:text-slate-400 border border-slate-100 dark:border-slate-800">
+        <p className="font-semibold text-slate-700 dark:text-slate-300">QuoteFlow Workspace</p>
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Multi-Tenant Protected</p>
       </div>
     </aside>
   );

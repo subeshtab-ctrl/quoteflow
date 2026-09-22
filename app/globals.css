@@ -7,6 +7,12 @@
     --background: 210 40% 98%;
     --foreground: 222.2 84% 4.9%;
     --radius: 0.75rem;
+    --brand-color: #4f46e5;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
   }
 }
 
@@ -14,6 +20,11 @@ body {
   color: rgb(15 23 42);
   background: #f8fafc;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+html.dark body {
+  color: rgb(241 245 249);
+  background: #0b0f19;
 }
 
 /* Custom scrollbars */
@@ -30,6 +41,13 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 @media print {

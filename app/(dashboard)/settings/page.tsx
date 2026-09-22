@@ -17,6 +17,8 @@ export default async function SettingsPage() {
       <SettingsClientView
         initialOrganization={organization!}
         currentUserRole={auth?.role || 'OWNER'}
+        currentUserId={auth?.userId || ''}
+        currentUserEmail={auth?.email || ''}
       />
     </DashboardLayout>
   );

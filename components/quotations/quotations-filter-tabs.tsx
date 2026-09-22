@@ -34,7 +34,7 @@ export function QuotationsFilterTabs({
   };
 
   return (
-    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200">
+    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
       {statuses.map((tab) => {
         const isActive = currentStatus === tab.value;
         return (
@@ -44,8 +44,8 @@ export function QuotationsFilterTabs({
             className={cn(
               'px-3.5 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors',
               isActive
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-[var(--brand-color,#4f46e5)] text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
             )}
           >
             {tab.label}

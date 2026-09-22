@@ -31,8 +31,13 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
     role: auth.role,
   };
 
+  const brandColor = auth.organization.brand_color || '#4f46e5';
+
   return (
-    <div className="flex min-h-screen bg-slate-50/60">
+    <div
+      className="flex min-h-screen bg-slate-50/60 dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 transition-colors"
+      style={{ '--brand-color': brandColor } as React.CSSProperties}
+    >
       {/* Desktop Sidebar */}
       <DashboardSidebar className="hidden md:flex shrink-0 sticky top-0 h-screen" />
 

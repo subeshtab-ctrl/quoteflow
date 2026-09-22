@@ -43,6 +43,24 @@ export async function POST(req: NextRequest) {
         (u) => u.email?.toLowerCase() === cleanEmail
       );
       if (existing) {
+        // Check if existing user is a staff member of another company
+        const { data: member } = await admin
+          .from('organization_members')
+          .select('organization_id, role')
+          .eq('user_id', existing.id)
+          .maybeSingle();
+
+        if (member && member.role === 'STAFF') {
+          const org = await store.getOrganization(member.organization_id);
+          const compName = org?.name || 'an existing company';
+          return NextResponse.json(
+            {
+              error: `This email is already registered as a team member of "${compName}". Staff accounts cannot register a separate company. Please sign in to access your company workspace.`,
+            },
+            { status: 409 }
+          );
+        }
+
         return NextResponse.json(
           {
             error:
@@ -93,7 +111,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Create user in Supabase Auth (Owner / Admin of their new company)
+    // 4. Create user in Supabase Auth (Owner of their new company)
     const { data: newUser, error: createError } = await admin.auth.admin.createUser({
       email: cleanEmail,
       password,
@@ -118,7 +136,7 @@ export async function POST(req: NextRequest) {
 
     const userId = newUser.user.id;
 
-    // Clean up any rogue default org membership inserted by legacy DB triggers
+    // Clean up any rogue default org membership inserted by database triggers
     const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
     if (newOrgId !== DEFAULT_ORG_ID) {
       await admin
@@ -151,9 +169,29 @@ export async function POST(req: NextRequest) {
       store.setCachedOrganization(newOrgId, newOrg);
     }
 
+    // 8. Generate verification link
+    let verificationLink: string | null = null;
+    try {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://abilities-tap-rounds-dat.trycloudflare.com';
+      const { data: linkData } = await admin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: cleanEmail,
+        options: {
+          redirectTo: `${appUrl}/onboarding`,
+        },
+      });
+      if (linkData?.properties?.action_link) {
+        verificationLink = linkData.properties.action_link;
+      }
+    } catch (linkErr) {
+      console.warn('Generate verification link note:', linkErr);
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Account and private organization workspace created successfully.',
+      verificationLinkSent: true,
+      verificationLink,
+      message: `Verification link has been sent to ${cleanEmail}. Please check your inbox and click the link to verify your account.`,
       user: {
         id: userId,
         email: cleanEmail,

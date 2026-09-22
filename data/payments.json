@@ -1,8 +1,14 @@
 {
   "c87168e9-4572-42e1-bac7-fdc2e36489a0": {
     "is_paid": true,
-    "paid_at": "2026-09-22T14:14:06.632Z",
-    "payment_method": "UPI",
-    "payment_notes": "Paid via GPay mobile verification"
+    "paid_at": "2026-09-22T00:00:00.000Z",
+    "payment_method": "OTHER",
+    "payment_notes": "Crypto usdt"
+  },
+  "d0000000-0000-0000-0000-000000000003": {
+    "is_paid": true,
+    "paid_at": "2026-09-22T10:00:00.000Z",
+    "payment_method": "BANK_TRANSFER",
+    "payment_notes": null
   }
 }
