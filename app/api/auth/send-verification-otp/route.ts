@@ -27,8 +27,9 @@ export async function POST(req: NextRequest) {
         if (companyName) metadata.company_name = companyName;
 
         const { data, error } = await admin.auth.admin.generateLink({
-          type: 'magiclink',
+          type: 'signup',
           email,
+          password: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2), // placeholder required by SDK type
           options: {
             data: metadata,
           },

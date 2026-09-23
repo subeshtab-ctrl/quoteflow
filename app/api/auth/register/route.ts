@@ -174,8 +174,9 @@ export async function POST(req: NextRequest) {
     try {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://abilities-tap-rounds-dat.trycloudflare.com';
       const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-        type: 'magiclink',
+        type: 'signup',
         email: cleanEmail,
+        password: password, // required by SDK type; user's actual password set during signup
         options: {
           redirectTo: `${appUrl}/auth/callback`,
         },

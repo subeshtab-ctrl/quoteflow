@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/service-role';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { sendEmail } from '@/lib/email/service';
 
 export async function GET() {
   try {
@@ -92,19 +93,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { fullName, email, password, role = 'STAFF' } = body;
+    // No password required — staff sets their own password via invitation link
+    const { fullName, email, role = 'STAFF' } = body;
 
     if (!fullName || !fullName.trim()) {
       return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
     }
     if (!email || !email.trim()) {
       return NextResponse.json({ error: 'Email address is required.' }, { status: 400 });
-    }
-    if (!password || password.length < 6) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters.' },
-        { status: 400 }
-      );
     }
 
     const assignedRole = role === 'ADMIN' ? 'ADMIN' : 'STAFF';
@@ -116,16 +112,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Database service unavailable' }, { status: 500 });
     }
 
-    // 1. Create auth user with pre-confirmed email and org metadata
+    // 1. Prevent cross-company conflicts — email must not already exist
+    const { data: existingList } = await supabase.auth.admin.listUsers();
+    const existingUser = (existingList?.users || []).find(
+      (u) => u.email?.toLowerCase() === cleanEmail
+    );
+    if (existingUser) {
+      return NextResponse.json(
+        {
+          error:
+            'This email address is already registered. Staff must use a new email address that has not been used for another account.',
+        },
+        { status: 409 }
+      );
+    }
+
+    // 2. Create auth user WITHOUT email confirmation and WITHOUT a password
+    //    Staff sets their own password via the invitation link.
     const { data: userData, error: createError } = await supabase.auth.admin.createUser({
       email: cleanEmail,
-      password,
-      email_confirm: true,
+      email_confirm: false,
       user_metadata: {
         full_name: cleanName,
         organization_id: auth.orgId,
         role: assignedRole,
         company_name: auth.organization.name,
+        invited_by: auth.userId,
       },
     });
 
@@ -135,7 +147,7 @@ export async function POST(req: NextRequest) {
 
     const newUser = userData.user;
 
-    // Clean up any rogue default org membership inserted by legacy DB triggers
+    // 3. Clean up any rogue default org membership inserted by legacy DB triggers
     const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
     if (auth.orgId !== DEFAULT_ORG_ID) {
       await supabase
@@ -145,7 +157,7 @@ export async function POST(req: NextRequest) {
         .eq('user_id', newUser.id);
     }
 
-    // 2. Add to organization_members
+    // 4. Add to organization_members
     const { error: memberError } = await supabase.from('organization_members').upsert({
       organization_id: auth.orgId,
       user_id: newUser.id,
@@ -157,7 +169,7 @@ export async function POST(req: NextRequest) {
       console.error('Error creating organization member:', memberError);
     }
 
-    // 3. Upsert into profiles
+    // 5. Upsert into profiles
     await supabase.from('profiles').upsert({
       id: newUser.id,
       full_name: cleanName,
@@ -166,20 +178,93 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
     });
 
+    // 6. Generate invitation link and send branded email
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://abilities-tap-rounds-dat.trycloudflare.com';
+    let invitationSent = false;
+    try {
+      const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+        type: 'invite',
+        email: cleanEmail,
+        options: {
+          redirectTo: `${appUrl}/auth/callback`,
+          data: {
+            full_name: cleanName,
+            organization_id: auth.orgId,
+            role: assignedRole,
+            company_name: auth.organization.name,
+          },
+        },
+      });
+
+      const actionLink = linkData?.properties?.action_link;
+      if (actionLink) {
+        await sendEmail({
+          to: cleanEmail,
+          subject: `You've been invited to join ${auth.organization.name} on QuoteFlow`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <meta charset="utf-8">
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
+                  .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+                  .badge { display: inline-block; background: #4f46e5; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px; }
+                  .btn { display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; margin: 24px 0; }
+                  .footer { font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+                  .note { font-size: 13px; color: #64748b; line-height: 1.6; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="badge">Team Invitation</div>
+                  <h2 style="margin: 0 0 8px 0; font-size: 22px; font-weight: 800;">You're Invited!</h2>
+                  <p class="note">
+                    Hello <strong>${cleanName}</strong>,<br><br>
+                    You have been invited to join <strong>${auth.organization.name}</strong> as a <strong>${assignedRole}</strong> on QuoteFlow.<br><br>
+                    Click the button below to accept your invitation and create your own password:
+                  </p>
+                  <div style="text-align: center;">
+                    <a href="${actionLink}" class="btn">Accept Invitation &amp; Set Password</a>
+                  </div>
+                  <p class="note" style="word-break: break-all;">
+                    If the button doesn't work, copy this link:<br>
+                    <a href="${actionLink}" style="color: #4f46e5;">${actionLink}</a>
+                  </p>
+                  <p class="note">This invitation link will expire in 24 hours. If you did not expect this invitation, you can safely ignore this email.</p>
+                  <div class="footer"><p>QuoteFlow SaaS Platform © 2026</p></div>
+                </div>
+              </body>
+            </html>
+          `,
+          text: `Hello ${cleanName},\n\nYou have been invited to join ${auth.organization.name} as ${assignedRole} on QuoteFlow.\n\nAccept your invitation and set your password:\n${actionLink}\n\nThis link expires in 24 hours.`,
+        });
+        invitationSent = true;
+        console.log(`[STAFF INVITATION SENT] ${cleanEmail} → ${auth.organization.name} (${assignedRole})`);
+      } else if (linkErr) {
+        console.warn('generateLink warning for invitation:', linkErr);
+      }
+    } catch (linkErr) {
+      console.warn('Staff invitation email warning:', linkErr);
+    }
+
     return NextResponse.json({
       success: true,
-      message: `User ${cleanEmail} created successfully as ${assignedRole}.`,
+      message: invitationSent
+        ? `Invitation email sent to ${cleanEmail}. They will need to accept the invitation to set their password and access the workspace.`
+        : `Staff member ${cleanEmail} added. Please send them the login link manually.`,
       user: {
         id: newUser.id,
         email: cleanEmail,
         full_name: cleanName,
         role: assignedRole,
+        invitation_sent: invitationSent,
       },
     });
   } catch (err: any) {
-    console.error('Failed to create staff user:', err);
+    console.error('Failed to invite staff user:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to create staff user' },
+      { error: err.message || 'Failed to invite staff user' },
       { status: 500 }
     );
   }

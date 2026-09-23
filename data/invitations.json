@@ -1,0 +1,14 @@
+{
+  "abe0bf9de2a7bc7812c1a4301f625f0e56d9167f21ef84e866c1e403913c9f81": {
+    "token": "abe0bf9de2a7bc7812c1a4301f625f0e56d9167f21ef84e866c1e403913c9f81",
+    "email": "m.subesh@outlook.com",
+    "fullName": "su",
+    "role": "STAFF",
+    "organizationId": "a0000000-0000-0000-0000-000000000001",
+    "companyName": "SUBESH M",
+    "inviterName": "SUBESH",
+    "createdAt": "2026-09-23T04:25:36.786Z",
+    "expiresAt": "2026-09-30T04:25:36.786Z",
+    "accepted": false
+  }
+}

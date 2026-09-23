@@ -23,6 +23,13 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
 
   if (error || !user) return null;
 
+  // STRICT: Do not grant authenticated application context to unverified users
+  const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+  if (!isEmailConfirmed) {
+    return null;
+  }
+
+
   const admin = createAdminClient();
   let orgId = (user.user_metadata?.organization_id as string) || '';
   let role: UserRole = (user.user_metadata?.role as UserRole) || 'OWNER';
