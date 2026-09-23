@@ -16,8 +16,9 @@ export async function GET(request: Request) {
   if (error || errorDescription) {
     console.error('Supabase auth callback error:', error, errorDescription);
     const msg = errorDescription || error || 'Verification failed or expired.';
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(msg)}`);
+    return NextResponse.redirect(`${origin}/verify-email?error=${encodeURIComponent(msg)}`);
   }
+
 
   const cookieStore = await cookies();
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -68,13 +69,22 @@ export async function GET(request: Request) {
         console.warn('Sync user details note in callback:', saveErr);
       }
 
-      return NextResponse.redirect(`${origin}${next}`);
+      // If user came from password recovery, route to recovery destination
+      if (type === 'recovery') {
+        return NextResponse.redirect(`${origin}${next}`);
+      }
+
+      // Email verification success -> route to celebration page
+      const userEmail = data.user.email || '';
+      return NextResponse.redirect(
+        `${origin}/verify-email?email=${encodeURIComponent(userEmail)}`
+      );
     }
 
     if (verifyErr) {
       console.error('Error verifying token_hash in callback:', verifyErr);
       return NextResponse.redirect(
-        `${origin}/login?error=${encodeURIComponent(verifyErr.message)}`
+        `${origin}/verify-email?error=${encodeURIComponent(verifyErr.message)}`
       );
     }
   }
@@ -99,13 +109,21 @@ export async function GET(request: Request) {
           console.warn('Sync user details note in PKCE callback:', saveErr);
         }
 
-        return NextResponse.redirect(`${origin}${next}`);
+        const userEmail = data.user.email || '';
+        // If recovery flow, honor next; otherwise show verification celebration
+        if (type === 'recovery') {
+          return NextResponse.redirect(`${origin}${next}`);
+        }
+
+        return NextResponse.redirect(
+          `${origin}/verify-email?email=${encodeURIComponent(userEmail)}`
+        );
       }
 
       if (exchangeErr) {
         console.error('Error exchanging code for session:', exchangeErr);
         return NextResponse.redirect(
-          `${origin}/login?error=${encodeURIComponent(exchangeErr.message)}`
+          `${origin}/verify-email?error=${encodeURIComponent(exchangeErr.message)}`
         );
       }
     } catch (err: any) {
@@ -113,6 +131,7 @@ export async function GET(request: Request) {
     }
   }
 
-  // Fallback to login with verified notification
-  return NextResponse.redirect(`${origin}/login?verified=true`);
+  // Fallback to verify-email
+  return NextResponse.redirect(`${origin}/verify-email`);
 }
+
