@@ -112,10 +112,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Create user in Supabase Auth (Owner of their new company)
+    // STRICT: email_confirm is FALSE so user MUST verify via email link
     const { data: newUser, error: createError } = await admin.auth.admin.createUser({
       email: cleanEmail,
       password,
-      email_confirm: true,
+      email_confirm: false,
       user_metadata: {
         full_name: cleanName,
         company_name: cleanCompany,
@@ -169,19 +170,68 @@ export async function POST(req: NextRequest) {
       store.setCachedOrganization(newOrgId, newOrg);
     }
 
-    // 8. Generate verification link
-    let verificationLink: string | null = null;
+    // 8. Generate & dispatch verification email link to the user's inbox
     try {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://abilities-tap-rounds-dat.trycloudflare.com';
-      const { data: linkData } = await admin.auth.admin.generateLink({
+      const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
         type: 'magiclink',
         email: cleanEmail,
         options: {
-          redirectTo: `${appUrl}/onboarding`,
+          redirectTo: `${appUrl}/auth/callback`,
         },
       });
-      if (linkData?.properties?.action_link) {
-        verificationLink = linkData.properties.action_link;
+
+      const actionLink = linkData?.properties?.action_link;
+
+      if (actionLink) {
+        console.log(`\n======================================================`);
+        console.log(`[VERIFICATION EMAIL SENT] Target: ${cleanEmail}`);
+        console.log(`[VERIFICATION LINK]       ${actionLink}`);
+        console.log(`======================================================\n`);
+
+        const { sendEmail } = await import('@/lib/email/service');
+        await sendEmail({
+          to: cleanEmail,
+          subject: `Verify your email for ${cleanCompany} on QuoteFlow`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <meta charset="utf-8">
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
+                  .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+                  .badge { display: inline-block; background: #4f46e5; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px; }
+                  .btn { display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; margin: 24px 0; }
+                  .footer { font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="badge">QuoteFlow Security</div>
+                  <h2 style="margin: 0 0 8px 0; font-size: 22px; font-weight: 800;">Verify Your Email Address</h2>
+                  <p style="font-size: 14px; color: #475569; line-height: 1.6;">
+                    Hello <strong>${cleanName}</strong>,<br><br>
+                    Thank you for registering <strong>${cleanCompany}</strong> on QuoteFlow. Please click the button below to verify your email address and activate your organization workspace:
+                  </p>
+                  <div style="text-align: center;">
+                    <a href="${actionLink}" class="btn">Verify Email & Activate Account</a>
+                  </div>
+                  <p style="font-size: 12px; color: #94a3b8; word-break: break-all; line-height: 1.5;">
+                    If the button doesn't work, copy and paste this link into your browser:<br>
+                    <a href="${actionLink}" style="color: #4f46e5;">${actionLink}</a>
+                  </p>
+                  <div class="footer">
+                    <p>QuoteFlow SaaS Platform © 2026</p>
+                  </div>
+                </div>
+              </body>
+            </html>
+          `,
+          text: `Hello ${cleanName},\n\nPlease verify your email for QuoteFlow by visiting this link:\n${actionLink}\n\nThank you!`,
+        });
+      } else if (linkErr) {
+        console.warn('Supabase generateLink error:', linkErr);
       }
     } catch (linkErr) {
       console.warn('Generate verification link note:', linkErr);
@@ -190,8 +240,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       verificationLinkSent: true,
-      verificationLink,
-      message: `Verification link has been sent to ${cleanEmail}. Please check your inbox and click the link to verify your account.`,
+      message: `A verification link has been sent to ${cleanEmail}. Please check your inbox and click the link to verify your email.`,
       user: {
         id: userId,
         email: cleanEmail,
@@ -201,6 +250,7 @@ export async function POST(req: NextRequest) {
         role: 'OWNER',
       },
     });
+
   } catch (err: any) {
     console.error('Registration API error:', err);
     return NextResponse.json(

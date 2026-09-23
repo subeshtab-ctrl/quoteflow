@@ -44,6 +44,7 @@ export async function middleware(request: NextRequest) {
   // Protected paths that require authentication
   const isProtectedPath =
     pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/onboarding') ||
     pathname.startsWith('/quotations') ||
     pathname.startsWith('/customers') ||
     pathname.startsWith('/products') ||
@@ -57,18 +58,36 @@ export async function middleware(request: NextRequest) {
     pathname === '/register' ||
     pathname === '/forgot-password';
 
-  if (!user && isProtectedPath) {
-    const redirectUrl = new URL('/login', request.url);
-    const destination = pathname + (request.nextUrl.search || '');
-    if (destination !== '/dashboard') {
-      redirectUrl.searchParams.set('redirect', destination);
+  if (isProtectedPath) {
+    if (!user) {
+      const redirectUrl = new URL('/login', request.url);
+      const destination = pathname + (request.nextUrl.search || '');
+      if (destination !== '/dashboard') {
+        redirectUrl.searchParams.set('redirect', destination);
+      }
+      return NextResponse.redirect(redirectUrl);
     }
-    return NextResponse.redirect(redirectUrl);
+
+    // STRICT: Block unconfirmed users from accessing the app
+    const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+    if (!isEmailConfirmed) {
+      const errorMsg = 'Please verify your email address to access your workspace.';
+      return NextResponse.redirect(
+        new URL(
+          `/verify-email?error=${encodeURIComponent(errorMsg)}&email=${encodeURIComponent(user.email || '')}`,
+          request.url
+        )
+      );
+    }
   }
 
   if (user && isAuthPage) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+    if (isEmailConfirmed) {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
   }
+
 
   return response;
 }

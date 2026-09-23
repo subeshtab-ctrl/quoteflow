@@ -120,21 +120,43 @@ export default function RegisterPage() {
                 </p>
               </div>
 
-              {/* Direct Setup Access */}
-              <div className="pt-2 space-y-2">
+              {/* Verification Actions */}
+              <div className="pt-2 space-y-3">
+                <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/80 text-left flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    Email validation is required before you can access your company workspace. Please open the email we just sent you to verify.
+                  </span>
+                </div>
+
                 <Link
-                  href={verificationLink || '/onboarding'}
+                  href={`/login?email=${encodeURIComponent(email)}`}
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--brand-color,#4f46e5)] hover:brightness-105 active:brightness-95 text-white py-3 px-4 text-xs font-semibold shadow-md transition-all"
                 >
-                  <span>Continue to Company Setup</span>
+                  <span>Go to Sign In</span>
                   <ArrowRight className="h-4 w-4" />
                 </Link>
 
-                <div className="pt-2 text-center text-xs text-slate-400">
-                  Already verified?{' '}
-                  <Link href={`/login?email=${encodeURIComponent(email)}`} className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline">
-                    Sign In to Workspace
-                  </Link>
+                <div className="pt-1 text-center text-xs text-slate-400">
+                  Didn&apos;t receive the email?{' '}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await fetch('/api/auth/send-verification-otp', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ email: email.trim() }),
+                        });
+                        alert('Verification link resent! Please check your inbox.');
+                      } catch {
+                        alert('Failed to resend. Please try again in a few moments.');
+                      }
+                    }}
+                    className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+                  >
+                    Resend Verification Link
+                  </button>
                 </div>
               </div>
             </div>

@@ -63,37 +63,24 @@ function LoginForm() {
 
       if (authError) {
         if (authError.message.toLowerCase().includes('email not confirmed')) {
-          // Auto-confirm user via admin API and retry sign in immediately
-          try {
-            const confirmRes = await fetch('/api/auth/confirm-user', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: email.trim() }),
-            });
-
-            if (confirmRes.ok) {
-              const { data: retryData, error: retryErr } = await supabase.auth.signInWithPassword({
-                email: email.trim(),
-                password,
-              });
-
-              if (!retryErr && retryData?.user) {
-                router.push(redirectParam);
-                router.refresh();
-                return;
-              }
-            }
-          } catch (cErr) {
-            console.warn('Auto-confirm retry note:', cErr);
-          }
-
-          setIsOtpMode(true);
-          setError('Email verification pending. We have sent a verification code to your email.');
+          // STRICT: Unconfirmed accounts CANNOT sign in. User must click their email verification link.
+          setError(
+            'Your email address has not been verified yet. Please check your inbox and click the verification link.'
+          );
           setIsLoading(false);
           return;
         }
         throw authError;
       }
+
+      // Ensure user email is confirmed before allowing dashboard access
+      if (data?.user && !data.user.email_confirmed_at && !data.user.confirmed_at) {
+        await supabase.auth.signOut();
+        setError('Your email address has not been verified yet. Please verify your email first.');
+        setIsLoading(false);
+        return;
+      }
+
 
       // Sync user profile & metadata on login
       if (data.user) {
