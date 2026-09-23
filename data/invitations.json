@@ -10,5 +10,17 @@
     "createdAt": "2026-09-23T04:25:36.786Z",
     "expiresAt": "2026-09-30T04:25:36.786Z",
     "accepted": false
+  },
+  "e08a49521ab27d4c020641b2cf51548abc4925fec7749090c525a41d2c1310aa": {
+    "token": "e08a49521ab27d4c020641b2cf51548abc4925fec7749090c525a41d2c1310aa",
+    "email": "subesh.periya@gmail.com",
+    "fullName": "sube",
+    "role": "STAFF",
+    "organizationId": "a0000000-0000-0000-0000-000000000001",
+    "companyName": "SUBESH M",
+    "inviterName": "SUBESH",
+    "createdAt": "2026-09-23T05:35:52.978Z",
+    "expiresAt": "2026-09-30T05:35:52.978Z",
+    "accepted": true
   }
 }

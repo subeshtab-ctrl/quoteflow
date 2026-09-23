@@ -32,9 +32,11 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
 
   const admin = createAdminClient();
   let orgId = (user.user_metadata?.organization_id as string) || '';
-  let role: UserRole = (user.user_metadata?.role as UserRole) || 'OWNER';
+  // IMPORTANT: role is ALWAYS read from the organization_members table, never from user_metadata.
+  // user_metadata.role is untrusted and may be stale or wrong (e.g. staff showing as OWNER).
+  let role: UserRole = 'STAFF'; // safest default — escalated only when DB confirms a higher role
 
-  // 1. If user has a designated organization_id in user_metadata, verify it's valid
+  // 1. If user has a designated organization_id in user_metadata, verify it's valid & get DB role
   if (orgId && admin) {
     try {
       const { data: member } = await admin
@@ -46,7 +48,11 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
         .maybeSingle();
 
       if (member?.role) {
-        role = member.role as UserRole;
+        role = member.role as UserRole; // DB role is authoritative
+      }
+      // If no member record found for this orgId, fall through to lookup below
+      if (!member) {
+        orgId = ''; // force re-lookup
       }
     } catch {
       // Keep existing metadata orgId
@@ -73,13 +79,13 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
         orgId = activeMember.organization_id;
         if (activeMember.role) role = activeMember.role as UserRole;
 
-        // Cache on user_metadata so future checks are fast
+        // Cache organization_id on user_metadata so future lookups are fast
+        // NOTE: do NOT cache role — role is always read from organization_members table
         try {
           await admin.auth.admin.updateUserById(user.id, {
             user_metadata: {
               ...user.user_metadata,
               organization_id: orgId,
-              role,
             },
           });
         } catch {
