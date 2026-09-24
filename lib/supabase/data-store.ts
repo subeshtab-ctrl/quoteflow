@@ -646,16 +646,37 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        const dbPayload: Record<string, any> = {
+          id: orgId,
+          name: updated.name,
+          slug: updated.slug,
+          business_type: updated.business_type,
+          email: updated.email,
+          phone: updated.phone,
+          website: updated.website,
+          gst_vat_number: updated.gst_vat_number,
+          address_line1: updated.address_line1,
+          address_line2: updated.address_line2,
+          city: updated.city,
+          state: updated.state,
+          country: updated.country,
+          postal_code: updated.postal_code,
+          logo_url: logoUrl,
+          brand_color: updated.brand_color,
+          default_currency: updated.default_currency,
+          default_tax_rate: updated.default_tax_rate,
+          default_validity_days: updated.default_validity_days,
+          quotation_prefix: updated.quotation_prefix,
+          quotation_start_number: updated.quotation_start_number,
+          current_quotation_counter: updated.current_quotation_counter,
+          default_terms: updated.default_terms,
+          invoice_footer: cleanFooter,
+          updated_at: new Date().toISOString(),
+        };
+
         const { data: saved, error } = await supabase
           .from('organizations')
-          .upsert({
-            ...updated,
-            ...data,
-            logo_url: logoUrl,
-            invoice_footer: cleanFooter,
-            id: orgId,
-            updated_at: new Date().toISOString(),
-          })
+          .upsert(dbPayload)
           .select()
           .maybeSingle();
 

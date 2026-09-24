@@ -253,16 +253,20 @@ export function SettingsClientView({
 
       document.documentElement.style.setProperty('--brand-color', updatedBrandColor);
 
-      // Auto-save logo and brand color to server
-      await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...org,
-          logo_url: newLogoUrl,
-          brand_color: updatedBrandColor,
-        }),
-      });
+      // Auto-save brand color and logo settings
+      try {
+        await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...org,
+            logo_url: newLogoUrl,
+            brand_color: updatedBrandColor,
+          }),
+        });
+      } catch (saveErr) {
+        console.warn('Note: settings sync note:', saveErr);
+      }
 
       setSuccessMsg(
         extractedThemeColor
@@ -343,6 +347,8 @@ export function SettingsClientView({
     if (file) {
       handleLogoFile(file);
     }
+    // Reset file input value so choosing a new file or re-uploading always fires onChange
+    e.target.value = '';
   };
 
   const handleRemoveLogo = async () => {

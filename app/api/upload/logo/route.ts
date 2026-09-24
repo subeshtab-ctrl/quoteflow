@@ -7,6 +7,10 @@ import path from 'path';
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    const supabase = createAdminClient();
+
     const contentType = req.headers.get('content-type') || '';
     let logoUrl = '';
 
@@ -40,30 +44,58 @@ export async function POST(req: NextRequest) {
 
       const buffer = Buffer.from(await file.arrayBuffer());
       const ext = file.name.split('.').pop() || 'png';
-      const fileName = `logo-${Date.now()}.${ext}`;
+      const storageFileName = `${orgId}/logo-${Date.now()}.${ext}`;
 
-      // Save to public/uploads directory
-      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
+      // 1. Primary: Upload to Supabase Storage (works seamlessly on Vercel & Production)
+      if (supabase) {
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from('logos')
+            .upload(storageFileName, buffer, {
+              contentType: file.type || 'image/png',
+              upsert: true,
+            });
+
+          if (!uploadError) {
+            const { data: publicData } = supabase.storage
+              .from('logos')
+              .getPublicUrl(storageFileName);
+            if (publicData?.publicUrl) {
+              logoUrl = publicData.publicUrl;
+            }
+          } else {
+            console.warn('Supabase storage upload error:', uploadError);
+          }
+        } catch (storageErr) {
+          console.warn('Supabase storage upload exception:', storageErr);
+        }
       }
 
-      const filePath = path.join(uploadsDir, fileName);
-      fs.writeFileSync(filePath, buffer);
-
-      logoUrl = `/uploads/${fileName}`;
+      // 2. Fallback: Local filesystem (for local dev) OR Base64 data URL
+      if (!logoUrl) {
+        try {
+          const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+          if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+          }
+          const localFileName = `logo-${Date.now()}.${ext}`;
+          const filePath = path.join(uploadsDir, localFileName);
+          fs.writeFileSync(filePath, buffer);
+          logoUrl = `/uploads/${localFileName}`;
+        } catch (fsErr) {
+          // In read-only serverless environments like Vercel without local write permission:
+          const mime = file.type || 'image/png';
+          logoUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+        }
+      }
     }
-
-    const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
     // Update in-memory store
     await store.updateOrganization(orgId, {
       logo_url: logoUrl,
     });
 
-    // Also update Supabase database if connected
-    const supabase = createAdminClient();
+    // Also update Supabase database directly
     if (supabase) {
       await supabase
         .from('organizations')
@@ -90,11 +122,12 @@ export async function DELETE() {
     const auth = await getAuthenticatedUserContext();
     const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-    // Reset logo to empty string
+    // Reset logo in store
     await store.updateOrganization(orgId, {
       logo_url: '',
     });
 
+    // Reset logo in Supabase database
     const supabase = createAdminClient();
     if (supabase) {
       await supabase
