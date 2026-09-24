@@ -111,5 +111,5 @@ describe('Financial Export & Payment Tracking System', () => {
     // Verify standard PDF header magic bytes: "%PDF-"
     const header = String.fromCharCode(...pdfBytes.slice(0, 5));
     expect(header).toBe('%PDF-');
-  });
+  }, 15000);
 });

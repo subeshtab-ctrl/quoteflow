@@ -3,7 +3,20 @@ import { formatCurrency } from '@/lib/quotations/calculations';
 import { CurrencyCode } from '@/types/database';
 
 const resendApiKey = process.env.RESEND_API_KEY;
-const emailFrom = process.env.EMAIL_FROM || 'QuoteFlow <onboarding@resend.dev>';
+
+export function resolveFromAddress(senderName?: string): string {
+  const envFrom = (process.env.EMAIL_FROM || '').trim();
+  if (!envFrom) {
+    return senderName ? `"${senderName}" <onboarding@resend.dev>` : 'QuoteFlow <onboarding@resend.dev>';
+  }
+
+  if (!senderName) return envFrom;
+
+  const emailMatch = envFrom.match(/<([^>]+)>/);
+  const emailOnly = emailMatch ? emailMatch[1].trim() : (envFrom.includes('@') ? envFrom : 'onboarding@resend.dev');
+
+  return `"${senderName}" <${emailOnly}>`;
+}
 
 const resendClient = resendApiKey ? new Resend(resendApiKey) : null;
 
@@ -12,13 +25,17 @@ export interface EmailPayload {
   subject: string;
   html: string;
   text?: string;
+  fromName?: string;
+  from?: string;
 }
 
 export async function sendEmail(payload: EmailPayload): Promise<{ success: boolean; id?: string; error?: string }> {
+  const sender = payload.from || resolveFromAddress(payload.fromName);
+
   if (!resendClient || !resendApiKey) {
     console.log('\n=================== [DEV EMAIL SERVICE LOG] ===================');
     console.log(`To: ${Array.isArray(payload.to) ? payload.to.join(', ') : payload.to}`);
-    console.log(`From: ${emailFrom}`);
+    console.log(`From: ${sender}`);
     console.log(`Subject: ${payload.subject}`);
     console.log('--- Content Summary ---');
     console.log(payload.text || payload.html.replace(/<[^>]*>?/gm, '').slice(0, 300) + '...');
@@ -28,7 +45,7 @@ export async function sendEmail(payload: EmailPayload): Promise<{ success: boole
 
   try {
     const data = await resendClient.emails.send({
-      from: emailFrom,
+      from: sender,
       to: payload.to,
       subject: payload.subject,
       html: payload.html,
@@ -36,7 +53,23 @@ export async function sendEmail(payload: EmailPayload): Promise<{ success: boole
     });
 
     if (data.error) {
-      console.error('[Resend Email Error]:', data.error);
+      const isDomainRestriction =
+        data.error.message?.toLowerCase().includes('resend.dev') ||
+        data.error.message?.toLowerCase().includes('testing domain');
+
+      if (isDomainRestriction) {
+        console.error(
+          '\n⚠️ [RESEND TESTING DOMAIN RESTRICTION - 403 FORBIDDEN]\n' +
+          `Resend cannot deliver to "${Array.isArray(payload.to) ? payload.to.join(', ') : payload.to}" using onboarding@resend.dev.\n` +
+          'Reason: The free onboarding@resend.dev testing domain only delivers to the owner email registered on Resend.\n' +
+          'To fix this:\n' +
+          '1. Go to https://resend.com/domains and click "Add Domain" (e.g. blendandbold.com or mail.blendandbold.com)\n' +
+          '2. Add the DNS records provided by Resend to your DNS provider (e.g. Vercel DNS)\n' +
+          '3. Set EMAIL_FROM="QuoteFlow <quotes@blendandbold.com>" in your environment variables.\n'
+        );
+      } else {
+        console.error('[Resend Email Error]:', data.error);
+      }
       return { success: false, error: data.error.message };
     }
 
@@ -122,6 +155,7 @@ export function generateQuotationSentEmail(params: {
 
   return {
     to: '',
+    fromName: params.companyName || 'QuoteFlow',
     subject,
     html,
     text: `Hello ${params.customerName},\n\nPlease review your quotation ${params.quotationNumber} from ${params.companyName}.\nTotal Amount: ${formattedAmount}\nValid Until: ${params.validUntil}\n\nView quotation: ${params.publicUrl}\n\nThank you,\n${params.companyName}`,
@@ -162,6 +196,7 @@ export function generateQuotationApprovedEmail(params: {
 
   return {
     to: '',
+    fromName: params.companyName || 'QuoteFlow',
     subject,
     html,
   };
@@ -200,6 +235,7 @@ export function generateQuotationRejectedEmail(params: {
 
   return {
     to: '',
+    fromName: params.companyName || 'QuoteFlow',
     subject,
     html,
   };

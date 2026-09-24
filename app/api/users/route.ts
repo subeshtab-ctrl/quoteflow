@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
     });
 
     // 6. Generate invitation link and send branded email
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://abilities-tap-rounds-dat.trycloudflare.com';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
     let invitationSent = false;
     try {
       const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
