@@ -27,6 +27,7 @@ export interface EmailPayload {
   text?: string;
   fromName?: string;
   from?: string;
+  replyTo?: string | string[];
 }
 
 export async function sendEmail(payload: EmailPayload): Promise<{ success: boolean; id?: string; error?: string }> {
@@ -36,6 +37,7 @@ export async function sendEmail(payload: EmailPayload): Promise<{ success: boole
     console.log('\n=================== [DEV EMAIL SERVICE LOG] ===================');
     console.log(`To: ${Array.isArray(payload.to) ? payload.to.join(', ') : payload.to}`);
     console.log(`From: ${sender}`);
+    if (payload.replyTo) console.log(`Reply-To: ${payload.replyTo}`);
     console.log(`Subject: ${payload.subject}`);
     console.log('--- Content Summary ---');
     console.log(payload.text || payload.html.replace(/<[^>]*>?/gm, '').slice(0, 300) + '...');
@@ -44,13 +46,19 @@ export async function sendEmail(payload: EmailPayload): Promise<{ success: boole
   }
 
   try {
-    const data = await resendClient.emails.send({
+    const sendOptions: any = {
       from: sender,
       to: payload.to,
       subject: payload.subject,
       html: payload.html,
       text: payload.text,
-    });
+    };
+
+    if (payload.replyTo) {
+      sendOptions.reply_to = payload.replyTo;
+    }
+
+    const data = await resendClient.emails.send(sendOptions);
 
     if (data.error) {
       const isDomainRestriction =
@@ -91,6 +99,7 @@ export function generateQuotationSentEmail(params: {
   currency: CurrencyCode;
   validUntil: string;
   publicUrl: string;
+  replyTo?: string;
 }): EmailPayload {
   const formattedAmount = formatCurrency(params.amount, params.currency);
   const subject = `Quotation ${params.quotationNumber} from ${params.companyName}`;
@@ -156,6 +165,7 @@ export function generateQuotationSentEmail(params: {
   return {
     to: '',
     fromName: params.companyName || 'QuoteFlow',
+    replyTo: params.replyTo,
     subject,
     html,
     text: `Hello ${params.customerName},\n\nPlease review your quotation ${params.quotationNumber} from ${params.companyName}.\nTotal Amount: ${formattedAmount}\nValid Until: ${params.validUntil}\n\nView quotation: ${params.publicUrl}\n\nThank you,\n${params.companyName}`,

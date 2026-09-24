@@ -200,6 +200,8 @@ export async function POST(req: NextRequest) {
       if (actionLink) {
         await sendEmail({
           to: cleanEmail,
+          replyTo: auth.email,
+          fromName: auth.organization.name,
           subject: `You've been invited to join ${auth.organization.name} on QuoteFlow`,
           html: `
             <!DOCTYPE html>

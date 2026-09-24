@@ -33,10 +33,12 @@ export async function POST(req: NextRequest) {
 
     // If quotation status was set to SENT, send email if customer has email
     if (quotation.status === 'SENT' && quotation.customer?.email) {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
+      const org = quotation.organization || (await store.getOrganization(orgId));
       const emailPayload = generateQuotationSentEmail({
         customerName: quotation.customer.name,
-        companyName: quotation.organization?.name || 'QuoteFlow',
+        companyName: org?.name || 'QuoteFlow',
+        replyTo: org?.email,
         quotationNumber: quotation.quotation_number,
         amount: quotation.grand_total,
         currency: quotation.currency,
