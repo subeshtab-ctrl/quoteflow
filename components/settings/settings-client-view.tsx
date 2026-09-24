@@ -24,9 +24,22 @@ import {
   Send,
   Link as LinkIcon,
   SunMoon,
+  Circle,
+  Square,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
 import { ThemeSegmentedControl } from '@/components/theme/theme-toggle';
+import {
+  parseLogoUrl,
+  formatLogoUrl,
+  getLogoShapeClass,
+  getLogoFitClass,
+  getCompanyInitials,
+  LogoShape,
+  LogoFit,
+} from '@/lib/utils/logo';
 
 export function SettingsClientView({
   initialOrganization,
@@ -41,6 +54,9 @@ export function SettingsClientView({
 }) {
   const router = useRouter();
   const [org, setOrg] = useState<Organization>(initialOrganization);
+  const initialParsed = parseLogoUrl(initialOrganization.logo_url);
+  const [logoShape, setLogoShape] = useState<LogoShape>(initialParsed.shape);
+  const [logoFit, setLogoFit] = useState<LogoFit>(initialParsed.fit);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isExtractingColor, setIsExtractingColor] = useState(false);
@@ -225,7 +241,8 @@ export function SettingsClientView({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to upload logo');
 
-      const newLogoUrl = data.logo_url;
+      const rawLogoUrl = data.logo_url;
+      const newLogoUrl = formatLogoUrl(rawLogoUrl, logoShape, logoFit);
       const updatedBrandColor = extractedThemeColor || org.brand_color || '#4f46e5';
 
       setOrg((prev) => ({
@@ -260,6 +277,44 @@ export function SettingsClientView({
     }
   };
 
+  const handleShapeChange = async (newShape: LogoShape) => {
+    setLogoShape(newShape);
+    if (org.logo_url) {
+      const formatted = formatLogoUrl(org.logo_url, newShape, logoFit);
+      setOrg((prev) => ({ ...prev, logo_url: formatted }));
+      try {
+        await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...org, logo_url: formatted }),
+        });
+        setSuccessMsg(`Logo shape set to ${newShape === 'circle' ? 'Round (Instagram style)' : newShape}!`);
+        setTimeout(() => setSuccessMsg(null), 2500);
+      } catch (e) {
+        console.warn('Auto save logo shape error:', e);
+      }
+    }
+  };
+
+  const handleFitChange = async (newFit: LogoFit) => {
+    setLogoFit(newFit);
+    if (org.logo_url) {
+      const formatted = formatLogoUrl(org.logo_url, logoShape, newFit);
+      setOrg((prev) => ({ ...prev, logo_url: formatted }));
+      try {
+        await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...org, logo_url: formatted }),
+        });
+        setSuccessMsg(`Image fit set to ${newFit === 'cover' ? 'Fill (Cover)' : 'Fit Entire Logo (Contain)'}!`);
+        setTimeout(() => setSuccessMsg(null), 2500);
+      } catch (e) {
+        console.warn('Auto save logo fit error:', e);
+      }
+    }
+  };
+
   const handleAutoExtractColor = async () => {
     if (!org.logo_url) {
       setErrorMsg('Please upload a company logo first to match theme colors.');
@@ -268,7 +323,8 @@ export function SettingsClientView({
 
     try {
       setIsExtractingColor(true);
-      const color = await extractDominantColor(org.logo_url);
+      const parsed = parseLogoUrl(org.logo_url);
+      const color = await extractDominantColor(parsed.cleanUrl);
       if (color) {
         setOrg((prev) => ({ ...prev, brand_color: color }));
         document.documentElement.style.setProperty('--brand-color', color);
@@ -303,7 +359,18 @@ export function SettingsClientView({
 
       setOrg((prev) => ({ ...prev, logo_url: '' }));
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setSuccessMsg('Logo removed.');
+
+      // Ensure setting is persisted to server
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...org,
+          logo_url: '',
+        }),
+      });
+
+      setSuccessMsg('Logo removed successfully.');
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error removing logo');
@@ -425,94 +492,239 @@ export function SettingsClientView({
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-            {/* Logo Preview Container */}
-            <div className="space-y-1.5 shrink-0">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Current Logo</span>
-              <div className="relative flex h-24 w-24 sm:h-28 sm:w-28 items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-2 overflow-hidden shadow-inner">
-                {org.logo_url ? (
-                  <img
-                    src={org.logo_url}
-                    alt="Company Logo"
-                    className="max-h-full max-w-full object-contain"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
-                    <ImageIcon className="h-8 w-8 stroke-1" />
-                    <span className="text-[10px] font-medium mt-1">No Logo</span>
-                  </div>
-                )}
-                {isUploadingLogo && (
-                  <div className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm flex items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Upload & Controls */}
-            <div className="space-y-3 flex-1">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
-                onChange={handleFileInputChange}
-                className="hidden"
-                id="company-logo-upload"
-              />
-
-              <div className="flex flex-wrap items-center gap-2.5">
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploadingLogo}
-                  className="gap-2 shadow-sm"
+          <div className="space-y-5">
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-6 p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800">
+              {/* Logo Preview Container */}
+              <div className="space-y-1.5 shrink-0">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Logo Preview
+                </span>
+                <div
+                  className={`relative flex h-24 w-24 sm:h-28 sm:w-28 items-center justify-center border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 p-1.5 overflow-hidden shadow-md ring-4 ring-indigo-500/10 transition-all ${getLogoShapeClass(
+                    logoShape
+                  )}`}
                 >
-                  <Upload className="h-4 w-4" />
-                  <span>{org.logo_url ? 'Change Logo' : 'Upload Logo'}</span>
-                </Button>
-
-                {org.logo_url && (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAutoExtractColor}
-                      disabled={isExtractingColor || isUploadingLogo}
-                      className="gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
-                      title="Automatically re-detect dominant color from this logo"
+                  {org.logo_url ? (
+                    <img
+                      src={parseLogoUrl(org.logo_url).cleanUrl}
+                      alt="Company Logo"
+                      className={`h-full w-full ${getLogoShapeClass(logoShape)} ${getLogoFitClass(
+                        logoFit
+                      )}`}
+                    />
+                  ) : (
+                    <div
+                      className={`flex h-full w-full items-center justify-center bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white font-black text-2xl tracking-wider select-none ${getLogoShapeClass(
+                        logoShape
+                      )}`}
                     >
-                      {isExtractingColor ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5" />
-                      )}
-                      <span>Auto-match Theme to Logo</span>
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleRemoveLogo}
-                      disabled={isUploadingLogo}
-                      className="gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-800"
+                      {getCompanyInitials(org.name)}
+                    </div>
+                  )}
+                  {isUploadingLogo && (
+                    <div
+                      className={`absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm flex items-center justify-center ${getLogoShapeClass(
+                        logoShape
+                      )}`}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span>Remove</span>
-                    </Button>
-                  </>
-                )}
+                      <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Supports <strong className="font-semibold text-slate-700 dark:text-slate-300">PNG, JPG, WebP, SVG</strong> (Max 5MB).
-                Transparent background recommended for best appearance.
-              </p>
+              {/* Live Fit in Sidebar Preview */}
+              <div className="flex-1 space-y-3 w-full">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Live Sidebar Header Fit
+                  </span>
+                  <div className="mt-1 flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs max-w-sm">
+                    {org.logo_url ? (
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs ring-2 ring-indigo-500/10 overflow-hidden ${getLogoShapeClass(
+                          logoShape
+                        )}`}
+                      >
+                        <img
+                          src={parseLogoUrl(org.logo_url).cleanUrl}
+                          alt={org.name}
+                          className={`h-full w-full ${getLogoShapeClass(logoShape)} ${getLogoFitClass(
+                            logoFit
+                          )}`}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white font-black text-sm tracking-wider shadow-sm ring-2 ring-indigo-500/20 select-none ${getLogoShapeClass(
+                          logoShape
+                        )}`}
+                      >
+                        {getCompanyInitials(org.name)}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate tracking-tight leading-snug">
+                        {org.name || 'Company Name'}
+                      </h4>
+                      <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none mt-0.5">
+                        Quotation Workspace
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Upload & Action Buttons */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                  onChange={handleFileInputChange}
+                  className="hidden"
+                  id="company-logo-upload"
+                />
+
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingLogo}
+                    className="gap-2 shadow-sm font-bold"
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span>{org.logo_url ? 'Change Logo' : 'Upload Logo'}</span>
+                  </Button>
+
+                  {org.logo_url && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAutoExtractColor}
+                        disabled={isExtractingColor || isUploadingLogo}
+                        className="gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+                        title="Automatically re-detect dominant color from this logo"
+                      >
+                        {isExtractingColor ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )}
+                        <span>Auto-match Theme</span>
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRemoveLogo}
+                        disabled={isUploadingLogo}
+                        className="gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-800"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Remove</span>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
+
+            {/* Shape & Image Fit Controls */}
+            {org.logo_url && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                {/* Shape Selector */}
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Logo Shape
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleShapeChange('circle')}
+                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
+                        logoShape === 'circle'
+                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
+                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <Circle className="h-4 w-4 mb-1" />
+                      <span>Round (IG)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleShapeChange('rounded')}
+                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
+                        logoShape === 'rounded'
+                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
+                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <div className="h-4 w-4 mb-1 rounded-sm border-2 border-current" />
+                      <span>Rounded</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleShapeChange('square')}
+                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
+                        logoShape === 'square'
+                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
+                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <Square className="h-4 w-4 mb-1" />
+                      <span>Square</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fit Mode Selector */}
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Image Fit Option
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleFitChange('cover')}
+                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
+                        logoFit === 'cover'
+                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
+                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
+                      }`}
+                      title="Fills the avatar completely like an Instagram profile picture"
+                    >
+                      <Maximize2 className="h-4 w-4 mb-1" />
+                      <span>Cover (Fill)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleFitChange('contain')}
+                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
+                        logoFit === 'contain'
+                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
+                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
+                      }`}
+                      title="Fits entire logo inside with no cropping"
+                    >
+                      <Minimize2 className="h-4 w-4 mb-1" />
+                      <span>Contain (Fit)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Supports <strong className="font-semibold text-slate-700 dark:text-slate-300">PNG, JPG, WebP, SVG</strong> (Max 5MB).
+              Instagram-style round crop and cover fit make logos and avatars look clean and centered.
+            </p>
           </div>
 
           {/* Brand Theme Color Customizer */}

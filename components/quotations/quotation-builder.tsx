@@ -25,6 +25,12 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
+import {
+  parseLogoUrl,
+  getLogoShapeClass,
+  getLogoFitClass,
+  getCompanyInitials,
+} from '@/lib/utils/logo';
 
 interface QuotationBuilderProps {
   customers: Customer[];
@@ -790,14 +796,34 @@ export function QuotationBuilder({
                 <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                   Live Preview
                 </span>
-                {organization?.logo_url && (
-                  <img
-                    src={organization.logo_url}
-                    alt={organization.name || 'Company Logo'}
-                    className="h-9 w-auto max-w-[160px] object-contain my-1 rounded"
-                  />
-                )}
-                <h4 className="text-sm font-bold text-slate-900 mt-1">{organization.name}</h4>
+                <div className="flex items-center gap-2.5 my-1">
+                  {(() => {
+                    const logoConfig = parseLogoUrl(organization?.logo_url);
+                    if (logoConfig.cleanUrl) {
+                      return (
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center bg-white border border-slate-200 shadow-xs ring-1 ring-indigo-500/10 overflow-hidden ${getLogoShapeClass(
+                            logoConfig.shape
+                          )}`}
+                        >
+                          <img
+                            src={logoConfig.cleanUrl}
+                            alt={organization?.name || 'Company'}
+                            className={`h-full w-full ${getLogoShapeClass(
+                              logoConfig.shape
+                            )} ${getLogoFitClass(logoConfig.fit)}`}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white font-black text-xs tracking-wider select-none shadow-xs">
+                        {getCompanyInitials(organization?.name)}
+                      </div>
+                    );
+                  })()}
+                  <h4 className="text-sm font-bold text-slate-900">{organization?.name || 'My Company'}</h4>
+                </div>
               </div>
               <div className="text-right">
                 <span className="text-xs font-bold text-slate-700">PREVIEW</span>

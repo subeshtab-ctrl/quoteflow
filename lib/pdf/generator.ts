@@ -56,7 +56,8 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     try {
       const fs = await import('fs');
       const path = await import('path');
-      const cleanUrl = org.logo_url.startsWith('/') ? org.logo_url.substring(1) : org.logo_url;
+      const rawPath = org.logo_url.split(/[?#]/)[0];
+      const cleanUrl = rawPath.startsWith('/') ? rawPath.substring(1) : rawPath;
       const logoPath = path.join(process.cwd(), 'public', cleanUrl);
       if (fs.existsSync(logoPath)) {
         const imgBuffer = fs.readFileSync(logoPath);

@@ -26,6 +26,12 @@ import {
   Building2,
   History,
 } from 'lucide-react';
+import {
+  parseLogoUrl,
+  getLogoShapeClass,
+  getLogoFitClass,
+  getCompanyInitials,
+} from '@/lib/utils/logo';
 import { QuotationActionButtons } from '@/components/quotations/quotation-action-buttons';
 import { QuotationPaymentButton } from '@/components/quotations/quotation-payment-button';
 
@@ -180,14 +186,34 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between gap-6 pb-6 border-b border-slate-100">
               <div className="space-y-2">
-                {org?.logo_url && (
-                  <img
-                    src={org.logo_url}
-                    alt={org.name || 'Company Logo'}
-                    className="h-12 sm:h-14 w-auto max-w-[220px] object-contain rounded mb-1"
-                  />
-                )}
-                <h3 className="text-xl font-bold text-slate-900">{org?.name}</h3>
+                <div className="flex items-center gap-3 mb-1">
+                  {(() => {
+                    const logoConfig = parseLogoUrl(org?.logo_url);
+                    if (logoConfig.cleanUrl) {
+                      return (
+                        <div
+                          className={`flex h-12 w-12 shrink-0 items-center justify-center bg-white border border-slate-200 shadow-xs ring-2 ring-indigo-500/10 overflow-hidden ${getLogoShapeClass(
+                            logoConfig.shape
+                          )}`}
+                        >
+                          <img
+                            src={logoConfig.cleanUrl}
+                            alt={org?.name || 'Company Logo'}
+                            className={`h-full w-full ${getLogoShapeClass(
+                              logoConfig.shape
+                            )} ${getLogoFitClass(logoConfig.fit)}`}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white font-black text-base tracking-wider select-none shadow-xs">
+                        {getCompanyInitials(org?.name)}
+                      </div>
+                    );
+                  })()}
+                  <h3 className="text-xl font-bold text-slate-900 tracking-tight">{org?.name}</h3>
+                </div>
                 <p className="text-xs text-slate-500 leading-relaxed">
                   {org?.address_line1}, {org?.city}, {org?.state} {org?.postal_code}
                   <br />

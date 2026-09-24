@@ -22,6 +22,13 @@ import {
   Zap,
 } from 'lucide-react';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
+import {
+  parseLogoUrl,
+  formatLogoUrl,
+  getLogoShapeClass,
+  getLogoFitClass,
+  getCompanyInitials,
+} from '@/lib/utils/logo';
 
 export function OnboardingClientView({
   initialOrg,
@@ -80,7 +87,8 @@ export function OnboardingClientView({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to upload logo');
 
-      const newLogoUrl = data.logo_url;
+      const rawLogoUrl = data.logo_url;
+      const newLogoUrl = formatLogoUrl(rawLogoUrl, 'circle', 'cover');
       const updatedColor = extractedThemeColor || org.brand_color || '#4f46e5';
 
       setOrg((prev) => ({
@@ -297,21 +305,20 @@ export function OnboardingClientView({
 
           {/* Logo Upload Box */}
           <div className="flex flex-col sm:flex-row items-center gap-6 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80">
-            <div className="relative flex h-24 w-24 sm:h-28 sm:w-28 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 p-2 overflow-hidden shadow-xs shrink-0">
+            <div className="relative flex h-24 w-24 sm:h-28 sm:w-28 items-center justify-center rounded-full border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 overflow-hidden shadow-sm ring-4 ring-indigo-500/10 shrink-0">
               {org.logo_url ? (
                 <img
-                  src={org.logo_url}
+                  src={parseLogoUrl(org.logo_url).cleanUrl}
                   alt="Company Logo"
-                  className="max-h-full max-w-full object-contain"
+                  className="h-full w-full rounded-full object-cover"
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
-                  <ImageIcon className="h-8 w-8 stroke-1" />
-                  <span className="text-[10px] font-medium mt-1">No Logo</span>
+                <div className="flex h-full w-full items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white font-black text-2xl tracking-wider select-none">
+                  {getCompanyInitials(org.name)}
                 </div>
               )}
               {isUploadingLogo && (
-                <div className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm flex items-center justify-center">
                   <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
                 </div>
               )}

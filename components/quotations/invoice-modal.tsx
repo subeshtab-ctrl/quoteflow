@@ -24,6 +24,12 @@ import {
   FileText,
   AlertCircle,
 } from 'lucide-react';
+import {
+  parseLogoUrl,
+  getLogoShapeClass,
+  getLogoFitClass,
+  getCompanyInitials,
+} from '@/lib/utils/logo';
 import { PaymentModal } from '@/components/quotations/payment-modal';
 
 interface InvoiceItem {
@@ -669,16 +675,36 @@ export function InvoiceModal({
                 <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
                   Commercial Tax Invoice
                 </span>
-                {organization?.logo_url && (
-                  <img
-                    src={organization.logo_url}
-                    alt={organization.name || 'Company Logo'}
-                    className="h-10 sm:h-12 w-auto max-w-[220px] object-contain rounded mt-2 mb-1"
-                  />
-                )}
-                <h2 className="text-2xl font-black text-slate-900 mt-1">
-                  {organization?.name || 'QuoteFlow Organization'}
-                </h2>
+                <div className="flex items-center gap-3 mt-2 mb-1">
+                  {(() => {
+                    const logoConfig = parseLogoUrl(organization?.logo_url);
+                    if (logoConfig.cleanUrl) {
+                      return (
+                        <div
+                          className={`flex h-12 w-12 shrink-0 items-center justify-center bg-white border border-slate-200 shadow-xs ring-2 ring-indigo-500/10 overflow-hidden ${getLogoShapeClass(
+                            logoConfig.shape
+                          )}`}
+                        >
+                          <img
+                            src={logoConfig.cleanUrl}
+                            alt={organization?.name || 'Company Logo'}
+                            className={`h-full w-full ${getLogoShapeClass(
+                              logoConfig.shape
+                            )} ${getLogoFitClass(logoConfig.fit)}`}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white font-black text-base tracking-wider select-none shadow-xs">
+                        {getCompanyInitials(organization?.name)}
+                      </div>
+                    );
+                  })()}
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                    {organization?.name || 'QuoteFlow Organization'}
+                  </h2>
+                </div>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                   {organization?.address_line1 && `${organization.address_line1}, `}
                   {organization?.city && `${organization.city}, `}

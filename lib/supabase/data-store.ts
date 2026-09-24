@@ -88,7 +88,7 @@ class QuoteFlowStore {
         current_quotation_counter: 0,
         default_terms: '1. Quotation valid for 30 days.\n2. Payment terms as agreed.',
         invoice_footer: 'Thank you for your business!',
-        logo_url: '/uploads/logo-1790080934630.png',
+        logo_url: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -100,7 +100,7 @@ class QuoteFlowStore {
     const demoOrg: Organization = {
       id: DEFAULT_ORG_ID,
       name: 'My Company',
-      logo_url: '/uploads/logo-1790080934630.png',
+      logo_url: null,
       slug: 'my-company',
       business_type: 'Services & Products',
       email: 'contact@mycompany.com',
@@ -600,9 +600,6 @@ class QuoteFlowStore {
           } else if (!data.invoice_footer) {
             data.invoice_footer = `Thank you for partnering with ${compName}.`;
           }
-          if (!data.logo_url) {
-            data.logo_url = '/uploads/logo-1790080934630.png';
-          }
           this.organizations.set(data.id, data as Organization);
           return data as Organization;
         }
@@ -615,9 +612,6 @@ class QuoteFlowStore {
       const compName = cached.name || 'us';
       if (cached.invoice_footer && cached.invoice_footer.includes('The Mining Future')) {
         cached.invoice_footer = `Thank you for partnering with ${compName}.`;
-      }
-      if (!cached.logo_url) {
-        cached.logo_url = '/uploads/logo-1790080934630.png';
       }
       return cached;
     }
@@ -636,9 +630,9 @@ class QuoteFlowStore {
       cleanFooter = `Thank you for partnering with ${compName}.`;
     }
     const logoUrl =
-      data.logo_url !== undefined && data.logo_url !== null && data.logo_url !== ''
-        ? data.logo_url
-        : org.logo_url || null;
+      data.logo_url !== undefined
+        ? (data.logo_url ? data.logo_url : null)
+        : (org.logo_url || null);
 
     const updated: Organization = {
       ...org,

@@ -14,6 +14,7 @@ import {
   PlusCircle,
   Building2,
 } from 'lucide-react';
+import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } from '@/lib/utils/logo';
 
 interface SidebarProps {
   organizationName?: string;
@@ -46,6 +47,11 @@ export function DashboardSidebar({
       .catch(() => {});
   }, [organizationName, logoUrl]);
 
+  const logoConfig = parseLogoUrl(orgData.logoUrl);
+  const shapeClass = getLogoShapeClass(logoConfig.shape);
+  const fitClass = getLogoFitClass(logoConfig.fit);
+  const initials = getCompanyInitials(orgData.name);
+
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Quotations', href: '/quotations', icon: FileText },
@@ -64,21 +70,41 @@ export function DashboardSidebar({
     >
       <div className="space-y-6">
         {/* Company Header */}
-        <div className="flex items-center gap-3 px-2 py-1">
-          {orgData.logoUrl ? (
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-              <img src={orgData.logoUrl} alt={orgData.name} className="max-h-full max-w-full object-contain" />
+        <div className="flex items-center gap-3 px-2 py-1.5 min-w-0">
+          {logoConfig.cleanUrl ? (
+            <div
+              className={cn(
+                'relative flex h-10 w-10 shrink-0 items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs ring-2 ring-indigo-500/10 overflow-hidden',
+                shapeClass
+              )}
+            >
+              <img
+                src={logoConfig.cleanUrl}
+                alt={orgData.name}
+                className={cn('h-full w-full', fitClass)}
+              />
             </div>
           ) : (
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--brand-color,#4f46e5)] text-white font-black text-lg shadow-md">
-              Q
+            <div
+              className={cn(
+                'flex h-10 w-10 shrink-0 items-center justify-center bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white font-black text-sm tracking-wider shadow-sm ring-2 ring-indigo-500/20 select-none',
+                shapeClass
+              )}
+              title={orgData.name}
+            >
+              {initials}
             </div>
           )}
-          <div className="overflow-hidden">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <h2
+              className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate tracking-tight leading-snug"
+              title={orgData.name}
+            >
               {orgData.name}
             </h2>
-            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">Quotation Management</p>
+            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none mt-0.5">
+              Quotation Workspace
+            </p>
           </div>
         </div>
 

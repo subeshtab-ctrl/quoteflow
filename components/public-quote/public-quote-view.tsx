@@ -18,6 +18,12 @@ import {
   Calendar,
   AlertTriangle,
 } from 'lucide-react';
+import {
+  parseLogoUrl,
+  getLogoShapeClass,
+  getLogoFitClass,
+  getCompanyInitials,
+} from '@/lib/utils/logo';
 
 interface PublicQuoteViewProps {
   initialQuotation: Quotation;
@@ -200,22 +206,41 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 pb-6 border-b border-slate-100">
             <div className="space-y-1.5">
               <div className="inline-flex items-center gap-3">
-                {org?.logo_url ? (
-                  <img
-                    src={org.logo_url}
-                    alt={org?.name || 'Company'}
-                    className="h-10 sm:h-12 w-auto max-w-[240px] object-contain"
-                  />
-                ) : (
-                  <div className="flex items-center gap-2.5">
-                    <div className="h-10 w-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-200 text-lg">
-                      {org?.name ? org.name.charAt(0).toUpperCase() : 'Q'}
+                {(() => {
+                  const logoConfig = parseLogoUrl(org?.logo_url);
+                  if (logoConfig.cleanUrl) {
+                    return (
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center bg-white border border-slate-200/80 shadow-xs ring-2 ring-indigo-500/10 overflow-hidden ${getLogoShapeClass(
+                            logoConfig.shape
+                          )}`}
+                        >
+                          <img
+                            src={logoConfig.cleanUrl}
+                            alt={org?.name || 'Company'}
+                            className={`h-full w-full ${getLogoShapeClass(
+                              logoConfig.shape
+                            )} ${getLogoFitClass(logoConfig.fit)}`}
+                          />
+                        </div>
+                        <span className="text-xl font-black text-slate-900 tracking-tight">
+                          {org?.name || 'QuoteFlow'}
+                        </span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-11 w-11 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-200 text-sm tracking-wider select-none">
+                        {getCompanyInitials(org?.name)}
+                      </div>
+                      <span className="text-xl font-black text-slate-900 tracking-tight">
+                        {org?.name || 'QuoteFlow'}
+                      </span>
                     </div>
-                    <span className="text-xl font-black text-slate-900 tracking-tight">
-                      {org?.name || 'QuoteFlow'}
-                    </span>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
               <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
                 {org?.address_line1 && `${org.address_line1}, `}
