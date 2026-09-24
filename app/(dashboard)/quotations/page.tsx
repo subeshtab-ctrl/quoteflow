@@ -197,10 +197,12 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
                             >
                               <ExternalLink className="h-4 w-4" />
                             </Link>
-                            <QuotationDeleteButton
-                              quotationId={quote.id}
-                              quotationNumber={quote.quotation_number}
-                            />
+                            {auth?.role !== 'STAFF' && (
+                              <QuotationDeleteButton
+                                quotationId={quote.id}
+                                quotationNumber={quote.quotation_number}
+                              />
+                            )}
                           </div>
                         </td>
                       </tr>

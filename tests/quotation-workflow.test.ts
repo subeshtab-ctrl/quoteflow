@@ -179,4 +179,39 @@ describe('End-to-End Quotation Workflow & Audit Lifecycle', () => {
     expect(updated.logo_url).toBe('/uploads/logo-1790062784938.jpg');
     expect(updated.phone).toBe('+91 99999 88888');
   });
+
+  it('allows owner to delete quotation and removes it from store', async () => {
+    const orgId = 'a0000000-0000-0000-0000-000000000001';
+    const quote = await store.createQuotation({
+      organization_id: orgId,
+      title: 'Quotation To Delete Test',
+      issue_date: new Date().toISOString().split('T')[0],
+      valid_until: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      currency: 'INR',
+      tax_rate: 18,
+      items: [
+        {
+          description: 'Disposable Service Item',
+          quantity: 1,
+          unit: 'service',
+          unit_price: 1500,
+          discount_type: 'PERCENTAGE',
+          discount_value: 0,
+          tax_rate: 18,
+          sort_order: 0,
+        },
+      ],
+      status: 'DRAFT',
+    });
+
+    expect(quote.id).toBeDefined();
+    const beforeDelete = await store.getQuotationById(quote.id, orgId);
+    expect(beforeDelete).not.toBeNull();
+
+    const deleteSuccess = await store.deleteQuotation(quote.id, orgId);
+    expect(deleteSuccess).toBe(true);
+
+    const afterDelete = await store.getQuotationById(quote.id, orgId);
+    expect(afterDelete).toBeNull();
+  });
 });

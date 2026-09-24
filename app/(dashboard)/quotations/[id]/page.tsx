@@ -90,6 +90,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
             quotation={quotation}
             organization={org}
             customer={customer}
+            currentUserRole={auth?.role || 'STAFF'}
           />
         </div>
 

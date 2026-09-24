@@ -63,7 +63,18 @@ export async function PATCH(req: NextRequest, { params }: RouteProps) {
 export async function DELETE(req: NextRequest, { params }: RouteProps) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (auth.role === 'STAFF') {
+      return NextResponse.json(
+        { error: 'Staff members are not permitted to delete quotations. Please contact the company owner.' },
+        { status: 403 }
+      );
+    }
+
+    const orgId = auth.orgId;
     const { id } = await params;
     await store.deleteQuotation(id, orgId);
     return NextResponse.json({ success: true, message: 'Quotation deleted successfully' });

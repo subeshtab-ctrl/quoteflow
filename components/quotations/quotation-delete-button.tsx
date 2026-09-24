@@ -7,14 +7,18 @@ import { Trash2, Loader2 } from 'lucide-react';
 interface QuotationDeleteButtonProps {
   quotationId: string;
   quotationNumber: string;
+  canDelete?: boolean;
 }
 
 export function QuotationDeleteButton({
   quotationId,
   quotationNumber,
+  canDelete = true,
 }: QuotationDeleteButtonProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+
+  if (!canDelete) return null;
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.preventDefault();

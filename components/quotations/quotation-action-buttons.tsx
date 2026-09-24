@@ -32,6 +32,7 @@ interface QuotationActionButtonsProps {
   quotation?: Quotation;
   organization?: Organization | null;
   customer?: Customer | null;
+  currentUserRole?: string;
 }
 
 export function QuotationActionButtons({
@@ -44,6 +45,7 @@ export function QuotationActionButtons({
   quotation,
   organization,
   customer,
+  currentUserRole,
 }: QuotationActionButtonsProps) {
   const router = useRouter();
   const [currentQuotation, setCurrentQuotation] = useState<Quotation | undefined>(quotation);
@@ -373,18 +375,20 @@ export function QuotationActionButtons({
           </Button>
         )}
 
-        {/* Delete Quotation */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDeleteQuotation}
-          isLoading={isDeleting}
-          className="gap-1.5 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 shadow-sm"
-          title="Permanently Delete Quotation"
-        >
-          <Trash2 className="h-3.5 w-3.5 text-rose-500" />
-          <span>Delete</span>
-        </Button>
+        {/* Delete Quotation (Hidden for STAFF) */}
+        {currentUserRole !== 'STAFF' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDeleteQuotation}
+            isLoading={isDeleting}
+            className="gap-1.5 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 shadow-sm"
+            title="Permanently Delete Quotation"
+          >
+            <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+            <span>Delete</span>
+          </Button>
+        )}
       </div>
 
       {/* Commercial Tax Invoice Modal - Only accessible when quotation is marked as PAID */}
