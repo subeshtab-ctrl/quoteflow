@@ -203,6 +203,7 @@ export interface Quotation {
   rejection_reason?: string | null;
   rejection_comments?: string | null;
   approved_document_hash?: string | null;
+  expired_at?: string | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -213,6 +214,11 @@ export interface Quotation {
   payment_method?: PaymentMethod | string | null;
   payment_notes?: string | null;
 
+  // Chat Tracking
+  has_unread_chat?: boolean;
+  unread_chat_count?: number;
+  chat_count?: number;
+
   // Joined fields
   customer?: Customer;
   organization?: Organization;
@@ -221,6 +227,16 @@ export interface Quotation {
   events?: QuotationEvent[];
   views?: QuotationView[];
   attachments?: QuotationAttachment[];
+}
+
+export interface QuotationChatMessage {
+  id: string;
+  quotation_id: string;
+  sender_role: 'CUSTOMER' | 'STAFF';
+  sender?: 'CUSTOMER' | 'STAFF';
+  sender_name: string;
+  message: string;
+  created_at: string;
 }
 
 export interface Notification {

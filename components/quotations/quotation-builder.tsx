@@ -121,6 +121,31 @@ export function QuotationBuilder({
     initialQuotation?.terms_conditions || organization.default_terms || ''
   );
 
+  const validityDays = (() => {
+    if (!issueDate || !validUntil) return 14;
+    const [sy, sm, sd] = String(issueDate).split('T')[0].split('-').map(Number);
+    const [ey, em, ed] = String(validUntil).split('T')[0].split('-').map(Number);
+    const startUtc = Date.UTC(sy, (sm || 1) - 1, sd || 1);
+    const endUtc = Date.UTC(ey, (em || 1) - 1, ed || 1);
+    const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+    return diff >= 0 ? diff : 0;
+  })();
+
+  const syncTermsWithValidityDays = (nextIssueDate: string, nextValidUntil: string) => {
+    if (!nextIssueDate || !nextValidUntil) return;
+    const [sy, sm, sd] = String(nextIssueDate).split('T')[0].split('-').map(Number);
+    const [ey, em, ed] = String(nextValidUntil).split('T')[0].split('-').map(Number);
+    const startUtc = Date.UTC(sy, (sm || 1) - 1, sd || 1);
+    const endUtc = Date.UTC(ey, (em || 1) - 1, ed || 1);
+    const diff = Math.max(0, Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24)));
+    setTerms((prev) =>
+      prev.replace(
+        /Quotation valid for \d+ days?/gi,
+        `Quotation valid for ${diff} ${diff === 1 ? 'day' : 'days'}`
+      )
+    );
+  };
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -493,16 +518,26 @@ export function QuotationBuilder({
                 label="Issue Date *"
                 type="date"
                 value={issueDate}
-                onChange={(e) => setIssueDate(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setIssueDate(next);
+                  syncTermsWithValidityDays(next, validUntil);
+                }}
                 required
               />
-              <Input
-                label="Valid Until *"
-                type="date"
-                value={validUntil}
-                onChange={(e) => setValidUntil(e.target.value)}
-                required
-              />
+              <div>
+                <Input
+                  label={`Valid Until * (${validityDays} ${validityDays === 1 ? 'day' : 'days'})`}
+                  type="date"
+                  value={validUntil}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setValidUntil(next);
+                    syncTermsWithValidityDays(issueDate, next);
+                  }}
+                  required
+                />
+              </div>
               <div className="space-y-1">
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
                   Currency

@@ -34,6 +34,7 @@ import {
 } from '@/lib/utils/logo';
 import { QuotationActionButtons } from '@/components/quotations/quotation-action-buttons';
 import { QuotationPaymentButton } from '@/components/quotations/quotation-payment-button';
+import { QuotationChatPanel } from '@/components/quotations/quotation-chat-panel';
 
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
@@ -50,6 +51,9 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
   const quotation = await store.getQuotationById(id, orgId);
 
   if (!quotation) notFound();
+
+  // Mark customer chat as read ONLY when this quotation is opened from the dashboard
+  await store.markQuotationChatRead(id, quotation.organization_id, auth?.fullName || auth?.email || 'Staff');
 
   const org = quotation.organization;
   const customer = quotation.customer;
@@ -259,9 +263,25 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Project Title
+                  Project / Scope Title
                 </span>
                 <p className="font-bold text-slate-900 mt-1">{quotation.title}</p>
+                <p className="text-slate-500 mt-1 flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>
+                    Validity:{' '}
+                    {(() => {
+                      if (!quotation.issue_date || !quotation.valid_until) return '14 days';
+                      const [sy, sm, sd] = String(quotation.issue_date).split('T')[0].split('-').map(Number);
+                      const [ey, em, ed] = String(quotation.valid_until).split('T')[0].split('-').map(Number);
+                      const diff = Math.max(
+                        0,
+                        Math.round((Date.UTC(ey, (em || 1) - 1, ed || 1) - Date.UTC(sy, (sm || 1) - 1, sd || 1)) / (1000 * 60 * 60 * 24))
+                      );
+                      return `${diff} ${diff === 1 ? 'day' : 'days'} from issuance`;
+                    })()}
+                  </span>
+                </p>
               </div>
             </div>
 
@@ -380,17 +400,24 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
             )}
           </div>
 
-          {/* Right Side: Chronological Activity History / Audit Trail */}
-          <div className="lg:col-span-4 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <History className="h-4 w-4 text-indigo-600" />
-                <h3 className="font-bold text-sm text-slate-900">Audit History</h3>
+          {/* Right Side: Customer Chat & Chronological Activity History / Audit Trail */}
+          <div className="lg:col-span-4 space-y-6">
+            <QuotationChatPanel
+              quotationId={quotation.id}
+              quotationNumber={quotation.quotation_number}
+              customerName={customer?.name}
+            />
+
+            <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <History className="h-4 w-4 text-indigo-600" />
+                  <h3 className="font-bold text-sm text-slate-900">Audit History</h3>
+                </div>
+                <span className="text-[11px] font-semibold text-slate-400">
+                  {quotation.events?.length || 0} events
+                </span>
               </div>
-              <span className="text-[11px] font-semibold text-slate-400">
-                {quotation.events?.length || 0} events
-              </span>
-            </div>
 
             {/* Timeline UI */}
             <div className="space-y-4 pt-1">
@@ -468,6 +495,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   <span>{formatDateTime(quotation.last_viewed_at)}</span>
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>

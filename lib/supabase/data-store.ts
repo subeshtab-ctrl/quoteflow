@@ -4,6 +4,7 @@ import {
   Organization,
   Product,
   Quotation,
+  QuotationChatMessage,
   QuotationEvent,
   QuotationItem,
   QuotationSignature,
@@ -1095,10 +1096,6 @@ class QuoteFlowStore {
           .eq('organization_id', orgId)
           .order('created_at', { ascending: false });
 
-        if (filters?.status && filters.status !== 'ALL') {
-          query = query.eq('status', filters.status);
-        }
-
         if (filters?.customerId) {
           query = query.eq('customer_id', filters.customerId);
         }
@@ -1116,18 +1113,19 @@ class QuoteFlowStore {
 
           const filePayments = this.loadPaymentsFromFile();
 
-          // Fetch payment events from Supabase to ensure accurate paid status across all clients
+          // Fetch payment and chat events from Supabase to ensure accurate status across all clients
           const paymentMap: Record<string, { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }> = {};
+          const chatEventsByQuote: Record<string, { messages: Array<{ senderRole: string; createdAt: string }>; lastReadAt: string | null }> = {};
           try {
-            const { data: payEvents } = await supabase
+            const { data: orgEvents } = await supabase
               .from('quotation_events')
-              .select('quotation_id, event_type, metadata, created_at')
+              .select('quotation_id, actor_type, event_type, metadata, created_at')
               .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'MARKED_UNPAID'])
+              .in('event_type', ['MARKED_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ'])
               .order('created_at', { ascending: true });
 
-            if (payEvents) {
-              for (const pe of payEvents) {
+            if (orgEvents) {
+              for (const pe of orgEvents) {
                 if (pe.event_type === 'MARKED_PAID') {
                   paymentMap[pe.quotation_id] = {
                     is_paid: true,
@@ -1142,10 +1140,29 @@ class QuoteFlowStore {
                     payment_method: null,
                     payment_notes: null,
                   };
+                } else if (pe.event_type === 'CHAT_MESSAGE') {
+                  if (!chatEventsByQuote[pe.quotation_id]) {
+                    chatEventsByQuote[pe.quotation_id] = { messages: [], lastReadAt: null };
+                  }
+                  const senderRole = pe.metadata?.sender_role || (pe.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF');
+                  chatEventsByQuote[pe.quotation_id].messages.push({
+                    senderRole,
+                    createdAt: pe.created_at,
+                  });
+                  if (senderRole === 'STAFF') {
+                    chatEventsByQuote[pe.quotation_id].lastReadAt = pe.created_at;
+                  }
+                } else if (pe.event_type === 'CHAT_READ') {
+                  if (!chatEventsByQuote[pe.quotation_id]) {
+                    chatEventsByQuote[pe.quotation_id] = { messages: [], lastReadAt: null };
+                  }
+                  chatEventsByQuote[pe.quotation_id].lastReadAt = pe.created_at;
                 }
               }
             }
           } catch {}
+
+          const expiredToUpdate: string[] = [];
 
           for (const q of data) {
             const existing = this.quotations.get(q.id);
@@ -1169,13 +1186,40 @@ class QuoteFlowStore {
               paymentNotes = filePay.payment_notes || null;
             }
 
+            // Auto-expire at the end of valid_until date (23:59:59.999)
+            let currentStatus = q.status;
+            let expiredAt = q.expired_at || existing?.expired_at || null;
+            if (
+              ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
+              this.isPastEndOfValidityDate(q.valid_until)
+            ) {
+              currentStatus = 'EXPIRED';
+              expiredAt = expiredAt || new Date().toISOString();
+              expiredToUpdate.push(q.id);
+            }
+
+            // Calculate chat unread status
+            const chatStats = chatEventsByQuote[q.id];
+            const chatCount = chatStats ? chatStats.messages.length : 0;
+            const lastReadTime = chatStats?.lastReadAt ? new Date(chatStats.lastReadAt).getTime() : 0;
+            const unreadChatCount = chatStats
+              ? chatStats.messages.filter(
+                  (m) => m.senderRole === 'CUSTOMER' && new Date(m.createdAt).getTime() > lastReadTime
+                ).length
+              : 0;
+
             const merged: Quotation = {
               ...(existing || {}),
               ...q,
+              status: currentStatus,
+              expired_at: expiredAt,
               is_paid: isPaid,
               paid_at: paidAt,
               payment_method: paymentMethod,
               payment_notes: paymentNotes,
+              chat_count: chatCount,
+              unread_chat_count: unreadChatCount,
+              has_unread_chat: unreadChatCount > 0,
             };
             this.quotations.set(q.id, merged);
             if (q.customer) {
@@ -1186,7 +1230,19 @@ class QuoteFlowStore {
             }
           }
 
+          if (expiredToUpdate.length > 0) {
+            const nowIso = new Date().toISOString();
+            supabase
+              .from('quotations')
+              .update({ status: 'EXPIRED', expired_at: nowIso, updated_at: nowIso })
+              .in('id', expiredToUpdate)
+              .then(() => {});
+          }
+
           let results = data.map((q) => this.quotations.get(q.id) as Quotation);
+          if (filters?.status && filters.status !== 'ALL') {
+            results = results.filter((item) => item.status === filters.status);
+          }
           if (filters?.search) {
             const s = filters.search.toLowerCase();
             results = results.filter((item) => {
@@ -1309,13 +1365,36 @@ class QuoteFlowStore {
             paymentNotes = filePayment.payment_notes || null;
           }
 
+          // Auto-expire at end of valid_until date (23:59:59.999)
+          let currentStatus = data.status;
+          let expiredAt = data.expired_at || existing?.expired_at || null;
+          if (
+            ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
+            this.isPastEndOfValidityDate(data.valid_until)
+          ) {
+            currentStatus = 'EXPIRED';
+            expiredAt = expiredAt || new Date().toISOString();
+            supabase
+              .from('quotations')
+              .update({ status: 'EXPIRED', expired_at: expiredAt, updated_at: new Date().toISOString() })
+              .eq('id', data.id)
+              .then(() => {});
+          }
+
+          const chatState = this.computeChatStatsFromEvents(eventsData || []);
+
           const merged: Quotation = {
             ...(existing || {}),
             ...data,
+            status: currentStatus,
+            expired_at: expiredAt,
             is_paid: isPaid,
             paid_at: paidAt,
             payment_method: paymentMethod,
             payment_notes: paymentNotes,
+            chat_count: chatState.chatCount,
+            unread_chat_count: chatState.unreadChatCount,
+            has_unread_chat: chatState.unreadChatCount > 0,
           };
           this.quotations.set(data.id, merged);
           if (data.customer) {
@@ -1344,6 +1423,15 @@ class QuoteFlowStore {
 
     const quote = this.quotations.get(id);
     if (!quote || quote.organization_id !== orgId) return null;
+
+    if (
+      ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(quote.status) &&
+      this.isPastEndOfValidityDate(quote.valid_until)
+    ) {
+      quote.status = 'EXPIRED';
+      quote.expired_at = quote.expired_at || new Date().toISOString();
+      this.quotations.set(id, quote);
+    }
 
     const org = (await this.getOrganization(quote.organization_id)) || this.organizations.get(quote.organization_id);
 
@@ -1424,13 +1512,36 @@ class QuoteFlowStore {
             paymentNotes = filePayment.payment_notes || null;
           }
 
+          // Auto-expire at end of valid_until date (23:59:59.999)
+          let currentStatus = data.status;
+          let expiredAt = data.expired_at || existing?.expired_at || null;
+          if (
+            ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
+            this.isPastEndOfValidityDate(data.valid_until)
+          ) {
+            currentStatus = 'EXPIRED';
+            expiredAt = expiredAt || new Date().toISOString();
+            supabase
+              .from('quotations')
+              .update({ status: 'EXPIRED', expired_at: expiredAt, updated_at: new Date().toISOString() })
+              .eq('id', data.id)
+              .then(() => {});
+          }
+
+          const chatState = this.computeChatStatsFromEvents(eventsData || []);
+
           const merged: Quotation = {
             ...(existing || {}),
             ...data,
+            status: currentStatus,
+            expired_at: expiredAt,
             is_paid: isPaid,
             paid_at: paidAt,
             payment_method: paymentMethod,
             payment_notes: paymentNotes,
+            chat_count: chatState.chatCount,
+            unread_chat_count: chatState.unreadChatCount,
+            has_unread_chat: chatState.unreadChatCount > 0,
           };
 
           this.quotations.set(data.id, merged);
@@ -1985,14 +2096,17 @@ class QuoteFlowStore {
       throw new Error('This quotation link has been revoked');
     }
 
-    // Expiry Check
-    const validUntilDate = new Date(quote.valid_until);
-    if (validUntilDate.getTime() < new Date().setHours(0, 0, 0, 0)) {
+    // Expiry Check (end of valid_until date)
+    if (this.isPastEndOfValidityDate(quote.valid_until) || quote.status === 'EXPIRED') {
       throw new Error(`This quotation expired on ${quote.valid_until}`);
     }
 
     if (quote.status === 'APPROVED') {
       throw new Error('This quotation has already been approved.');
+    }
+
+    if (quote.status === 'REJECTED') {
+      throw new Error('This quotation has already been rejected.');
     }
 
     if (quote.status === 'CANCELLED') {
@@ -2455,6 +2569,232 @@ class QuoteFlowStore {
       created_at: new Date().toISOString(),
     };
     this.notifications.set(id, notif);
+  }
+
+  // --- VALIDITY DATE & CHAT HELPERS ---
+  public isPastEndOfValidityDate(validUntil?: string | null): boolean {
+    if (!validUntil) return false;
+    const datePart = String(validUntil).split('T')[0];
+    const parts = datePart.split('-').map(Number);
+    if (parts.length === 3 && !parts.some(isNaN)) {
+      const endOfDay = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999);
+      return Date.now() > endOfDay.getTime();
+    }
+    const d = new Date(validUntil);
+    if (isNaN(d.getTime())) return false;
+    d.setHours(23, 59, 59, 999);
+    return Date.now() > d.getTime();
+  }
+
+  private computeChatStatsFromEvents(events: any[]): { chatCount: number; unreadChatCount: number } {
+    if (!events || events.length === 0) return { chatCount: 0, unreadChatCount: 0 };
+    const sorted = [...events].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    let lastReadAt: string | null = null;
+    const messages: Array<{ senderRole: string; createdAt: string }> = [];
+
+    for (const ev of sorted) {
+      if (ev.event_type === 'CHAT_MESSAGE') {
+        const senderRole = ev.metadata?.sender_role || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF');
+        messages.push({ senderRole, createdAt: ev.created_at });
+        if (senderRole === 'STAFF') {
+          lastReadAt = ev.created_at;
+        }
+      } else if (ev.event_type === 'CHAT_READ') {
+        lastReadAt = ev.created_at;
+      }
+    }
+
+    const lastReadTime = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+    const unreadChatCount = messages.filter(
+      (m) => m.senderRole === 'CUSTOMER' && new Date(m.createdAt).getTime() > lastReadTime
+    ).length;
+
+    return { chatCount: messages.length, unreadChatCount };
+  }
+
+  public async getQuotationChatMessages(quotationId: string): Promise<QuotationChatMessage[]> {
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('quotation_events')
+          .select('*')
+          .eq('quotation_id', quotationId)
+          .eq('event_type', 'CHAT_MESSAGE')
+          .order('created_at', { ascending: true });
+
+        if (!error && data) {
+          return data.map((ev: any) => ({
+            id: ev.id,
+            quotation_id: ev.quotation_id,
+            sender_role: ev.metadata?.sender_role || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF'),
+            sender_name: ev.metadata?.sender_name || ev.actor_name || (ev.actor_type === 'CUSTOMER' ? 'Customer' : 'Team'),
+            message: ev.metadata?.message || '',
+            created_at: ev.created_at,
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching chat messages from Supabase:', err);
+    }
+
+    const localEvents = (this.events.get(quotationId) || [])
+      .filter((ev) => ev.event_type === 'CHAT_MESSAGE')
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    return localEvents.map((ev) => ({
+      id: ev.id,
+      quotation_id: ev.quotation_id,
+      sender_role: (ev.metadata?.sender_role as 'CUSTOMER' | 'STAFF') || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF'),
+      sender_name: (ev.metadata?.sender_name as string) || ev.actor_name || (ev.actor_type === 'CUSTOMER' ? 'Customer' : 'Team'),
+      message: (ev.metadata?.message as string) || '',
+      created_at: ev.created_at,
+    }));
+  }
+
+  public async addQuotationChatMessage(params: {
+    quotationId: string;
+    organizationId: string;
+    senderRole: 'CUSTOMER' | 'STAFF';
+    senderName: string;
+    message: string;
+  }): Promise<QuotationChatMessage> {
+    const now = new Date().toISOString();
+    const trimmedMessage = params.message.trim();
+    const eventId = `chat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    const list = this.events.get(params.quotationId) || [];
+    const localEvt: QuotationEvent = {
+      id: eventId,
+      organization_id: params.organizationId,
+      quotation_id: params.quotationId,
+      actor_type: params.senderRole === 'CUSTOMER' ? 'CUSTOMER' : 'USER',
+      actor_name: params.senderName,
+      event_type: 'CHAT_MESSAGE',
+      metadata: {
+        sender_role: params.senderRole,
+        sender_name: params.senderName,
+        message: trimmedMessage,
+      },
+      created_at: now,
+    };
+    list.push(localEvt);
+    this.events.set(params.quotationId, list);
+
+    const existingQuote = this.quotations.get(params.quotationId);
+    if (existingQuote) {
+      existingQuote.chat_count = (existingQuote.chat_count || 0) + 1;
+      if (params.senderRole === 'CUSTOMER') {
+        existingQuote.unread_chat_count = (existingQuote.unread_chat_count || 0) + 1;
+        existingQuote.has_unread_chat = true;
+      } else {
+        existingQuote.unread_chat_count = 0;
+        existingQuote.has_unread_chat = false;
+      }
+      this.quotations.set(params.quotationId, existingQuote);
+    }
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data } = await supabase
+          .from('quotation_events')
+          .insert({
+            organization_id: params.organizationId,
+            quotation_id: params.quotationId,
+            actor_type: params.senderRole === 'CUSTOMER' ? 'CUSTOMER' : 'USER',
+            actor_name: params.senderName,
+            event_type: 'CHAT_MESSAGE',
+            metadata: {
+              sender_role: params.senderRole,
+              sender_name: params.senderName,
+              message: trimmedMessage,
+            },
+            created_at: now,
+          })
+          .select('*')
+          .maybeSingle();
+
+        if (data?.id) {
+          return {
+            id: data.id,
+            quotation_id: params.quotationId,
+            sender_role: params.senderRole,
+            sender_name: params.senderName,
+            message: trimmedMessage,
+            created_at: data.created_at || now,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Error saving chat message to Supabase:', err);
+    }
+
+    return {
+      id: eventId,
+      quotation_id: params.quotationId,
+      sender_role: params.senderRole,
+      sender_name: params.senderName,
+      message: trimmedMessage,
+      created_at: now,
+    };
+  }
+
+  public async markQuotationChatRead(
+    quotationId: string,
+    organizationId: string,
+    readerName: string = 'Staff'
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data: events } = await supabase
+          .from('quotation_events')
+          .select('actor_type, event_type, metadata, created_at')
+          .eq('quotation_id', quotationId)
+          .in('event_type', ['CHAT_MESSAGE', 'CHAT_READ'])
+          .order('created_at', { ascending: true });
+
+        const stats = this.computeChatStatsFromEvents(events || []);
+        if (stats.unreadChatCount > 0) {
+          await supabase.from('quotation_events').insert({
+            organization_id: organizationId,
+            quotation_id: quotationId,
+            actor_type: 'USER',
+            actor_name: readerName,
+            event_type: 'CHAT_READ',
+            metadata: { read_by: readerName, read_at: now },
+            created_at: now,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Error marking quotation chat read in Supabase:', err);
+    }
+
+    const list = this.events.get(quotationId) || [];
+    list.push({
+      id: `chat_read_${Date.now()}`,
+      organization_id: organizationId,
+      quotation_id: quotationId,
+      actor_type: 'USER',
+      actor_name: readerName,
+      event_type: 'CHAT_READ',
+      metadata: { read_by: readerName, read_at: now },
+      created_at: now,
+    });
+    this.events.set(quotationId, list);
+
+    const existingQuote = this.quotations.get(quotationId);
+    if (existingQuote) {
+      existingQuote.unread_chat_count = 0;
+      existingQuote.has_unread_chat = false;
+      this.quotations.set(quotationId, existingQuote);
+    }
   }
 
   // --- AUDIT LOG EVENT HELPER ---

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Quotation } from '@/types/database';
+import React, { useState, useEffect, useRef } from 'react';
+import { Quotation, QuotationChatMessage } from '@/types/database';
 import { formatCurrency } from '@/lib/quotations/calculations';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/badge';
@@ -17,6 +17,8 @@ import {
   Building2,
   Calendar,
   AlertTriangle,
+  MessageSquare,
+  Send,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -36,20 +38,120 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
+  // Customer Chat state
+  const [chatMessages, setChatMessages] = useState<QuotationChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [senderName, setSenderName] = useState(
+    initialQuotation.customer?.name || initialQuotation.customer?.company_name || ''
+  );
+  const [isSendingChat, setIsSendingChat] = useState(false);
+  const [isChatExpanded, setIsChatExpanded] = useState(true);
+  const chatSectionRef = useRef<HTMLDivElement>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+
   const org = quotation.organization;
   const customer = quotation.customer;
   const grandTotalFormatted = formatCurrency(quotation.grand_total, quotation.currency);
 
+  const getValidityEndTime = (validUntil?: string | null) => {
+    if (!validUntil) return Infinity;
+    const datePart = String(validUntil).split('T')[0];
+    const parts = datePart.split('-').map(Number);
+    if (parts.length === 3 && !parts.some(isNaN)) {
+      return new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).getTime();
+    }
+    const d = new Date(validUntil);
+    if (isNaN(d.getTime())) return Infinity;
+    d.setHours(23, 59, 59, 999);
+    return d.getTime();
+  };
+
   const isExpired =
-    new Date(quotation.valid_until).getTime() < new Date().setHours(0, 0, 0, 0) &&
-    quotation.status !== 'APPROVED';
+    quotation.status === 'EXPIRED' ||
+    (Date.now() > getValidityEndTime(quotation.valid_until) &&
+      quotation.status !== 'APPROVED' &&
+      quotation.status !== 'REJECTED');
 
   const canTakeAction =
     !isExpired &&
     !quotation.is_token_revoked &&
     quotation.status !== 'APPROVED' &&
+    quotation.status !== 'REJECTED' &&
+    quotation.status !== 'EXPIRED' &&
     quotation.status !== 'CANCELLED' &&
     quotation.status !== 'DRAFT';
+
+  const validityDays = (() => {
+    if (!quotation.issue_date || !quotation.valid_until) return 14;
+    const startStr = String(quotation.issue_date).split('T')[0];
+    const endStr = String(quotation.valid_until).split('T')[0];
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = endStr.split('-').map(Number);
+    const startUtc = Date.UTC(sy, (sm || 1) - 1, sd || 1);
+    const endUtc = Date.UTC(ey, (em || 1) - 1, ed || 1);
+    const diffDays = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 ? diffDays : 0;
+  })();
+
+  const loadChatMessages = async () => {
+    try {
+      const res = await fetch(`/api/public/chat?token=${encodeURIComponent(token)}`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.messages)) {
+          setChatMessages(data.messages);
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    loadChatMessages();
+    const interval = setInterval(loadChatMessages, 8000);
+    return () => clearInterval(interval);
+  }, [token]);
+
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isSendingChat) return;
+    try {
+      setIsSendingChat(true);
+      const res = await fetch('/api/public/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          sender_name: senderName || customer?.name || 'Customer',
+          message: chatInput.trim(),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setChatInput('');
+        if (Array.isArray(data.messages)) {
+          setChatMessages(data.messages);
+        } else {
+          await loadChatMessages();
+        }
+        setTimeout(() => {
+          chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      }
+    } catch (err) {
+      console.error('Failed to send chat:', err);
+    } finally {
+      setIsSendingChat(false);
+    }
+  };
+
+  const openAndScrollToChat = () => {
+    setIsChatExpanded(true);
+    setTimeout(() => {
+      chatSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
 
   const handleDownloadPdf = async () => {
     try {
@@ -82,6 +184,11 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
     refreshQuotationData();
   };
 
+  const handleRejected = () => {
+    setQuotation((prev) => ({ ...prev, status: 'REJECTED' }));
+    refreshQuotationData();
+  };
+
   const refreshQuotationData = async () => {
     try {
       const res = await fetch(`/api/public/quote?token=${encodeURIComponent(token)}`);
@@ -91,10 +198,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
           setQuotation(data.quotation);
         }
       }
-    } catch {
-      // Fallback local status update
-      setQuotation((prev) => ({ ...prev, status: 'APPROVED' }));
-    }
+    } catch {}
   };
 
   return (
@@ -310,7 +414,9 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
               <h3 className="text-base font-bold text-slate-900 mt-1">{quotation.title}</h3>
               <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
                 <Calendar className="h-3.5 w-3.5 text-indigo-500" />
-                <span>Validity: 30 days from issuance</span>
+                <span>
+                  Validity: {validityDays} {validityDays === 1 ? 'day' : 'days'} from issuance
+                </span>
               </div>
             </div>
           </div>
@@ -375,7 +481,10 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
                     Terms & Conditions
                   </h4>
                   <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
-                    {quotation.terms_conditions}
+                    {quotation.terms_conditions.replace(
+                      /Quotation valid for \d+ days?/gi,
+                      `Quotation valid for ${validityDays} ${validityDays === 1 ? 'day' : 'days'}`
+                    )}
                   </p>
                 </div>
               )}
@@ -475,20 +584,21 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
           </div>
         </div>
 
-        {/* Bottom CTA for Mobile */}
-        {canTakeAction && (
+        {/* Bottom CTA ("down side") */}
+        {canTakeAction ? (
           <div className="rounded-2xl bg-indigo-600 p-6 text-white text-center shadow-xl space-y-4">
             <h3 className="text-lg font-bold">Ready to approve this quotation?</h3>
             <p className="text-xs sm:text-sm text-indigo-100 max-w-md mx-auto">
               You can digitally sign with touch or mouse. No account creation or login required.
             </p>
-            <div className="flex justify-center gap-3">
+            <div className="flex flex-wrap justify-center gap-3">
               <Button
                 variant="outline"
-                onClick={() => setIsRejectionOpen(true)}
+                onClick={openAndScrollToChat}
                 className="bg-white/10 text-white border-white/20 hover:bg-white/20"
               >
-                Request Changes
+                <MessageSquare className="h-4 w-4 mr-1.5" />
+                Chat
               </Button>
               <Button
                 variant="success"
@@ -500,7 +610,136 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
               </Button>
             </div>
           </div>
+        ) : (
+          <div className="rounded-2xl bg-indigo-600 p-6 text-white text-center shadow-xl space-y-3">
+            <h3 className="text-lg font-bold">
+              {quotation.status === 'REJECTED'
+                ? 'Need to discuss changes or send a message?'
+                : quotation.status === 'APPROVED'
+                  ? 'Have a question about your approved quotation?'
+                  : 'Need assistance with this quotation?'}
+            </h3>
+            <p className="text-xs sm:text-sm text-indigo-100 max-w-md mx-auto">
+              Send a direct chat message to {org?.name || 'our team'} regarding quotation {quotation.quotation_number}.
+            </p>
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                onClick={openAndScrollToChat}
+                className="bg-white text-indigo-700 border-white hover:bg-indigo-50 font-bold px-6 shadow-md"
+              >
+                <MessageSquare className="h-4 w-4 mr-1.5" />
+                Chat
+              </Button>
+            </div>
+          </div>
         )}
+
+        {/* Customer Chat Section (Down side) */}
+        <div
+          ref={chatSectionRef}
+          id="customer-chat"
+          className="rounded-2xl bg-white border border-slate-200/90 shadow-lg overflow-hidden"
+        >
+          <div
+            onClick={() => setIsChatExpanded((prev) => !prev)}
+            className="flex items-center justify-between px-5 py-4 bg-slate-900 text-white cursor-pointer select-none"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white">
+                <MessageSquare className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2">
+                  Chat with {org?.name || 'Our Team'}
+                  {chatMessages.length > 0 && (
+                    <span className="inline-flex items-center rounded-full bg-indigo-500/30 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">
+                      {chatMessages.length} {chatMessages.length === 1 ? 'message' : 'messages'}
+                    </span>
+                  )}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Ask questions, request changes, or discuss quotation {quotation.quotation_number}
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-semibold text-indigo-300 hover:text-white">
+              {isChatExpanded ? 'Hide' : 'Open Chat'}
+            </span>
+          </div>
+
+          {isChatExpanded && (
+            <div className="p-5 space-y-4">
+              <div className="max-h-80 overflow-y-auto space-y-3 rounded-xl bg-slate-50 p-4 border border-slate-100">
+                {chatMessages.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-400">
+                    No messages yet. Type a message below to start chatting with {org?.name || 'us'}.
+                  </div>
+                ) : (
+                  chatMessages.map((msg) => {
+                    const isCustomer = msg.sender_role === 'CUSTOMER';
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1 px-1">
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {isCustomer ? `${msg.sender_name} (You)` : msg.sender_name}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {formatDateTime(msg.created_at)}
+                          </span>
+                        </div>
+                        <div
+                          className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-xs ${
+                            isCustomer
+                              ? 'bg-indigo-600 text-white rounded-br-xs'
+                              : 'bg-white text-slate-800 border border-slate-200 rounded-bl-xs'
+                          }`}
+                        >
+                          {msg.message}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={chatMessagesEndRef} />
+              </div>
+
+              <form onSubmit={handleSendChat} className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2.5">
+                  <input
+                    type="text"
+                    value={senderName}
+                    onChange={(e) => setSenderName(e.target.value)}
+                    placeholder="Your Name"
+                    className="sm:w-48 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm text-slate-800 focus:border-indigo-500 focus:outline-none"
+                  />
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Write your message or change request..."
+                      className="flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm text-slate-800 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      isLoading={isSendingChat}
+                      disabled={!chatInput.trim() || isSendingChat}
+                      className="px-5 font-semibold"
+                    >
+                      <Send className="h-4 w-4 mr-1.5" />
+                      Send
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Modals */}
@@ -521,7 +760,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         onClose={() => setIsRejectionOpen(false)}
         quotationNumber={quotation.quotation_number}
         token={token}
-        onRejected={refreshQuotationData}
+        onRejected={handleRejected}
       />
     </div>
   );
