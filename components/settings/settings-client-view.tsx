@@ -1097,6 +1097,62 @@ export function SettingsClientView({
         )}
       </form>
 
+      {/* Update Password Section (For Logged-in Admin, Owner, and Staff Accounts) */}
+      <form
+        onSubmit={handleUpdateOwnPassword}
+        className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4"
+      >
+        <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+          <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
+            Update Account Password
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Change the login password for your currently signed-in account ({currentUserEmail}).
+          </p>
+        </div>
+
+        {passwordChangeMsg && (
+          <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-3 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span>{passwordChangeMsg}</span>
+          </div>
+        )}
+
+        {passwordChangeError && (
+          <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-3 text-xs font-semibold text-rose-700 dark:text-rose-300">
+            {passwordChangeError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input
+            label="New Password *"
+            type="password"
+            value={myNewPassword}
+            onChange={(e) => setMyNewPassword(e.target.value)}
+            placeholder="At least 6 characters"
+            minLength={6}
+            required
+          />
+          <Input
+            label="Confirm New Password *"
+            type="password"
+            value={myConfirmPassword}
+            onChange={(e) => setMyConfirmPassword(e.target.value)}
+            placeholder="Re-enter your new password"
+            minLength={6}
+            required
+          />
+        </div>
+
+        <div className="flex justify-end pt-1">
+          <Button type="submit" variant="primary" isLoading={isChangingMyPassword} className="gap-2 shadow-sm">
+            <Save className="h-4 w-4" />
+            <span>Update Password</span>
+          </Button>
+        </div>
+      </form>
+
       {/* Add Staff Member Modal (Direct Password Setup Only) */}
       {isAddStaffOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
