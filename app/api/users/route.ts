@@ -52,6 +52,10 @@ export async function GET() {
           user.user_metadata?.role ||
           (user.id === auth.userId ? auth.role : 'STAFF');
 
+        const mustChangePassword = Boolean(user.user_metadata?.must_change_password);
+        const isVerifiedWithOwnPassword =
+          Boolean(user.email_confirmed_at) && !mustChangePassword;
+
         return {
           id: user.id,
           email: user.email,
@@ -61,7 +65,8 @@ export async function GET() {
             (user.email ? user.email.split('@')[0] : 'Member'),
           role,
           company_name: user.user_metadata?.company_name || auth.organization.name,
-          email_confirmed: !!user.email_confirmed_at,
+          email_confirmed: isVerifiedWithOwnPassword,
+          must_change_password: mustChangePassword,
           created_at: member?.created_at || user.created_at,
           last_sign_in_at: user.last_sign_in_at,
         };

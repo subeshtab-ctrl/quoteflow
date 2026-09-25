@@ -1045,20 +1045,22 @@ export function SettingsClientView({
                             : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
                         }`}
                       >
-                        {user.email_confirmed ? 'Verified' : 'Pending Verification'}
+                        {user.email_confirmed ? 'Verified' : 'Temp Password'}
                       </span>
 
                       {canDelete && (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => handleResetStaffPassword(user.id, user.email)}
-                            disabled={deletingUserId === user.id}
-                            className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
-                            title="Set or Reset Temporary Password"
-                          >
-                            <span>Set Temp Password</span>
-                          </button>
+                          {!user.email_confirmed && (
+                            <button
+                              type="button"
+                              onClick={() => handleResetStaffPassword(user.id, user.email)}
+                              disabled={deletingUserId === user.id}
+                              className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
+                              title="Set or Reset Temporary Password"
+                            >
+                              <span>Set Temp Password</span>
+                            </button>
+                          )}
 
                           <button
                             type="button"
@@ -1093,62 +1095,6 @@ export function SettingsClientView({
             </Button>
           </div>
         )}
-      </form>
-
-      {/* Account Security / Set Own Password Card (Available to Staff, Admin, and Owner) */}
-      <form
-        onSubmit={handleUpdateOwnPassword}
-        className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4"
-      >
-        <div>
-          <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
-            Account Security &amp; Password ({currentUserEmail})
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Set or update your personal login password at any time.
-          </p>
-        </div>
-
-        {passwordChangeMsg && (
-          <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-3 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <span>{passwordChangeMsg}</span>
-          </div>
-        )}
-
-        {passwordChangeError && (
-          <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-3 text-xs font-semibold text-rose-700 dark:text-rose-300">
-            {passwordChangeError}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            label="New Password *"
-            type="password"
-            value={myNewPassword}
-            onChange={(e) => setMyNewPassword(e.target.value)}
-            placeholder="At least 6 characters"
-            minLength={6}
-            required
-          />
-          <Input
-            label="Confirm New Password *"
-            type="password"
-            value={myConfirmPassword}
-            onChange={(e) => setMyConfirmPassword(e.target.value)}
-            placeholder="Repeat your new password"
-            minLength={6}
-            required
-          />
-        </div>
-
-        <div className="flex justify-end">
-          <Button type="submit" variant="outline" isLoading={isChangingMyPassword} className="gap-2">
-            <Save className="h-4 w-4" />
-            <span>Update My Password</span>
-          </Button>
-        </div>
       </form>
 
       {/* Add Staff Member Modal (Direct Password Setup Only) */}
