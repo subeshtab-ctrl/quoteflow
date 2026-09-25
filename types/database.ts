@@ -237,6 +237,7 @@ export interface QuotationChatMessage {
   sender_name: string;
   message: string;
   created_at: string;
+  is_read?: boolean;
 }
 
 export interface Notification {

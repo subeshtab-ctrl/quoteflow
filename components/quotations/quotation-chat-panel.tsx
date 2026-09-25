@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { QuotationChatMessage } from '@/types/database';
 import { formatDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { MessageSquare, Send } from 'lucide-react';
+import { MessageSquare, Send, CheckCheck } from 'lucide-react';
 
 interface QuotationChatPanelProps {
   quotationId: string;
@@ -154,11 +154,30 @@ export function QuotationChatPanel({
                   <div
                     className={`max-w-[88%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed shadow-xs ${
                       isStaff
-                        ? 'bg-indigo-600 text-white rounded-br-xs'
+                        ? 'bg-slate-900 text-white rounded-br-xs'
                         : 'bg-white text-slate-800 border border-emerald-200 rounded-bl-xs'
                     }`}
                   >
-                    {msg.message}
+                    <div>{msg.message}</div>
+                    {isStaff && (
+                      <div
+                        className="mt-1 flex items-center justify-end gap-1"
+                        title={msg.is_read ? 'Read by customer' : 'Delivered'}
+                      >
+                        <span
+                          className={`text-[9px] font-medium ${
+                            msg.is_read ? 'text-emerald-400' : 'text-slate-400'
+                          }`}
+                        >
+                          {msg.is_read ? 'Read' : 'Delivered'}
+                        </span>
+                        <CheckCheck
+                          className={`h-3.5 w-3.5 ${
+                            msg.is_read ? 'text-emerald-400' : 'text-slate-400'
+                          }`}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               );

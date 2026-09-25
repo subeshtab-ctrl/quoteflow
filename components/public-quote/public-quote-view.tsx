@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   MessageSquare,
   Send,
+  CheckCheck,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -46,10 +47,13 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   );
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [isChatPopupOpen, setIsChatPopupOpen] = useState(false);
-  const [hasNewIncomingReply, setHasNewIncomingReply] = useState(false);
+  const isChatPopupOpenRef = useRef<boolean>(false);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const prevChatCountRef = useRef<number>(0);
-  const initialLoadDoneRef = useRef<boolean>(false);
+
+  const unreadStaffCount = chatMessages.filter(
+    (m) => m.sender_role === 'STAFF' && !m.is_read
+  ).length;
 
   const org = quotation.organization;
   const customer = quotation.customer;
@@ -95,31 +99,26 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
     return diffDays >= 0 ? diffDays : 0;
   })();
 
-  const loadChatMessages = async () => {
+  const loadChatMessages = async (forceMarkRead = false) => {
     try {
-      const res = await fetch(`/api/public/chat?token=${encodeURIComponent(token)}`, {
-        cache: 'no-store',
-      });
+      const shouldMarkRead = forceMarkRead || isChatPopupOpenRef.current;
+      const res = await fetch(
+        `/api/public/chat?token=${encodeURIComponent(token)}${shouldMarkRead ? '&markRead=true' : ''}`,
+        { cache: 'no-store' }
+      );
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.messages)) {
           const nextMessages: QuotationChatMessage[] = data.messages;
           const prevCount = prevChatCountRef.current;
 
-          if (initialLoadDoneRef.current && nextMessages.length > prevCount) {
-            const latestMsg = nextMessages[nextMessages.length - 1];
-            // Automatically pop open chat and scroll if a new message arrives
-            if (latestMsg?.sender_role === 'STAFF') {
-              setIsChatPopupOpen(true);
-              setHasNewIncomingReply(true);
-            }
+          if (nextMessages.length > prevCount && isChatPopupOpenRef.current) {
             setTimeout(() => {
               chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, 80);
           }
 
           prevChatCountRef.current = nextMessages.length;
-          initialLoadDoneRef.current = true;
           setChatMessages(nextMessages);
         }
       }
@@ -127,8 +126,8 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   };
 
   useEffect(() => {
-    loadChatMessages();
-    const interval = setInterval(loadChatMessages, 2500);
+    loadChatMessages(false);
+    const interval = setInterval(() => loadChatMessages(false), 2500);
     return () => clearInterval(interval);
   }, [token]);
 
@@ -153,7 +152,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
           prevChatCountRef.current = data.messages.length;
           setChatMessages(data.messages);
         } else {
-          await loadChatMessages();
+          await loadChatMessages(true);
         }
         setTimeout(() => {
           chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -167,11 +166,17 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   };
 
   const openChatPopup = () => {
+    isChatPopupOpenRef.current = true;
     setIsChatPopupOpen(true);
-    setHasNewIncomingReply(false);
+    loadChatMessages(true);
     setTimeout(() => {
       chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 80);
+  };
+
+  const closeChatPopup = () => {
+    isChatPopupOpenRef.current = false;
+    setIsChatPopupOpen(false);
   };
 
   const handleDownloadPdf = async () => {
@@ -620,9 +625,10 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
               >
                 <MessageSquare className="h-4 w-4 mr-1.5" />
                 Chat
-                {chatMessages.length > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {chatMessages.length}
+                {unreadStaffCount > 0 && (
+                  <span className="ml-1.5 inline-flex items-center gap-1 justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                    <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                    {unreadStaffCount}
                   </span>
                 )}
               </Button>
@@ -656,9 +662,10 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
               >
                 <MessageSquare className="h-4 w-4 mr-1.5" />
                 Chat
-                {chatMessages.length > 0 && (
-                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {chatMessages.length}
+                {unreadStaffCount > 0 && (
+                  <span className="ml-1.5 inline-flex items-center gap-1 justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                    <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                    {unreadStaffCount}
                   </span>
                 )}
               </Button>
@@ -676,10 +683,10 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         >
           <MessageSquare className="h-4 w-4 text-emerald-400" />
           <span className="text-xs font-bold">Chat</span>
-          {(hasNewIncomingReply || chatMessages.length > 0) && (
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          {unreadStaffCount > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              {unreadStaffCount}
             </span>
           )}
         </button>
@@ -711,7 +718,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
             </div>
             <button
               type="button"
-              onClick={() => setIsChatPopupOpen(false)}
+              onClick={closeChatPopup}
               className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
               title="Close Chat"
             >
@@ -748,11 +755,30 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
                       <div
                         className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed shadow-xs ${
                           isCustomer
-                            ? 'bg-indigo-600 text-white rounded-br-xs'
+                            ? 'bg-slate-900 text-white rounded-br-xs'
                             : 'bg-white text-slate-800 border border-emerald-200 rounded-bl-xs'
                         }`}
                       >
-                        {msg.message}
+                        <div>{msg.message}</div>
+                        {isCustomer && (
+                          <div
+                            className="mt-1 flex items-center justify-end gap-1"
+                            title={msg.is_read ? 'Read by team' : 'Delivered'}
+                          >
+                            <span
+                              className={`text-[9px] font-medium ${
+                                msg.is_read ? 'text-emerald-400' : 'text-slate-400'
+                              }`}
+                            >
+                              {msg.is_read ? 'Read' : 'Delivered'}
+                            </span>
+                            <CheckCheck
+                              className={`h-3.5 w-3.5 ${
+                                msg.is_read ? 'text-emerald-400' : 'text-slate-400'
+                              }`}
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

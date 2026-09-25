@@ -15,6 +15,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
     }
 
+    const markRead = request.nextUrl.searchParams.get('markRead') === 'true';
+    if (markRead) {
+      await store.markCustomerChatRead(
+        quotation.id,
+        quotation.organization_id,
+        quotation.customer?.name || quotation.customer?.company_name || 'Customer'
+      );
+    }
+
     const messages = await store.getQuotationChatMessages(quotation.id);
     return NextResponse.json({ messages });
   } catch (err: any) {
@@ -49,6 +58,8 @@ export async function POST(request: NextRequest) {
       senderName,
       message: String(message).trim(),
     });
+
+    await store.markCustomerChatRead(quotation.id, quotation.organization_id, senderName);
 
     const messages = await store.getQuotationChatMessages(quotation.id);
     return NextResponse.json({ message: saved, messages });

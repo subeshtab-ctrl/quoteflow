@@ -2614,6 +2614,57 @@ class QuoteFlowStore {
     return { chatCount: messages.length, unreadChatCount };
   }
 
+  private mapEventsToChatMessages(events: any[]): QuotationChatMessage[] {
+    if (!events || events.length === 0) return [];
+    const sorted = [...events].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
+    let lastStaffReadTime = 0;
+    let lastCustomerReadTime = 0;
+
+    for (const ev of sorted) {
+      const t = new Date(ev.created_at).getTime();
+      if (ev.event_type === 'CHAT_READ') {
+        if (t > lastStaffReadTime) lastStaffReadTime = t;
+      } else if (ev.event_type === 'CUSTOMER_CHAT_READ') {
+        if (t > lastCustomerReadTime) lastCustomerReadTime = t;
+      } else if (ev.event_type === 'CHAT_MESSAGE') {
+        const role = ev.metadata?.sender_role || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF');
+        if (role === 'STAFF' && t > lastStaffReadTime) {
+          lastStaffReadTime = t;
+        } else if (role === 'CUSTOMER' && t > lastCustomerReadTime) {
+          lastCustomerReadTime = t;
+        }
+      }
+    }
+
+    return sorted
+      .filter((ev) => ev.event_type === 'CHAT_MESSAGE')
+      .map((ev) => {
+        const senderRole: 'CUSTOMER' | 'STAFF' =
+          ev.metadata?.sender_role || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF');
+        const msgTime = new Date(ev.created_at).getTime();
+        const isRead =
+          senderRole === 'CUSTOMER'
+            ? lastStaffReadTime >= msgTime && lastStaffReadTime > 0
+            : lastCustomerReadTime >= msgTime && lastCustomerReadTime > 0;
+
+        return {
+          id: ev.id,
+          quotation_id: ev.quotation_id,
+          sender_role: senderRole,
+          sender_name:
+            ev.metadata?.sender_name ||
+            ev.actor_name ||
+            (senderRole === 'CUSTOMER' ? 'Customer' : 'Team'),
+          message: ev.metadata?.message || '',
+          created_at: ev.created_at,
+          is_read: isRead,
+        };
+      });
+  }
+
   public async getQuotationChatMessages(quotationId: string): Promise<QuotationChatMessage[]> {
     try {
       const supabase = createAdminClient();
@@ -2622,36 +2673,21 @@ class QuoteFlowStore {
           .from('quotation_events')
           .select('*')
           .eq('quotation_id', quotationId)
-          .eq('event_type', 'CHAT_MESSAGE')
+          .in('event_type', ['CHAT_MESSAGE', 'CHAT_READ', 'CUSTOMER_CHAT_READ'])
           .order('created_at', { ascending: true });
 
         if (!error && data) {
-          return data.map((ev: any) => ({
-            id: ev.id,
-            quotation_id: ev.quotation_id,
-            sender_role: ev.metadata?.sender_role || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF'),
-            sender_name: ev.metadata?.sender_name || ev.actor_name || (ev.actor_type === 'CUSTOMER' ? 'Customer' : 'Team'),
-            message: ev.metadata?.message || '',
-            created_at: ev.created_at,
-          }));
+          return this.mapEventsToChatMessages(data);
         }
       }
     } catch (err) {
       console.warn('Error fetching chat messages from Supabase:', err);
     }
 
-    const localEvents = (this.events.get(quotationId) || [])
-      .filter((ev) => ev.event_type === 'CHAT_MESSAGE')
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-    return localEvents.map((ev) => ({
-      id: ev.id,
-      quotation_id: ev.quotation_id,
-      sender_role: (ev.metadata?.sender_role as 'CUSTOMER' | 'STAFF') || (ev.actor_type === 'CUSTOMER' ? 'CUSTOMER' : 'STAFF'),
-      sender_name: (ev.metadata?.sender_name as string) || ev.actor_name || (ev.actor_type === 'CUSTOMER' ? 'Customer' : 'Team'),
-      message: (ev.metadata?.message as string) || '',
-      created_at: ev.created_at,
-    }));
+    const localEvents = (this.events.get(quotationId) || []).filter((ev) =>
+      ['CHAT_MESSAGE', 'CHAT_READ', 'CUSTOMER_CHAT_READ'].includes(ev.event_type)
+    );
+    return this.mapEventsToChatMessages(localEvents);
   }
 
   public async addQuotationChatMessage(params: {
@@ -2725,6 +2761,7 @@ class QuoteFlowStore {
             sender_name: params.senderName,
             message: trimmedMessage,
             created_at: data.created_at || now,
+            is_read: false,
           };
         }
       }
@@ -2739,6 +2776,7 @@ class QuoteFlowStore {
       sender_name: params.senderName,
       message: trimmedMessage,
       created_at: now,
+      is_read: false,
     };
   }
 
@@ -2795,6 +2833,56 @@ class QuoteFlowStore {
       existingQuote.has_unread_chat = false;
       this.quotations.set(quotationId, existingQuote);
     }
+  }
+
+  public async markCustomerChatRead(
+    quotationId: string,
+    organizationId: string,
+    customerName: string = 'Customer'
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data: events } = await supabase
+          .from('quotation_events')
+          .select('*')
+          .eq('quotation_id', quotationId)
+          .in('event_type', ['CHAT_MESSAGE', 'CHAT_READ', 'CUSTOMER_CHAT_READ'])
+          .order('created_at', { ascending: true });
+
+        const msgs = this.mapEventsToChatMessages(events || []);
+        const unreadStaffMsgs = msgs.filter((m) => m.sender_role === 'STAFF' && !m.is_read);
+
+        if (unreadStaffMsgs.length > 0) {
+          await supabase.from('quotation_events').insert({
+            organization_id: organizationId,
+            quotation_id: quotationId,
+            actor_type: 'CUSTOMER',
+            actor_name: customerName,
+            event_type: 'CUSTOMER_CHAT_READ',
+            metadata: { read_by: customerName, read_at: now },
+            created_at: now,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Error marking customer chat read in Supabase:', err);
+    }
+
+    const list = this.events.get(quotationId) || [];
+    list.push({
+      id: `cust_chat_read_${Date.now()}`,
+      organization_id: organizationId,
+      quotation_id: quotationId,
+      actor_type: 'CUSTOMER',
+      actor_name: customerName,
+      event_type: 'CUSTOMER_CHAT_READ',
+      metadata: { read_by: customerName, read_at: now },
+      created_at: now,
+    });
+    this.events.set(quotationId, list);
   }
 
   // --- AUDIT LOG EVENT HELPER ---
