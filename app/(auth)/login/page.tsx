@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  KeyRound,
+  ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
@@ -19,6 +21,7 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const verified = searchParams.get('verified') === 'true';
+  const setupPasswordParam = searchParams.get('setup_password') === 'true';
   const paramEmail = searchParams.get('email') || '';
   const redirectParam = searchParams.get('redirect') || '/dashboard';
   const urlError = searchParams.get('error');
@@ -30,6 +33,31 @@ function LoginForm() {
   const [resendSuccess, setResendSuccess] = useState(false);
   const [showResend, setShowResend] = useState(false);
   const [error, setError] = useState<string | null>(urlError || null);
+
+  // First-time staff password setup state
+  const [isSettingUpPassword, setIsSettingUpPassword] = useState(setupPasswordParam);
+  const [staffName, setStaffName] = useState('');
+  const [staffCompany, setStaffCompany] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  useEffect(() => {
+    const checkExistingTempUser = async () => {
+      const supabase = createClient();
+      if (!supabase) return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user && user.user_metadata?.must_change_password) {
+        setIsSettingUpPassword(true);
+        setEmail(user.email || '');
+        setStaffName(user.user_metadata?.full_name || '');
+        setStaffCompany(user.user_metadata?.company_name || '');
+      }
+    };
+    checkExistingTempUser();
+  }, [setupPasswordParam]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +114,15 @@ function LoginForm() {
         } catch (saveErr) {
           console.warn('Sync user details note:', saveErr);
         }
+
+        // Check if staff logged in with a temporary password and needs to set their own password
+        if (data.user.user_metadata?.must_change_password) {
+          setStaffName(data.user.user_metadata?.full_name || '');
+          setStaffCompany(data.user.user_metadata?.company_name || '');
+          setIsSettingUpPassword(true);
+          setIsLoading(false);
+          return;
+        }
       }
 
       router.push(redirectParam);
@@ -94,6 +131,49 @@ function LoginForm() {
       console.error('Login error:', err);
       setError(err.message || 'Invalid email or password.');
       setIsLoading(false);
+    }
+  };
+
+  const handleSetupOwnPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!newPassword || newPassword.length < 6) {
+      setError('New password must be at least 6 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    try {
+      setIsSavingPassword(true);
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update password.');
+      }
+
+      const supabase = createClient();
+      if (supabase && email) {
+        await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: newPassword,
+        });
+      }
+
+      router.push(redirectParam);
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save new password.');
+      setIsSavingPassword(false);
     }
   };
 
@@ -117,6 +197,79 @@ function LoginForm() {
       setIsResending(false);
     }
   };
+
+  if (isSettingUpPassword) {
+    return (
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center space-y-2">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-200">
+            <KeyRound className="h-6 w-6" />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900">
+            Set Up Your Own Password
+          </h1>
+          <p className="text-xs text-slate-500">
+            {staffName ? `Welcome, ${staffName}! ` : 'Welcome! '}
+            You signed in with a temporary password. Please create your personal password to continue
+            {staffCompany ? ` to ${staffCompany}` : ''}.
+          </p>
+        </div>
+
+        <Card className="rounded-2xl shadow-xl border-slate-200 overflow-hidden">
+          <form onSubmit={handleSetupOwnPassword}>
+            <CardContent className="p-6 space-y-4">
+              <div className="rounded-xl bg-indigo-50/80 p-3 text-xs text-indigo-900 border border-indigo-100 flex items-start gap-2">
+                <ShieldCheck className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
+                <span>
+                  Once you set your new password, you will use it for all future logins with{' '}
+                  <strong>{email}</strong>.
+                </span>
+              </div>
+
+              {error && (
+                <div className="rounded-xl bg-rose-50 p-3 text-xs text-rose-800 border border-rose-200 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <Input
+                label="New Password *"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                required
+                minLength={6}
+              />
+
+              <Input
+                label="Confirm New Password *"
+                type="password"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                placeholder="Re-enter your new password"
+                required
+                minLength={6}
+              />
+            </CardContent>
+
+            <CardFooter className="p-6 pt-0 flex flex-col gap-3">
+              <Button
+                type="submit"
+                variant="primary"
+                isLoading={isSavingPassword}
+                className="w-full shadow-md"
+              >
+                <span>Save Password &amp; Enter Workspace</span>
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md space-y-6">

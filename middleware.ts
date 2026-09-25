@@ -58,6 +58,8 @@ export async function middleware(request: NextRequest) {
     pathname === '/register' ||
     pathname === '/forgot-password';
 
+  const mustChangePassword = Boolean(user?.user_metadata?.must_change_password);
+
   if (isProtectedPath) {
     if (!user) {
       const redirectUrl = new URL('/login', request.url);
@@ -79,11 +81,18 @@ export async function middleware(request: NextRequest) {
         )
       );
     }
+
+    // Force staff with temporary password to set their own password on first login
+    if (mustChangePassword) {
+      const setupUrl = new URL('/login', request.url);
+      setupUrl.searchParams.set('setup_password', 'true');
+      return NextResponse.redirect(setupUrl);
+    }
   }
 
   if (user && isAuthPage) {
     const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
-    if (isEmailConfirmed) {
+    if (isEmailConfirmed && !mustChangePassword) {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
   }

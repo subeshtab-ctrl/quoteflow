@@ -67,17 +67,21 @@ export function SettingsClientView({
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Staff creation / invitation state
+  // Staff creation state (Direct Password Setup)
   const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
-  const [staffModalMode, setStaffModalMode] = useState<'invite' | 'direct'>('invite');
   const [isAddingStaff, setIsAddingStaff] = useState(false);
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('');
   const [newStaffRole, setNewStaffRole] = useState<'STAFF' | 'ADMIN'>('STAFF');
   const [staffError, setStaffError] = useState<string | null>(null);
-  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
-  const [copiedInvite, setCopiedInvite] = useState(false);
+
+  // Logged-in user password change state
+  const [myNewPassword, setMyNewPassword] = useState('');
+  const [myConfirmPassword, setMyConfirmPassword] = useState('');
+  const [isChangingMyPassword, setIsChangingMyPassword] = useState(false);
+  const [passwordChangeMsg, setPasswordChangeMsg] = useState<string | null>(null);
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
 
   // Synchronize CSS variable when brand color changes
   useEffect(() => {
@@ -105,39 +109,40 @@ export function SettingsClientView({
     fetchUsers();
   }, []);
 
-  // Staff creation via direct password or invite link
-  const handleInviteStaff = async (e: React.FormEvent) => {
+  const handleUpdateOwnPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStaffError(null);
-    setGeneratedInviteUrl(null);
+    setPasswordChangeError(null);
+    setPasswordChangeMsg(null);
 
-    if (!newStaffEmail.trim()) {
-      setStaffError('Please enter the team member email address.');
+    if (!myNewPassword || myNewPassword.length < 6) {
+      setPasswordChangeError('New password must be at least 6 characters.');
+      return;
+    }
+
+    if (myNewPassword !== myConfirmPassword) {
+      setPasswordChangeError('Passwords do not match.');
       return;
     }
 
     try {
-      setIsAddingStaff(true);
-      const res = await fetch('/api/users/invite', {
+      setIsChangingMyPassword(true);
+      const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: newStaffName.trim(),
-          email: newStaffEmail.trim(),
-          role: newStaffRole,
-        }),
+        body: JSON.stringify({ newPassword: myNewPassword }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create staff invitation');
+      if (!res.ok) throw new Error(data.error || 'Failed to update password.');
 
-      setGeneratedInviteUrl(data.inviteUrl);
-      setSuccessMsg(`Invitation dispatched to ${newStaffEmail}!`);
-      fetchUsers();
+      setPasswordChangeMsg('Your password has been updated successfully!');
+      setMyNewPassword('');
+      setMyConfirmPassword('');
+      setTimeout(() => setPasswordChangeMsg(null), 4000);
     } catch (err: any) {
-      setStaffError(err.message || 'Error creating staff invitation');
+      setPasswordChangeError(err.message || 'Error updating password');
     } finally {
-      setIsAddingStaff(false);
+      setIsChangingMyPassword(false);
     }
   };
 
@@ -171,18 +176,53 @@ export function SettingsClientView({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create team member');
 
-      setSuccessMsg(`Team account "${newStaffEmail}" created successfully! They can now log in.`);
+      setSuccessMsg(
+        `Team account "${newStaffEmail}" created! They can log in with the temporary password and set their own password.`
+      );
       setIsAddStaffOpen(false);
       setNewStaffName('');
       setNewStaffEmail('');
       setNewStaffPassword('');
       setNewStaffRole('STAFF');
       fetchUsers();
-      setTimeout(() => setSuccessMsg(null), 4000);
+      setTimeout(() => setSuccessMsg(null), 4500);
     } catch (err: any) {
       setStaffError(err.message || 'Error creating staff member');
     } finally {
       setIsAddingStaff(false);
+    }
+  };
+
+  const handleResetStaffPassword = async (userId: string, email: string) => {
+    const tempPassword = window.prompt(
+      `Enter a new Temporary Password (at least 6 characters) for ${email}:`,
+      '123456'
+    );
+    if (!tempPassword) return;
+    if (tempPassword.length < 6) {
+      alert('Temporary password must be at least 6 characters.');
+      return;
+    }
+
+    try {
+      setDeletingUserId(userId);
+      const res = await fetch(`/api/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: tempPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to set temporary password');
+
+      setSuccessMsg(
+        `Temporary password set for ${email}! They can now log in with "${tempPassword}" and set their own password.`
+      );
+      fetchUsers();
+      setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error setting temporary password');
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -409,14 +449,6 @@ export function SettingsClientView({
       setErrorMsg(err.message);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const copyInviteToClipboard = () => {
-    if (generatedInviteUrl) {
-      navigator.clipboard.writeText(generatedInviteUrl);
-      setCopiedInvite(true);
-      setTimeout(() => setCopiedInvite(false), 2500);
     }
   };
 
@@ -933,7 +965,7 @@ export function SettingsClientView({
                 <span>Team Accounts & Staff Members</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Staff invited here connect directly to your company database. Owners & Admins can invite staff or remove access at any time.
+                Create staff accounts with a temporary password. When staff log in, they will be prompted to set up their own password.
               </p>
             </div>
             <div className="flex items-center gap-2.5">
@@ -947,13 +979,12 @@ export function SettingsClientView({
                   size="sm"
                   onClick={() => {
                     setStaffError(null);
-                    setGeneratedInviteUrl(null);
                     setIsAddStaffOpen(true);
                   }}
                   className="gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
                 >
                   <UserPlus className="h-3.5 w-3.5" />
-                  <span>Invite / Add Staff Member</span>
+                  <span>Add Staff Member</span>
                 </Button>
               )}
             </div>
@@ -1006,7 +1037,7 @@ export function SettingsClientView({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       <span
                         className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
                           user.email_confirmed
@@ -1018,20 +1049,32 @@ export function SettingsClientView({
                       </span>
 
                       {canDelete && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteUser(user.id, user.email)}
-                          disabled={deletingUserId === user.id}
-                          className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
-                          title="Delete User Account"
-                        >
-                          {deletingUserId === user.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3.5 w-3.5" />
-                          )}
-                          <span>Delete</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleResetStaffPassword(user.id, user.email)}
+                            disabled={deletingUserId === user.id}
+                            className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
+                            title="Set or Reset Temporary Password"
+                          >
+                            <span>Set Temp Password</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(user.id, user.email)}
+                            disabled={deletingUserId === user.id}
+                            className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
+                            title="Delete User Account"
+                          >
+                            {deletingUserId === user.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                            <span>Delete</span>
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1052,7 +1095,63 @@ export function SettingsClientView({
         )}
       </form>
 
-      {/* Add / Invite Staff Member Modal */}
+      {/* Account Security / Set Own Password Card (Available to Staff, Admin, and Owner) */}
+      <form
+        onSubmit={handleUpdateOwnPassword}
+        className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4"
+      >
+        <div>
+          <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
+            Account Security &amp; Password ({currentUserEmail})
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Set or update your personal login password at any time.
+          </p>
+        </div>
+
+        {passwordChangeMsg && (
+          <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-3 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span>{passwordChangeMsg}</span>
+          </div>
+        )}
+
+        {passwordChangeError && (
+          <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-3 text-xs font-semibold text-rose-700 dark:text-rose-300">
+            {passwordChangeError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input
+            label="New Password *"
+            type="password"
+            value={myNewPassword}
+            onChange={(e) => setMyNewPassword(e.target.value)}
+            placeholder="At least 6 characters"
+            minLength={6}
+            required
+          />
+          <Input
+            label="Confirm New Password *"
+            type="password"
+            value={myConfirmPassword}
+            onChange={(e) => setMyConfirmPassword(e.target.value)}
+            placeholder="Repeat your new password"
+            minLength={6}
+            required
+          />
+        </div>
+
+        <div className="flex justify-end">
+          <Button type="submit" variant="outline" isLoading={isChangingMyPassword} className="gap-2">
+            <Save className="h-4 w-4" />
+            <span>Update My Password</span>
+          </Button>
+        </div>
+      </form>
+
+      {/* Add Staff Member Modal (Direct Password Setup Only) */}
       {isAddStaffOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
           <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -1063,271 +1162,100 @@ export function SettingsClientView({
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setIsAddStaffOpen(false);
-                  setGeneratedInviteUrl(null);
-                }}
+                onClick={() => setIsAddStaffOpen(false)}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Mode Switcher */}
-            <div className="px-6 pt-4">
-              <div className="grid grid-cols-2 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStaffModalMode('invite');
-                    setStaffError(null);
-                  }}
-                  className={`py-1.5 px-2 rounded-lg font-semibold transition-all ${
-                    staffModalMode === 'invite'
-                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Send Invite Link & Email
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStaffModalMode('direct');
-                    setStaffError(null);
-                  }}
-                  className={`py-1.5 px-2 rounded-lg font-semibold transition-all ${
-                    staffModalMode === 'direct'
-                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Direct Password Setup
-                </button>
+            <form onSubmit={handleDirectCreateStaff} className="p-6 space-y-4">
+              {staffError && (
+                <div className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-3 rounded-xl">
+                  {staffError}
+                </div>
+              )}
+
+              <div className="rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 p-3 text-xs text-indigo-900 dark:text-indigo-300 flex items-start gap-2">
+                <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                <span>
+                  Set a temporary password to create the account immediately. When the staff member logs in, they will be prompted to set up their own password.
+                </span>
               </div>
-            </div>
 
-            {/* Generated Invite Card */}
-            {generatedInviteUrl ? (
-              <div className="p-6 space-y-4">
-                <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 p-4 text-center space-y-2">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-600 dark:text-emerald-400 mx-auto" />
-                  <h4 className="font-bold text-sm text-emerald-900 dark:text-emerald-200">
-                    Invitation Created & Dispatched!
-                  </h4>
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                    An email notification has been sent to <strong>{newStaffEmail}</strong>. They will set their own password and gain access to your company database.
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                    Shareable Invitation Link
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={generatedInviteUrl}
-                      className="h-10 flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 text-xs font-mono text-slate-700 dark:text-slate-200 truncate"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={copyInviteToClipboard}
-                      className="gap-1.5 shrink-0"
-                    >
-                      {copiedInvite ? (
-                        <>
-                          <Check className="h-4 w-4 text-emerald-600" />
-                          <span>Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-4 w-4" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                    You can copy this link and send it directly via WhatsApp, SMS, or Slack.
-                  </p>
-                </div>
-
-                <div className="pt-2 flex justify-end">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    onClick={() => {
-                      setIsAddStaffOpen(false);
-                      setGeneratedInviteUrl(null);
-                      setNewStaffEmail('');
-                      setNewStaffName('');
-                    }}
-                  >
-                    Done
-                  </Button>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Full Name <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  placeholder="e.g. Rahul Verma"
+                  required
+                />
               </div>
-            ) : staffModalMode === 'invite' ? (
-              /* Option 1: Invite Form */
-              <form onSubmit={handleInviteStaff} className="p-6 space-y-4">
-                {staffError && (
-                  <div className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-3 rounded-xl">
-                    {staffError}
-                  </div>
-                )}
 
-                <div className="rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 p-3 text-xs text-indigo-900 dark:text-indigo-300 flex items-start gap-2">
-                  <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-                  <span>
-                    Staff will receive an invite email with a link where they can set their own secure password and immediately access your company quotations and customers.
-                  </span>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Email Address (Login ID) <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  type="email"
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  placeholder="rahul@example.com"
+                  required
+                />
+              </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Staff Member Full Name
-                  </label>
-                  <Input
-                    value={newStaffName}
-                    onChange={(e) => setNewStaffName(e.target.value)}
-                    placeholder="e.g. Rahul Verma"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Temporary Password <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  type="password"
+                  value={newStaffPassword}
+                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                />
+              </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Email Address (Login ID) <span className="text-rose-500">*</span>
-                  </label>
-                  <Input
-                    type="email"
-                    value={newStaffEmail}
-                    onChange={(e) => setNewStaffEmail(e.target.value)}
-                    placeholder="rahul@example.com"
-                    required
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Account Role <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newStaffRole}
+                  onChange={(e) => setNewStaffRole(e.target.value as 'STAFF' | 'ADMIN')}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                >
+                  <option value="STAFF">Staff (Can create & manage quotations, customers, products)</option>
+                  <option value="ADMIN">Admin (Full organization access)</option>
+                </select>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Account Role <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={newStaffRole}
-                    onChange={(e) => setNewStaffRole(e.target.value as 'STAFF' | 'ADMIN')}
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  >
-                    <option value="STAFF">Staff (Can create & manage quotations, customers, products)</option>
-                    <option value="ADMIN">Admin (Full organization access)</option>
-                  </select>
-                </div>
-
-                <div className="pt-3 flex justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsAddStaffOpen(false)}
-                    disabled={isAddingStaff}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    isLoading={isAddingStaff}
-                    className="gap-2 shadow-sm"
-                  >
-                    <Send className="h-4 w-4" />
-                    <span>Send Invitation Link</span>
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              /* Option 2: Direct Password Form */
-              <form onSubmit={handleDirectCreateStaff} className="p-6 space-y-4">
-                {staffError && (
-                  <div className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-3 rounded-xl">
-                    {staffError}
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Full Name <span className="text-rose-500">*</span>
-                  </label>
-                  <Input
-                    value={newStaffName}
-                    onChange={(e) => setNewStaffName(e.target.value)}
-                    placeholder="e.g. Rahul Verma"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Email Address (Login ID) <span className="text-rose-500">*</span>
-                  </label>
-                  <Input
-                    type="email"
-                    value={newStaffEmail}
-                    onChange={(e) => setNewStaffEmail(e.target.value)}
-                    placeholder="rahul@example.com"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Temporary Password <span className="text-rose-500">*</span>
-                  </label>
-                  <Input
-                    type="password"
-                    value={newStaffPassword}
-                    onChange={(e) => setNewStaffPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    required
-                    minLength={6}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Account Role <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={newStaffRole}
-                    onChange={(e) => setNewStaffRole(e.target.value as 'STAFF' | 'ADMIN')}
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  >
-                    <option value="STAFF">Staff (Can create & manage quotations, customers, products)</option>
-                    <option value="ADMIN">Admin (Full organization access)</option>
-                  </select>
-                </div>
-
-                <div className="pt-3 flex justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsAddStaffOpen(false)}
-                    disabled={isAddingStaff}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    isLoading={isAddingStaff}
-                    className="gap-2 shadow-sm"
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    <span>Create Account</span>
-                  </Button>
-                </div>
-              </form>
-            )}
+              <div className="pt-3 flex justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddStaffOpen(false)}
+                  disabled={isAddingStaff}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  isLoading={isAddingStaff}
+                  className="gap-2 shadow-sm"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span>Create Account</span>
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

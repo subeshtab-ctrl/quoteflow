@@ -93,14 +93,19 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    // No password required — staff sets their own password via invitation link
-    const { fullName, email, role = 'STAFF' } = body;
+    const { fullName, email, password, role = 'STAFF' } = body;
 
     if (!fullName || !fullName.trim()) {
       return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
     }
     if (!email || !email.trim()) {
       return NextResponse.json({ error: 'Email address is required.' }, { status: 400 });
+    }
+    if (!password || password.length < 6) {
+      return NextResponse.json(
+        { error: 'Temporary password must be at least 6 characters.' },
+        { status: 400 }
+      );
     }
 
     const assignedRole = role === 'ADMIN' ? 'ADMIN' : 'STAFF';
@@ -112,40 +117,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Database service unavailable' }, { status: 500 });
     }
 
-    // 1. Prevent cross-company conflicts — email must not already exist
-    const { data: existingList } = await supabase.auth.admin.listUsers();
+    // 1. Check if email already exists in Supabase Auth
+    const { data: existingList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
     const existingUser = (existingList?.users || []).find(
       (u) => u.email?.toLowerCase() === cleanEmail
     );
+
+    let targetUserId: string;
+
     if (existingUser) {
-      return NextResponse.json(
-        {
-          error:
-            'This email address is already registered. Staff must use a new email address that has not been used for another account.',
+      // Check if existing user belongs to another company as OWNER
+      const existingOrgId = existingUser.user_metadata?.organization_id;
+      const existingRole = existingUser.user_metadata?.role;
+      if (existingOrgId && existingOrgId !== auth.orgId && existingRole === 'OWNER') {
+        return NextResponse.json(
+          {
+            error:
+              'This email address is already registered as an owner of another organization.',
+          },
+          { status: 409 }
+        );
+      }
+
+      // Otherwise update existing staff account with the new temporary password & confirm email
+      const { data: updatedData, error: updateError } =
+        await supabase.auth.admin.updateUserById(existingUser.id, {
+          password,
+          email_confirm: true,
+          user_metadata: {
+            ...existingUser.user_metadata,
+            full_name: cleanName,
+            organization_id: auth.orgId,
+            role: assignedRole,
+            company_name: auth.organization.name,
+            invited_by: auth.userId,
+            must_change_password: true,
+          },
+        });
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      }
+      targetUserId = updatedData.user.id;
+    } else {
+      // 2. Create auth user with email confirmed and the temporary password.
+      //    Set must_change_password: true so staff is prompted to set their own password on first login.
+      const { data: userData, error: createError } = await supabase.auth.admin.createUser({
+        email: cleanEmail,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          full_name: cleanName,
+          organization_id: auth.orgId,
+          role: assignedRole,
+          company_name: auth.organization.name,
+          invited_by: auth.userId,
+          must_change_password: true,
         },
-        { status: 409 }
-      );
+      });
+
+      if (createError) {
+        return NextResponse.json({ error: createError.message }, { status: 400 });
+      }
+      targetUserId = userData.user.id;
     }
-
-    // 2. Create auth user WITHOUT email confirmation and WITHOUT a password
-    //    Staff sets their own password via the invitation link.
-    const { data: userData, error: createError } = await supabase.auth.admin.createUser({
-      email: cleanEmail,
-      email_confirm: false,
-      user_metadata: {
-        full_name: cleanName,
-        organization_id: auth.orgId,
-        role: assignedRole,
-        company_name: auth.organization.name,
-        invited_by: auth.userId,
-      },
-    });
-
-    if (createError) {
-      return NextResponse.json({ error: createError.message }, { status: 400 });
-    }
-
-    const newUser = userData.user;
 
     // 3. Clean up any rogue default org membership inserted by legacy DB triggers
     const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -154,13 +189,13 @@ export async function POST(req: NextRequest) {
         .from('organization_members')
         .delete()
         .eq('organization_id', DEFAULT_ORG_ID)
-        .eq('user_id', newUser.id);
+        .eq('user_id', targetUserId);
     }
 
     // 4. Add to organization_members
     const { error: memberError } = await supabase.from('organization_members').upsert({
       organization_id: auth.orgId,
-      user_id: newUser.id,
+      user_id: targetUserId,
       role: assignedRole,
       is_active: true,
     });
@@ -171,96 +206,22 @@ export async function POST(req: NextRequest) {
 
     // 5. Upsert into profiles
     await supabase.from('profiles').upsert({
-      id: newUser.id,
+      id: targetUserId,
       full_name: cleanName,
       email: cleanEmail,
       role: assignedRole,
       updated_at: new Date().toISOString(),
     });
 
-    // 6. Generate invitation link and send branded email
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
-    let invitationSent = false;
-    try {
-      const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
-        type: 'invite',
-        email: cleanEmail,
-        options: {
-          redirectTo: `${appUrl}/auth/callback`,
-          data: {
-            full_name: cleanName,
-            organization_id: auth.orgId,
-            role: assignedRole,
-            company_name: auth.organization.name,
-          },
-        },
-      });
-
-      const actionLink = linkData?.properties?.action_link;
-      if (actionLink) {
-        await sendEmail({
-          to: cleanEmail,
-          replyTo: auth.email,
-          fromName: auth.organization.name,
-          subject: `You've been invited to join ${auth.organization.name} on QuoteFlow`,
-          html: `
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <meta charset="utf-8">
-                <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
-                  .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-                  .badge { display: inline-block; background: #4f46e5; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px; }
-                  .btn { display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; margin: 24px 0; }
-                  .footer { font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
-                  .note { font-size: 13px; color: #64748b; line-height: 1.6; }
-                </style>
-              </head>
-              <body>
-                <div class="card">
-                  <div class="badge">Team Invitation</div>
-                  <h2 style="margin: 0 0 8px 0; font-size: 22px; font-weight: 800;">You're Invited!</h2>
-                  <p class="note">
-                    Hello <strong>${cleanName}</strong>,<br><br>
-                    You have been invited to join <strong>${auth.organization.name}</strong> as a <strong>${assignedRole}</strong> on QuoteFlow.<br><br>
-                    Click the button below to accept your invitation and create your own password:
-                  </p>
-                  <div style="text-align: center;">
-                    <a href="${actionLink}" class="btn">Accept Invitation &amp; Set Password</a>
-                  </div>
-                  <p class="note" style="word-break: break-all;">
-                    If the button doesn't work, copy this link:<br>
-                    <a href="${actionLink}" style="color: #4f46e5;">${actionLink}</a>
-                  </p>
-                  <p class="note">This invitation link will expire in 24 hours. If you did not expect this invitation, you can safely ignore this email.</p>
-                  <div class="footer"><p>QuoteFlow SaaS Platform © 2026</p></div>
-                </div>
-              </body>
-            </html>
-          `,
-          text: `Hello ${cleanName},\n\nYou have been invited to join ${auth.organization.name} as ${assignedRole} on QuoteFlow.\n\nAccept your invitation and set your password:\n${actionLink}\n\nThis link expires in 24 hours.`,
-        });
-        invitationSent = true;
-        console.log(`[STAFF INVITATION SENT] ${cleanEmail} → ${auth.organization.name} (${assignedRole})`);
-      } else if (linkErr) {
-        console.warn('generateLink warning for invitation:', linkErr);
-      }
-    } catch (linkErr) {
-      console.warn('Staff invitation email warning:', linkErr);
-    }
-
     return NextResponse.json({
       success: true,
-      message: invitationSent
-        ? `Invitation email sent to ${cleanEmail}. They will need to accept the invitation to set their password and access the workspace.`
-        : `Staff member ${cleanEmail} added. Please send them the login link manually.`,
+      message: `Staff account ready for ${cleanEmail}. They can now sign in with the temporary password and set their own password.`,
       user: {
-        id: newUser.id,
+        id: targetUserId,
         email: cleanEmail,
         full_name: cleanName,
         role: assignedRole,
-        invitation_sent: invitationSent,
+        email_confirmed: true,
       },
     });
   } catch (err: any) {
