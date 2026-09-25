@@ -23,6 +23,7 @@ export function QuotationChatPanel({
   const [isLoading, setIsLoading] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef<number>(0);
 
   const fetchAndMarkRead = async () => {
     try {
@@ -32,7 +33,15 @@ export function QuotationChatPanel({
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.messages)) {
+          const newCount = data.messages.length;
+          const hadNewMessage = newCount > prevCountRef.current;
+          prevCountRef.current = newCount;
           setMessages(data.messages);
+          if (hadNewMessage) {
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, 80);
+          }
         }
       }
     } catch (err) {
@@ -44,7 +53,7 @@ export function QuotationChatPanel({
 
   useEffect(() => {
     fetchAndMarkRead();
-    const interval = setInterval(fetchAndMarkRead, 8000);
+    const interval = setInterval(fetchAndMarkRead, 2500);
     return () => clearInterval(interval);
   }, [quotationId]);
 
@@ -72,13 +81,14 @@ export function QuotationChatPanel({
         const data = await res.json();
         setReplyText('');
         if (Array.isArray(data.messages)) {
+          prevCountRef.current = data.messages.length;
           setMessages(data.messages);
         } else {
           await fetchAndMarkRead();
         }
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+        }, 80);
       }
     } catch (err) {
       console.error('Failed to send reply:', err);
@@ -108,13 +118,13 @@ export function QuotationChatPanel({
           </div>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          Read
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Live
         </span>
       </div>
 
       <div className="p-4 space-y-3">
-        <div className="max-h-80 overflow-y-auto space-y-2.5 rounded-xl bg-slate-50 p-3.5 border border-slate-100">
+        <div className="max-h-72 overflow-y-auto space-y-2.5 rounded-xl bg-slate-50 p-3.5 border border-slate-100">
           {isLoading ? (
             <div className="py-6 text-center text-xs text-slate-400">Loading chat messages...</div>
           ) : messages.length === 0 ? (

@@ -38,16 +38,18 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  // Customer Chat state
+  // Customer Chat Popup state
   const [chatMessages, setChatMessages] = useState<QuotationChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [senderName, setSenderName] = useState(
     initialQuotation.customer?.name || initialQuotation.customer?.company_name || ''
   );
   const [isSendingChat, setIsSendingChat] = useState(false);
-  const [isChatExpanded, setIsChatExpanded] = useState(true);
-  const chatSectionRef = useRef<HTMLDivElement>(null);
+  const [isChatPopupOpen, setIsChatPopupOpen] = useState(false);
+  const [hasNewIncomingReply, setHasNewIncomingReply] = useState(false);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+  const prevChatCountRef = useRef<number>(0);
+  const initialLoadDoneRef = useRef<boolean>(false);
 
   const org = quotation.organization;
   const customer = quotation.customer;
@@ -101,7 +103,24 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.messages)) {
-          setChatMessages(data.messages);
+          const nextMessages: QuotationChatMessage[] = data.messages;
+          const prevCount = prevChatCountRef.current;
+
+          if (initialLoadDoneRef.current && nextMessages.length > prevCount) {
+            const latestMsg = nextMessages[nextMessages.length - 1];
+            // Automatically pop open chat and scroll if a new message arrives
+            if (latestMsg?.sender_role === 'STAFF') {
+              setIsChatPopupOpen(true);
+              setHasNewIncomingReply(true);
+            }
+            setTimeout(() => {
+              chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, 80);
+          }
+
+          prevChatCountRef.current = nextMessages.length;
+          initialLoadDoneRef.current = true;
+          setChatMessages(nextMessages);
         }
       }
     } catch {}
@@ -109,7 +128,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
 
   useEffect(() => {
     loadChatMessages();
-    const interval = setInterval(loadChatMessages, 8000);
+    const interval = setInterval(loadChatMessages, 2500);
     return () => clearInterval(interval);
   }, [token]);
 
@@ -131,13 +150,14 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         const data = await res.json();
         setChatInput('');
         if (Array.isArray(data.messages)) {
+          prevChatCountRef.current = data.messages.length;
           setChatMessages(data.messages);
         } else {
           await loadChatMessages();
         }
         setTimeout(() => {
           chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+        }, 80);
       }
     } catch (err) {
       console.error('Failed to send chat:', err);
@@ -146,11 +166,12 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
     }
   };
 
-  const openAndScrollToChat = () => {
-    setIsChatExpanded(true);
+  const openChatPopup = () => {
+    setIsChatPopupOpen(true);
+    setHasNewIncomingReply(false);
     setTimeout(() => {
-      chatSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 50);
+      chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 80);
   };
 
   const handleDownloadPdf = async () => {
@@ -594,11 +615,16 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
             <div className="flex flex-wrap justify-center gap-3">
               <Button
                 variant="outline"
-                onClick={openAndScrollToChat}
-                className="bg-white/10 text-white border-white/20 hover:bg-white/20"
+                onClick={openChatPopup}
+                className="relative bg-white/10 text-white border-white/20 hover:bg-white/20"
               >
                 <MessageSquare className="h-4 w-4 mr-1.5" />
                 Chat
+                {chatMessages.length > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {chatMessages.length}
+                  </span>
+                )}
               </Button>
               <Button
                 variant="success"
@@ -611,136 +637,161 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl bg-indigo-600 p-6 text-white text-center shadow-xl space-y-3">
-            <h3 className="text-lg font-bold">
+          <div className="rounded-2xl bg-indigo-600 p-5 text-white text-center shadow-xl space-y-3">
+            <h3 className="text-base sm:text-lg font-bold">
               {quotation.status === 'REJECTED'
                 ? 'Need to discuss changes or send a message?'
                 : quotation.status === 'APPROVED'
                   ? 'Have a question about your approved quotation?'
                   : 'Need assistance with this quotation?'}
             </h3>
-            <p className="text-xs sm:text-sm text-indigo-100 max-w-md mx-auto">
-              Send a direct chat message to {org?.name || 'our team'} regarding quotation {quotation.quotation_number}.
+            <p className="text-xs text-indigo-100 max-w-md mx-auto">
+              Click Chat below to open the live chat box with {org?.name || 'our team'}.
             </p>
             <div className="flex justify-center">
               <Button
                 variant="outline"
-                onClick={openAndScrollToChat}
-                className="bg-white text-indigo-700 border-white hover:bg-indigo-50 font-bold px-6 shadow-md"
+                onClick={openChatPopup}
+                className="relative bg-white text-indigo-700 border-white hover:bg-indigo-50 font-bold px-6 shadow-md"
               >
                 <MessageSquare className="h-4 w-4 mr-1.5" />
                 Chat
+                {chatMessages.length > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {chatMessages.length}
+                  </span>
+                )}
               </Button>
             </div>
           </div>
         )}
+      </div>
 
-        {/* Customer Chat Section (Down side) */}
-        <div
-          ref={chatSectionRef}
-          id="customer-chat"
-          className="rounded-2xl bg-white border border-slate-200/90 shadow-lg overflow-hidden"
+      {/* Compact Floating Chat Button (when popup is closed) */}
+      {!isChatPopupOpen && (
+        <button
+          type="button"
+          onClick={openChatPopup}
+          className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full bg-slate-900 hover:bg-indigo-600 text-white px-4 py-3 shadow-2xl border border-slate-700 transition-all"
         >
-          <div
-            onClick={() => setIsChatExpanded((prev) => !prev)}
-            className="flex items-center justify-between px-5 py-4 bg-slate-900 text-white cursor-pointer select-none"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white">
+          <MessageSquare className="h-4 w-4 text-emerald-400" />
+          <span className="text-xs font-bold">Chat</span>
+          {(hasNewIncomingReply || chatMessages.length > 0) && (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Small Customer Chat Popup (Same compact size as Quotation Dashboard Chat) */}
+      {isChatPopupOpen && (
+        <div
+          id="customer-chat-popup"
+          className="fixed bottom-4 right-4 z-50 w-[340px] sm:w-[365px] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200"
+        >
+          <div className="border-b border-slate-100 bg-slate-900 px-4 py-3 flex items-center justify-between text-white">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
                 <MessageSquare className="h-4 w-4" />
-              </div>
+              </span>
               <div>
-                <h3 className="text-sm font-bold flex items-center gap-2">
-                  Chat with {org?.name || 'Our Team'}
-                  {chatMessages.length > 0 && (
-                    <span className="inline-flex items-center rounded-full bg-indigo-500/30 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">
-                      {chatMessages.length} {chatMessages.length === 1 ? 'message' : 'messages'}
-                    </span>
-                  )}
+                <h3 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+                  Chat ({chatMessages.length})
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-semibold text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Live
+                  </span>
                 </h3>
-                <p className="text-[11px] text-slate-400">
-                  Ask questions, request changes, or discuss quotation {quotation.quotation_number}
+                <p className="text-[10px] text-slate-400 truncate max-w-[200px]">
+                  {org?.name || 'Our Team'} • {quotation.quotation_number}
                 </p>
               </div>
             </div>
-            <span className="text-xs font-semibold text-indigo-300 hover:text-white">
-              {isChatExpanded ? 'Hide' : 'Open Chat'}
-            </span>
+            <button
+              type="button"
+              onClick={() => setIsChatPopupOpen(false)}
+              className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+              title="Close Chat"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
           </div>
 
-          {isChatExpanded && (
-            <div className="p-5 space-y-4">
-              <div className="max-h-80 overflow-y-auto space-y-3 rounded-xl bg-slate-50 p-4 border border-slate-100">
-                {chatMessages.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-slate-400">
-                    No messages yet. Type a message below to start chatting with {org?.name || 'us'}.
-                  </div>
-                ) : (
-                  chatMessages.map((msg) => {
-                    const isCustomer = msg.sender_role === 'CUSTOMER';
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1 px-1">
-                          <span className="text-[11px] font-bold text-slate-600">
-                            {isCustomer ? `${msg.sender_name} (You)` : msg.sender_name}
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {formatDateTime(msg.created_at)}
-                          </span>
-                        </div>
-                        <div
-                          className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-xs ${
-                            isCustomer
-                              ? 'bg-indigo-600 text-white rounded-br-xs'
-                              : 'bg-white text-slate-800 border border-slate-200 rounded-bl-xs'
+          <div className="p-3.5 space-y-2.5">
+            <div className="h-64 overflow-y-auto space-y-2.5 rounded-xl bg-slate-50 p-3 border border-slate-100">
+              {chatMessages.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  Send a message below to start live chat with {org?.name || 'our team'}.
+                </div>
+              ) : (
+                chatMessages.map((msg) => {
+                  const isCustomer = msg.sender_role === 'CUSTOMER';
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5 px-1">
+                        <span
+                          className={`text-[10px] font-bold ${
+                            isCustomer ? 'text-indigo-600' : 'text-emerald-700'
                           }`}
                         >
-                          {msg.message}
-                        </div>
+                          {isCustomer ? `${msg.sender_name} (You)` : msg.sender_name}
+                        </span>
+                        <span className="text-[9px] text-slate-400">
+                          {formatDateTime(msg.created_at)}
+                        </span>
                       </div>
-                    );
-                  })
-                )}
-                <div ref={chatMessagesEndRef} />
-              </div>
-
-              <form onSubmit={handleSendChat} className="space-y-3">
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <input
-                    type="text"
-                    value={senderName}
-                    onChange={(e) => setSenderName(e.target.value)}
-                    placeholder="Your Name"
-                    className="sm:w-48 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm text-slate-800 focus:border-indigo-500 focus:outline-none"
-                  />
-                  <div className="flex-1 flex gap-2">
-                    <input
-                      type="text"
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="Write your message or change request..."
-                      className="flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm text-slate-800 focus:border-indigo-500 focus:outline-none"
-                    />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      isLoading={isSendingChat}
-                      disabled={!chatInput.trim() || isSendingChat}
-                      className="px-5 font-semibold"
-                    >
-                      <Send className="h-4 w-4 mr-1.5" />
-                      Send
-                    </Button>
-                  </div>
-                </div>
-              </form>
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed shadow-xs ${
+                          isCustomer
+                            ? 'bg-indigo-600 text-white rounded-br-xs'
+                            : 'bg-white text-slate-800 border border-emerald-200 rounded-bl-xs'
+                        }`}
+                      >
+                        {msg.message}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatMessagesEndRef} />
             </div>
-          )}
+
+            <form onSubmit={handleSendChat} className="space-y-2">
+              <input
+                type="text"
+                value={senderName}
+                onChange={(e) => setSenderName(e.target.value)}
+                placeholder="Your Name"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+              />
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Type a message..."
+                  className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  isLoading={isSendingChat}
+                  disabled={!chatInput.trim() || isSendingChat}
+                  className="px-3 py-2"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modals */}
       <ApprovalModal

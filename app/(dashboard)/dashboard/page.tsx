@@ -24,6 +24,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { QuotationChatActionButton } from '@/components/quotations/quotation-chat-action-button';
 
 export default async function DashboardPage() {
   const auth = await getAuthenticatedUserContext();
@@ -276,28 +277,11 @@ export default async function DashboardPage() {
                       </td>
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Link
-                            href={`/quotations/${quote.id}#chat`}
-                            title={
-                              quote.has_unread_chat
-                                ? `New unread customer chat (${quote.unread_chat_count || 1}) — open quotation to read`
-                                : 'Open Quotation Chat'
-                            }
-                            className={`relative inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors border ${
-                              quote.has_unread_chat
-                                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
-                                : 'text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600'
-                            }`}
-                          >
-                            <MessageSquare className="h-3.5 w-3.5" />
-                            <span>Chat</span>
-                            {quote.has_unread_chat && (
-                              <span className="relative flex h-2.5 w-2.5 ml-0.5">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                              </span>
-                            )}
-                          </Link>
+                          <QuotationChatActionButton
+                            quotationId={quote.id}
+                            initialHasUnread={Boolean(quote.has_unread_chat)}
+                            initialUnreadCount={quote.unread_chat_count || 0}
+                          />
                           <Link href={`/quotations/${quote.id}`}>
                             <button
                               className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400"

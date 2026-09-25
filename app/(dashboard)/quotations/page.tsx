@@ -23,6 +23,7 @@ import { QuotationsFilterTabs } from '@/components/quotations/quotations-filter-
 import { QuotationDeleteButton } from '@/components/quotations/quotation-delete-button';
 import { QuotationInvoiceButton } from '@/components/quotations/quotation-invoice-button';
 import { QuotationPaymentButton } from '@/components/quotations/quotation-payment-button';
+import { QuotationChatActionButton } from '@/components/quotations/quotation-chat-action-button';
 import { ExportButton } from '@/components/export/export-button';
 
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
@@ -163,29 +164,12 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
                               customer={quote.customer}
                             />
 
-                            {/* Chat Action Button (opens quotation to read chat; shows green dot when unread) */}
-                            <Link
-                              href={`/quotations/${quote.id}#chat`}
-                              title={
-                                quote.has_unread_chat
-                                  ? `New unread customer chat (${quote.unread_chat_count || 1}) — open quotation to read`
-                                  : 'Open Quotation Chat'
-                              }
-                              className={`relative inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors border ${
-                                quote.has_unread_chat
-                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
-                                  : 'text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600'
-                              }`}
-                            >
-                              <MessageSquare className="h-3.5 w-3.5" />
-                              <span>Chat</span>
-                              {quote.has_unread_chat && (
-                                <span className="relative flex h-2.5 w-2.5 ml-0.5">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                                </span>
-                              )}
-                            </Link>
+                            {/* Chat Action Button (opens quotation to read chat; shows green dot live when unread) */}
+                            <QuotationChatActionButton
+                              quotationId={quote.id}
+                              initialHasUnread={Boolean(quote.has_unread_chat)}
+                              initialUnreadCount={quote.unread_chat_count || 0}
+                            />
 
                             <Link href={`/quotations/${quote.id}`}>
                               <button
