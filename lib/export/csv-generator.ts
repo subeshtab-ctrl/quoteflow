@@ -58,8 +58,8 @@ export function generateFinancialCsv({
 
   for (const quote of quotations) {
     const cust = quote.customer;
-    const isApproved = quote.status === 'APPROVED';
-    const isPaid = Boolean(quote.is_paid);
+    const isApproved = quote.status === 'APPROVED' || quote.status === 'PAYMENT_COMPLETED' || quote.status === 'COMPLETED' || Boolean(quote.approved_at);
+    const isPaid = Boolean(quote.is_paid) || quote.status === 'PAYMENT_COMPLETED';
 
     const itemsSummary = (quote.items || [])
       .map((item) => `${item.quantity}x ${item.description} (${quote.currency} ${item.line_total})`)

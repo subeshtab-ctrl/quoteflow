@@ -9,6 +9,10 @@ import {
   QuotationItem,
   QuotationSignature,
   QuotationView,
+  Invoice,
+  InvoiceItem,
+  InvoiceStatus,
+  AttachmentItem,
 } from '@/types/database';
 import { calculateQuotationTotals } from '@/lib/quotations/calculations';
 import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quotations/tokens';
@@ -29,6 +33,8 @@ class QuoteFlowStore {
   private views: Map<string, QuotationView[]> = new Map();
   private events: Map<string, QuotationEvent[]> = new Map();
   private notifications: Map<string, Notification> = new Map();
+  private invoices: Map<string, Invoice> = new Map();
+  private invoiceItems: Map<string, InvoiceItem[]> = new Map();
 
   private getPaymentsFilePath(): string {
     const dir = path.join(process.cwd(), 'data');
@@ -64,7 +70,51 @@ class QuoteFlowStore {
     }
   }
 
+  private getInvoicesFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {}
+    }
+    return path.join(dir, 'invoices.json');
+  }
+
+  private loadInvoicesFromFile(): Invoice[] {
+    try {
+      const p = this.getInvoicesFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || [];
+      }
+    } catch {
+      // Fallback
+    }
+    return [];
+  }
+
+  private saveInvoicesToFile(): void {
+    try {
+      const all = Array.from(this.invoices.values());
+      const p = this.getInvoicesFilePath();
+      fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+    } catch {
+      // Fallback
+    }
+  }
+
   constructor() {
+    // Load any file-persisted invoices
+    const savedInvoices = this.loadInvoicesFromFile();
+    if (savedInvoices && savedInvoices.length > 0) {
+      for (const inv of savedInvoices) {
+        this.invoices.set(inv.id, inv);
+        if (inv.items) {
+          this.invoiceItems.set(inv.id, inv.items);
+        }
+      }
+    }
+
     const hasSupabase =
       process.env.NEXT_PUBLIC_SUPABASE_URL &&
       !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('your-project') &&
@@ -570,6 +620,71 @@ class QuoteFlowStore {
     };
     this.notifications.set(notif1.id, notif1);
     this.notifications.set(notif2.id, notif2);
+
+    // 9. Initial Invoices
+    if (this.invoices.size === 0) {
+      const inv1: Invoice = {
+        id: 'inv_demo_001',
+        organization_id: DEFAULT_ORG_ID,
+        customer_id: cust2.id,
+        quotation_id: q3.id,
+        invoice_number: 'INV-000001',
+        po_number: 'PO-2026-091',
+        status: 'PAID',
+        issue_date: new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0],
+        due_date: new Date(Date.now() + 27 * 86400000).toISOString().split('T')[0],
+        currency: 'INR',
+        subtotal: 75000,
+        discount_type: 'PERCENTAGE',
+        discount_value: 0,
+        discount_amount: 0,
+        tax_rate: 18,
+        tax_amount: 13500,
+        grand_total: 88500,
+        tax_breakdown: [
+          { label: 'CGST (9%)', rate: 9, amount: 6750 },
+          { label: 'SGST (9%)', rate: 9, amount: 6750 },
+        ],
+        notes: 'Thank you for your prompt business! Payment received in full.',
+        terms_conditions: 'Standard 30 days payment cycle. All taxes as per statutory norms.',
+        payment_terms: 'Net 30 Days',
+        payment_method: 'BANK_TRANSFER',
+        is_paid: true,
+        paid_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+        payment_notes: 'NEFT Ref: 2026092400921',
+        attachments: [],
+        created_by: 'User',
+        created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      };
+      this.invoices.set(inv1.id, inv1);
+      this.invoiceItems.set(inv1.id, [
+        {
+          id: 'inv_item_demo_1',
+          invoice_id: inv1.id,
+          product_id: prod1.id,
+          description: 'UI/UX Redesign & Customer Portal Workflow',
+          quantity: 1,
+          unit: 'service',
+          unit_price: 75000,
+          discount_type: 'PERCENTAGE',
+          discount_value: 0,
+          discount_amount: 0,
+          tax_rate: 18,
+          tax_amount: 13500,
+          line_total: 88500,
+          sort_order: 0,
+          item_type: 'SERVICE',
+          classification_type: 'SAC',
+          classification_code: '998311',
+          cgst_rate: 9,
+          cgst_amount: 6750,
+          sgst_rate: 9,
+          sgst_amount: 6750,
+          created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+        },
+      ]);
+    }
   }
 
   // --- ORGANIZATIONS ---
@@ -1585,28 +1700,30 @@ class QuoteFlowStore {
 
   public async createQuotation(data: {
     organization_id?: string;
-    customer_id: string;
+    customer_id?: string;
     title: string;
     issue_date: string;
     valid_until: string;
-    currency: any;
-    discount_type: any;
-    discount_value: number;
-    tax_rate: number;
+    currency?: any;
+    discount_type?: any;
+    discount_value?: number;
+    tax_rate?: number;
     notes?: string;
     terms_conditions?: string;
     items: any[];
+    attachments?: any[];
     status?: any;
   }): Promise<Quotation> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
+    const customerId = data.customer_id || 'b0000000-0000-0000-0000-000000000001';
 
     // Recalculate totals server-side
     const calculation = calculateQuotationTotals({
       items: data.items,
-      discount_type: data.discount_type,
-      discount_value: data.discount_value,
-      tax_rate: data.tax_rate,
+      discount_type: data.discount_type || 'PERCENTAGE',
+      discount_value: data.discount_value || 0,
+      tax_rate: data.tax_rate || 0,
     });
 
     const quotationNumber = await this.generateNextQuotationNumber(orgId);
@@ -1617,7 +1734,7 @@ class QuoteFlowStore {
     const newQuotation: Quotation = {
       id,
       organization_id: orgId,
-      customer_id: data.customer_id,
+      customer_id: customerId,
       quotation_number: quotationNumber,
       revision_number: 1,
       title: data.title,
@@ -1638,29 +1755,43 @@ class QuoteFlowStore {
       public_token_hash: publicTokenHash,
       is_token_revoked: false,
       view_count: 0,
+      attachments: data.attachments || [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
     this.quotations.set(id, newQuotation);
 
-    // Save items
-    const savedItems: QuotationItem[] = calculation.items.map((item, idx) => ({
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item_${Date.now()}_${idx}`,
-      quotation_id: id,
-      product_id: item.product_id || null,
-      description: item.description,
-      quantity: item.quantity,
-      unit: item.unit,
-      unit_price: item.unit_price,
-      discount_type: item.discount_type,
-      discount_value: item.discount_value,
-      discount_amount: item.discount_amount,
-      tax_rate: item.tax_rate,
-      tax_amount: item.tax_amount,
-      line_total: item.line_total,
-      sort_order: idx,
-    }));
+    // Save items with classification and tax breakdowns
+    const savedItems: QuotationItem[] = calculation.items.map((item, idx) => {
+      const orig = (data.items && data.items[idx]) || {};
+      return {
+        id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `item_${Date.now()}_${idx}`,
+        quotation_id: id,
+        product_id: item.product_id || null,
+        description: item.description,
+        quantity: item.quantity,
+        unit: item.unit,
+        unit_price: item.unit_price,
+        discount_type: item.discount_type,
+        discount_value: item.discount_value,
+        discount_amount: item.discount_amount,
+        tax_rate: item.tax_rate,
+        tax_amount: item.tax_amount,
+        line_total: item.line_total,
+        sort_order: idx,
+        item_type: orig.item_type || 'GOODS',
+        classification_type: orig.classification_type || null,
+        classification_code: orig.classification_code || null,
+        cgst_rate: orig.cgst_rate,
+        cgst_amount: orig.cgst_amount,
+        sgst_rate: orig.sgst_rate,
+        sgst_amount: orig.sgst_amount,
+        igst_rate: orig.igst_rate,
+        igst_amount: orig.igst_amount,
+        tax_category: orig.tax_category || null,
+      };
+    });
     this.quotationItems.set(id, savedItems);
 
     // Audit Event
@@ -1734,7 +1865,7 @@ class QuoteFlowStore {
     return {
       ...newQuotation,
       items: savedItems,
-      customer: this.customers.get(data.customer_id),
+      customer: this.customers.get(customerId),
       organization: org || undefined,
     };
   }
@@ -1788,6 +1919,7 @@ class QuoteFlowStore {
       notes?: string;
       terms_conditions?: string;
       items?: any[];
+      attachments?: any[];
       status?: any;
     },
     orgId?: string
@@ -1817,22 +1949,35 @@ class QuoteFlowStore {
         tax_rate: data.tax_rate !== undefined ? data.tax_rate : existing.tax_rate,
       });
 
-      newItems = calculation.items.map((item: any, idx: number) => ({
-        id: item.id || `item_${Date.now()}_${idx}`,
-        quotation_id: id,
-        product_id: item.product_id || null,
-        description: item.description,
-        quantity: item.quantity,
-        unit: item.unit,
-        unit_price: item.unit_price,
-        discount_type: item.discount_type,
-        discount_value: item.discount_value,
-        discount_amount: item.discount_amount,
-        tax_rate: item.tax_rate,
-        tax_amount: item.tax_amount,
-        line_total: item.line_total,
-        sort_order: idx,
-      }));
+      newItems = calculation.items.map((item: any, idx: number) => {
+        const orig = (data.items && data.items[idx]) || {};
+        return {
+          id: item.id || `item_${Date.now()}_${idx}`,
+          quotation_id: id,
+          product_id: item.product_id || null,
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit,
+          unit_price: item.unit_price,
+          discount_type: item.discount_type,
+          discount_value: item.discount_value,
+          discount_amount: item.discount_amount,
+          tax_rate: item.tax_rate,
+          tax_amount: item.tax_amount,
+          line_total: item.line_total,
+          sort_order: idx,
+          item_type: orig.item_type || 'GOODS',
+          classification_type: orig.classification_type || null,
+          classification_code: orig.classification_code || null,
+          cgst_rate: orig.cgst_rate,
+          cgst_amount: orig.cgst_amount,
+          sgst_rate: orig.sgst_rate,
+          sgst_amount: orig.sgst_amount,
+          igst_rate: orig.igst_rate,
+          igst_amount: orig.igst_amount,
+          tax_category: orig.tax_category || null,
+        };
+      });
       this.quotationItems.set(id, newItems);
     }
 
@@ -1852,6 +1997,7 @@ class QuoteFlowStore {
       grand_total: calculation ? calculation.grand_total : existing.grand_total,
       notes: data.notes !== undefined ? data.notes : existing.notes,
       terms_conditions: data.terms_conditions !== undefined ? data.terms_conditions : existing.terms_conditions,
+      attachments: data.attachments !== undefined ? data.attachments : existing.attachments,
       status: data.status || existing.status,
       updated_at: new Date().toISOString(),
     };
@@ -2381,6 +2527,16 @@ class QuoteFlowStore {
     quote.payment_notes = paymentData.is_paid ? (paymentData.payment_notes ?? quote.payment_notes ?? null) : null;
     quote.updated_at = now;
 
+    if (paymentData.is_paid) {
+      if (['APPROVED', 'SENT', 'VIEWED', 'PENDING', 'PENDING_APPROVAL'].includes(quote.status)) {
+        quote.status = 'PAYMENT_COMPLETED';
+      }
+    } else {
+      if (quote.status === 'PAYMENT_COMPLETED') {
+        quote.status = 'APPROVED';
+      }
+    }
+
     this.quotations.set(id, quote);
 
     // Save to local file storage for rock-solid persistence
@@ -2402,6 +2558,7 @@ class QuoteFlowStore {
         paid_at: quote.paid_at,
         payment_method: quote.payment_method,
         payment_notes: quote.payment_notes,
+        status: quote.status,
       }
     );
 
@@ -2423,14 +2580,16 @@ class QuoteFlowStore {
               paid_at: quote.paid_at,
               payment_method: quote.payment_method,
               payment_notes: quote.payment_notes,
+              status: quote.status,
             },
             created_at: now,
           });
 
-        // Touch quotation updated_at in Supabase
+        // Touch quotation updated_at and status in Supabase
         await supabase
           .from('quotations')
           .update({
+            status: quote.status,
             updated_at: now,
           })
           .eq('id', id);
@@ -2447,6 +2606,420 @@ class QuoteFlowStore {
       signature: this.signatures.get(id) || quote.signature || null,
       events: this.events.get(id) || quote.events || [],
     };
+  }
+
+  // --- MARK AS COMPLETED WORKFLOW ---
+  public async markQuotationCompleted(
+    id: string,
+    orgId?: string,
+    user: string = 'Business User'
+  ): Promise<Quotation> {
+    let quote = this.quotations.get(id);
+    if (!quote) {
+      quote = (await this.getQuotationById(id, orgId || DEFAULT_ORG_ID)) || undefined;
+    }
+    if (!quote) throw new Error('Quotation not found');
+
+    if (orgId && quote.organization_id !== orgId) {
+      throw new Error('Unauthorized to modify quotation from another organization');
+    }
+
+    const now = new Date().toISOString();
+    quote.status = 'COMPLETED';
+    quote.updated_at = now;
+
+    this.quotations.set(id, quote);
+
+    // Audit Log Event
+    this.logEvent(quote.organization_id, id, 'USER', 'COMPLETED', {
+      completed_by: user,
+      completed_at: now,
+    });
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('quotations')
+          .update({
+            status: 'COMPLETED',
+            updated_at: now,
+          })
+          .eq('id', id);
+
+        await supabase
+          .from('quotation_events')
+          .insert({
+            organization_id: quote.organization_id,
+            quotation_id: id,
+            actor_type: 'USER',
+            actor_name: user,
+            event_type: 'COMPLETED',
+            metadata: { completed_at: now },
+            created_at: now,
+          });
+      }
+    } catch (err) {
+      console.warn('Failed to sync quotation completed status to Supabase:', err);
+    }
+
+    return {
+      ...quote,
+      items: this.quotationItems.get(id) || quote.items || [],
+      customer: this.customers.get(quote.customer_id) || quote.customer,
+      organization: this.organizations.get(quote.organization_id) || quote.organization,
+      signature: this.signatures.get(id) || quote.signature || null,
+      events: this.events.get(id) || quote.events || [],
+    };
+  }
+
+  // --- MULTI-QUOTE CUSTOMER PORTAL RESOLVER ---
+  public async getCustomerPortalQuotationsByToken(token: string): Promise<{
+    activeQuotation: Quotation | null;
+    allQuotations: Quotation[];
+  }> {
+    const activeQuotation = await this.getQuotationByPublicToken(token);
+    if (!activeQuotation) {
+      return { activeQuotation: null, allQuotations: [] };
+    }
+
+    const orgId = activeQuotation.organization_id;
+    const customerId = activeQuotation.customer_id;
+    const allOrgQuotes = await this.getQuotations(orgId, { customerId });
+
+    // Filter quotes for this customer, excluding drafts
+    const customerQuotes = allOrgQuotes
+      .filter((q) => q.customer_id === customerId && q.status !== 'DRAFT' && q.status !== 'CANCELLED')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    // Make sure active quotation is present in customerQuotes
+    if (!customerQuotes.some((q) => q.id === activeQuotation.id)) {
+      customerQuotes.unshift(activeQuotation);
+    }
+
+    return {
+      activeQuotation,
+      allQuotations: customerQuotes,
+    };
+  }
+
+  // --- INVOICES CRUD MODULE ---
+  public async getInvoices(
+    orgId: string = DEFAULT_ORG_ID,
+    filters?: { status?: string; search?: string; customerId?: string }
+  ): Promise<Invoice[]> {
+    if (this.invoices.size === 0) {
+      const saved = this.loadInvoicesFromFile();
+      for (const inv of saved) {
+        this.invoices.set(inv.id, inv);
+        if (inv.items) {
+          this.invoiceItems.set(inv.id, inv.items);
+        }
+      }
+    }
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('invoices')
+          .select('*, customer:customers(*), items:invoice_items(*)')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          for (const inv of data) {
+            this.invoices.set(inv.id, inv as Invoice);
+            if (inv.items) {
+              this.invoiceItems.set(inv.id, inv.items as InvoiceItem[]);
+            }
+          }
+        }
+      }
+    } catch {}
+
+    let list = Array.from(this.invoices.values()).filter((inv) => inv.organization_id === orgId);
+
+    if (filters?.status && filters.status !== 'ALL') {
+      list = list.filter((inv) => inv.status === filters.status);
+    }
+
+    if (filters?.customerId) {
+      list = list.filter((inv) => inv.customer_id === filters.customerId);
+    }
+
+    if (filters?.search) {
+      const s = filters.search.toLowerCase();
+      list = list.filter((inv) => {
+        const cust = inv.customer || this.customers.get(inv.customer_id);
+        return (
+          inv.invoice_number.toLowerCase().includes(s) ||
+          (inv.po_number && inv.po_number.toLowerCase().includes(s)) ||
+          (cust && (cust.name.toLowerCase().includes(s) || (cust.company_name && cust.company_name.toLowerCase().includes(s))))
+        );
+      });
+    }
+
+    return list
+      .map((inv) => ({
+        ...inv,
+        customer: inv.customer || this.customers.get(inv.customer_id),
+        organization: inv.organization || this.organizations.get(inv.organization_id),
+        items: inv.items || this.invoiceItems.get(inv.id) || [],
+      }))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  public async getInvoiceById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Invoice | null> {
+    if (this.invoices.size === 0) {
+      const saved = this.loadInvoicesFromFile();
+      for (const inv of saved) {
+        this.invoices.set(inv.id, inv);
+        if (inv.items) {
+          this.invoiceItems.set(inv.id, inv.items);
+        }
+      }
+    }
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('invoices')
+          .select('*, customer:customers(*), items:invoice_items(*)')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (!error && data) {
+          this.invoices.set(data.id, data as Invoice);
+          if (data.items) {
+            this.invoiceItems.set(data.id, data.items as InvoiceItem[]);
+          }
+          return {
+            ...(data as Invoice),
+            customer: data.customer || this.customers.get(data.customer_id),
+            organization: (await this.getOrganization(data.organization_id)) || this.organizations.get(data.organization_id),
+            items: data.items || this.invoiceItems.get(data.id) || [],
+          };
+        }
+      }
+    } catch {}
+
+    const inv = this.invoices.get(id);
+    if (!inv) return null;
+
+    return {
+      ...inv,
+      customer: inv.customer || this.customers.get(inv.customer_id),
+      organization: inv.organization || this.organizations.get(inv.organization_id),
+      items: inv.items || this.invoiceItems.get(inv.id) || [],
+    };
+  }
+
+  public async createInvoice(data: {
+    organization_id?: string;
+    customer_id: string;
+    quotation_id?: string | null;
+    invoice_number?: string;
+    po_number?: string | null;
+    status?: InvoiceStatus;
+    issue_date: string;
+    due_date: string;
+    currency: any;
+    notes?: string | null;
+    terms_conditions?: string | null;
+    payment_terms?: string | null;
+    items: Array<any>;
+    attachments?: AttachmentItem[];
+    tax_breakdown?: any[];
+    discount_type?: any;
+    discount_value?: number;
+    tax_rate?: number;
+  }): Promise<Invoice> {
+    const orgId = data.organization_id || DEFAULT_ORG_ID;
+    const invId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // Auto generate invoice number if not provided
+    let invoiceNumber = data.invoice_number;
+    if (!invoiceNumber) {
+      const count = this.invoices.size + 1;
+      invoiceNumber = `INV-${String(count).padStart(6, '0')}`;
+    }
+
+    const calculated = calculateQuotationTotals({
+      items: data.items,
+      discount_type: data.discount_type || 'PERCENTAGE',
+      discount_value: data.discount_value || 0,
+      tax_rate: data.tax_rate || 0,
+    });
+
+    const invoiceItems: InvoiceItem[] = (data.items || []).map((item, idx) => ({
+      id: item.id || `inv_item_${Date.now()}_${idx}`,
+      invoice_id: invId,
+      product_id: item.product_id || null,
+      description: item.description,
+      quantity: Number(item.quantity) || 1,
+      unit: item.unit || 'unit',
+      unit_price: Number(item.unit_price) || 0,
+      discount_type: item.discount_type || 'PERCENTAGE',
+      discount_value: Number(item.discount_value) || 0,
+      discount_amount: Number(item.discount_amount) || 0,
+      tax_rate: Number(item.tax_rate) || 0,
+      tax_amount: Number(item.tax_amount) || 0,
+      line_total: Number(item.line_total) || 0,
+      sort_order: idx + 1,
+      item_type: item.item_type || 'GOODS',
+      classification_type: item.classification_type || null,
+      classification_code: item.classification_code || null,
+      cgst_rate: item.cgst_rate,
+      cgst_amount: item.cgst_amount,
+      sgst_rate: item.sgst_rate,
+      sgst_amount: item.sgst_amount,
+      igst_rate: item.igst_rate,
+      igst_amount: item.igst_amount,
+      tax_category: item.tax_category || null,
+      created_at: new Date().toISOString(),
+    }));
+
+    const status: InvoiceStatus = data.status || 'ISSUED';
+    const isPaid = status === 'PAID';
+
+    const newInvoice: Invoice = {
+      id: invId,
+      organization_id: orgId,
+      customer_id: data.customer_id,
+      quotation_id: data.quotation_id || null,
+      invoice_number: invoiceNumber,
+      po_number: data.po_number || null,
+      status,
+      issue_date: data.issue_date,
+      due_date: data.due_date,
+      currency: data.currency,
+      subtotal: calculated.subtotal,
+      discount_type: data.discount_type || 'PERCENTAGE',
+      discount_value: data.discount_value || 0,
+      discount_amount: calculated.discount_amount,
+      tax_rate: data.tax_rate || calculated.tax_rate || 0,
+      tax_amount: calculated.tax_amount,
+      grand_total: calculated.grand_total,
+      tax_breakdown: data.tax_breakdown || [],
+      notes: data.notes || '',
+      terms_conditions: data.terms_conditions || '',
+      payment_terms: data.payment_terms || 'Net 30 Days',
+      payment_method: isPaid ? 'BANK_TRANSFER' : null,
+      is_paid: isPaid,
+      paid_at: isPaid ? new Date().toISOString() : null,
+      payment_notes: null,
+      attachments: data.attachments || [],
+      created_by: 'User',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      items: invoiceItems,
+    };
+
+    this.invoices.set(invId, newInvoice);
+    this.invoiceItems.set(invId, invoiceItems);
+    this.saveInvoicesToFile();
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('invoices').insert({
+          id: newInvoice.id,
+          organization_id: newInvoice.organization_id,
+          customer_id: newInvoice.customer_id,
+          quotation_id: newInvoice.quotation_id,
+          invoice_number: newInvoice.invoice_number,
+          po_number: newInvoice.po_number,
+          status: newInvoice.status,
+          issue_date: newInvoice.issue_date,
+          due_date: newInvoice.due_date,
+          currency: newInvoice.currency,
+          subtotal: newInvoice.subtotal,
+          discount_type: newInvoice.discount_type,
+          discount_value: newInvoice.discount_value,
+          discount_amount: newInvoice.discount_amount,
+          tax_rate: newInvoice.tax_rate,
+          tax_amount: newInvoice.tax_amount,
+          grand_total: newInvoice.grand_total,
+          notes: newInvoice.notes,
+          terms_conditions: newInvoice.terms_conditions,
+          payment_terms: newInvoice.payment_terms,
+          is_paid: newInvoice.is_paid,
+          paid_at: newInvoice.paid_at,
+          created_at: newInvoice.created_at,
+          updated_at: newInvoice.updated_at,
+        });
+      }
+    } catch {}
+
+    const org = await this.getOrganization(orgId);
+    const customer = this.customers.get(data.customer_id);
+
+    return {
+      ...newInvoice,
+      organization: org || undefined,
+      customer: customer || undefined,
+    };
+  }
+
+  public async updateInvoiceStatus(
+    id: string,
+    orgId: string = DEFAULT_ORG_ID,
+    status: InvoiceStatus,
+    paymentDetails?: { payment_method?: string; payment_notes?: string }
+  ): Promise<Invoice> {
+    const inv = await this.getInvoiceById(id, orgId);
+    if (!inv) throw new Error('Invoice not found');
+
+    const now = new Date().toISOString();
+    const isPaid = status === 'PAID';
+
+    inv.status = status;
+    inv.is_paid = isPaid;
+    inv.paid_at = isPaid ? now : null;
+    if (paymentDetails?.payment_method) {
+      inv.payment_method = paymentDetails.payment_method as any;
+    }
+    if (paymentDetails?.payment_notes) {
+      inv.payment_notes = paymentDetails.payment_notes;
+    }
+    inv.updated_at = now;
+
+    this.invoices.set(id, inv);
+    this.saveInvoicesToFile();
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase
+          .from('invoices')
+          .update({
+            status: inv.status,
+            is_paid: inv.is_paid,
+            paid_at: inv.paid_at,
+            updated_at: now,
+          })
+          .eq('id', id);
+      }
+    } catch {}
+
+    return inv;
+  }
+
+  public async deleteInvoice(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    this.invoices.delete(id);
+    this.invoiceItems.delete(id);
+    this.saveInvoicesToFile();
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('invoices').delete().eq('id', id).eq('organization_id', orgId);
+      }
+    } catch {}
+
+    return true;
   }
 
   // --- REJECTION WORKFLOW ---

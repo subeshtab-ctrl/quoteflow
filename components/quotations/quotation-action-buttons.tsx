@@ -56,6 +56,7 @@ export function QuotationActionButtons({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
@@ -127,6 +128,38 @@ export function QuotationActionButtons({
       alert(err.message || 'Error approving quotation');
     } finally {
       setIsApproving(false);
+    }
+  };
+
+  const handleMarkCompleted = async () => {
+    if (
+      !confirm(
+        `Mark quotation ${quotationNumber} as COMPLETED? This marks the project lifecycle as fully completed.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsCompleting(true);
+      const res = await fetch(`/api/quotations/${quotationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'COMPLETED' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to mark quotation as completed');
+
+      if (data.quotation) {
+        setCurrentQuotation(data.quotation);
+        setCurrentStatus('COMPLETED');
+      }
+
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || 'Error completing quotation');
+    } finally {
+      setIsCompleting(false);
     }
   };
 
@@ -219,22 +252,35 @@ export function QuotationActionButtons({
   return (
     <>
       <div className="flex items-center gap-2 flex-wrap">
-        {/* Approved Quotation Actions: Invoice is ONLY shown when marked as PAID */}
-        {currentStatus === 'APPROVED' && currentQuotation && (
+        {/* Approved Quotation Actions: Create Invoice and Mark as Completed */}
+        {(currentStatus === 'APPROVED' || currentStatus === 'PAYMENT_COMPLETED') && currentQuotation && (
           <>
+            <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
+              <Button
+                variant="primary"
+                size="sm"
+                className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm font-semibold"
+                title="Create an Invoice from this approved quotation"
+              >
+                <Receipt className="h-3.5 w-3.5" />
+                <span>Create Invoice</span>
+              </Button>
+            </Link>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleMarkCompleted}
+              isLoading={isCompleting}
+              className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-xs"
+              title="Mark this quotation lifecycle as Completed"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Mark as Completed</span>
+            </Button>
+
             {currentQuotation.is_paid ? (
               <>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setIsInvoiceOpen(true)}
-                  className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
-                  title="Generate & View Commercial Tax Invoice"
-                >
-                  <Receipt className="h-3.5 w-3.5" />
-                  <span>Generate Tax Invoice</span>
-                </Button>
-
                 <Button
                   variant="outline"
                   size="sm"
@@ -252,7 +298,7 @@ export function QuotationActionButtons({
                 size="sm"
                 onClick={() => setIsPaymentOpen(true)}
                 className="gap-1.5 text-xs font-semibold shadow-sm bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900"
-                title="Mark as paid to unlock invoice generation"
+                title="Record customer payment"
               >
                 <CreditCard className="h-3.5 w-3.5" />
                 <span>Mark as Paid</span>
@@ -261,8 +307,8 @@ export function QuotationActionButtons({
           </>
         )}
 
-        {/* Mark Approved Option for Unapproved Quotes */}
-        {currentStatus !== 'APPROVED' && (
+        {/* Mark Approved Option for Pending/Sent Quotes */}
+        {['DRAFT', 'PENDING', 'SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) && (
           <Button
             variant="outline"
             size="sm"

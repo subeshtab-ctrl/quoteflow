@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Customer, Product, Organization, CurrencyCode, DiscountType } from '@/types/database';
+import { Customer, Product, Organization, CurrencyCode, DiscountType, AttachmentItem } from '@/types/database';
 import {
   calculateQuotationTotals,
   formatCurrency,
@@ -23,6 +23,7 @@ import {
   DollarSign,
   Percent,
   CheckCircle2,
+  Paperclip,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import {
@@ -31,6 +32,8 @@ import {
   getLogoFitClass,
   getCompanyInitials,
 } from '@/lib/utils/logo';
+import { getCountryProfile } from '@/lib/tax/country-config';
+import { FileAttachmentsUploader } from '@/components/common/file-attachments-uploader';
 
 interface QuotationBuilderProps {
   customers: Customer[];
@@ -49,6 +52,9 @@ interface ItemState {
   discount_type: DiscountType;
   discount_value: number;
   tax_rate: number;
+  item_type?: 'GOODS' | 'SERVICE';
+  classification_type?: string;
+  classification_code?: string;
 }
 
 export function QuotationBuilder({
@@ -87,9 +93,23 @@ export function QuotationBuilder({
     initialQuotation?.currency || organization.default_currency || 'INR'
   );
 
+  const countryProfile = getCountryProfile(organization?.country);
+  const goodsLabel = organization?.goods_classification_label || countryProfile.goodsClassificationLabel;
+  const serviceLabel = organization?.service_classification_label || countryProfile.serviceClassificationLabel;
+
+  // Attachments State
+  const [attachments, setAttachments] = useState<AttachmentItem[]>(
+    initialQuotation?.attachments || []
+  );
+
   // Line items
   const [items, setItems] = useState<ItemState[]>(
-    initialQuotation?.items || [
+    initialQuotation?.items?.map((it: any) => ({
+      ...it,
+      item_type: it.item_type || 'GOODS',
+      classification_type: it.classification_type || (it.item_type === 'SERVICE' ? serviceLabel : goodsLabel),
+      classification_code: it.classification_code || '',
+    })) || [
       {
         description: 'Cloud Architecture & Implementation',
         quantity: 1,
@@ -98,6 +118,9 @@ export function QuotationBuilder({
         discount_type: 'PERCENTAGE',
         discount_value: 0,
         tax_rate: organization.default_tax_rate || 18,
+        item_type: 'SERVICE',
+        classification_type: serviceLabel,
+        classification_code: countryProfile.isIndiaGst ? '998311' : '',
       },
     ]
   );
@@ -221,7 +244,10 @@ export function QuotationBuilder({
         unit_price: 0,
         discount_type: 'PERCENTAGE',
         discount_value: 0,
-        tax_rate: organization.default_tax_rate || 18,
+        tax_rate: organization.default_tax_rate || countryProfile.defaultTaxRate || 0,
+        item_type: 'GOODS',
+        classification_type: goodsLabel,
+        classification_code: '',
       },
     ]);
   };
@@ -299,6 +325,7 @@ export function QuotationBuilder({
         notes,
         terms_conditions: terms,
         items,
+        attachments,
         status: statusToSet,
       };
 
@@ -754,6 +781,62 @@ export function QuotationBuilder({
                         </span>
                       </div>
                     </div>
+
+                    {/* Item Classification: Goods vs Service and Adaptive Code */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-100 text-xs">
+                      <div>
+                        <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">
+                          Classification Type
+                        </label>
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleItemChange(idx, 'item_type', 'GOODS');
+                              handleItemChange(idx, 'classification_type', goodsLabel);
+                            }}
+                            className={`flex-1 py-1 text-[11px] font-semibold rounded transition-colors ${
+                              item.item_type === 'GOODS' || !item.item_type
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Goods
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleItemChange(idx, 'item_type', 'SERVICE');
+                              handleItemChange(idx, 'classification_type', serviceLabel);
+                            }}
+                            className={`flex-1 py-1 text-[11px] font-semibold rounded transition-colors ${
+                              item.item_type === 'SERVICE'
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Service
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">
+                          {item.item_type === 'SERVICE' ? serviceLabel : goodsLabel}
+                        </label>
+                        <input
+                          type="text"
+                          value={item.classification_code || ''}
+                          onChange={(e) => handleItemChange(idx, 'classification_code', e.target.value)}
+                          placeholder={
+                            item.item_type === 'SERVICE'
+                              ? countryProfile.servicePlaceholder
+                              : countryProfile.goodsPlaceholder
+                          }
+                          className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -820,6 +903,18 @@ export function QuotationBuilder({
               onChange={(e) => setTerms(e.target.value)}
               rows={3}
             />
+          </div>
+
+          {/* Step 5: Document Attachments */}
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+              <Paperclip className="h-3.5 w-3.5 text-indigo-500" />
+              <span>5. Quotation Attachments & Documents</span>
+            </h3>
+            <p className="text-xs text-slate-400">
+              Upload project specifications, reference images, drawings, or contract PDFs for your customer to review.
+            </p>
+            <FileAttachmentsUploader attachments={attachments} onChange={setAttachments} />
           </div>
         </div>
 
@@ -922,6 +1017,31 @@ export function QuotationBuilder({
                 </span>
               </div>
             </div>
+
+            {/* Attachments Preview */}
+            {attachments.length > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                <span className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
+                  <Paperclip className="h-3 w-3" />
+                  <span>Attached Documents ({attachments.length})</span>
+                </span>
+                <div className="space-y-1">
+                  {attachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="flex items-center justify-between text-xs p-1.5 rounded-lg bg-slate-50 border border-slate-100"
+                    >
+                      <span className="font-medium text-slate-700 truncate max-w-[180px]">
+                        {att.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {((att as any).type || (att as any).file_type || 'file').toUpperCase()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="pt-2 flex flex-col gap-2">

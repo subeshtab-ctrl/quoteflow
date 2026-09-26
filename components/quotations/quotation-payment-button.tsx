@@ -23,7 +23,11 @@ export function QuotationPaymentButton({
     setCurrentQuotation(quotation);
   }, [quotation]);
 
-  const isApproved = currentQuotation.status === 'APPROVED';
+  const isApproved =
+    currentQuotation.status === 'APPROVED' ||
+    currentQuotation.status === 'PAYMENT_COMPLETED' ||
+    currentQuotation.status === 'COMPLETED' ||
+    Boolean(currentQuotation.approved_at);
 
   if (!isApproved) {
     return null;

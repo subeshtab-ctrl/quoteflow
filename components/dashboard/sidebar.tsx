@@ -7,11 +7,11 @@ import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
   FileText,
+  Receipt,
   Users,
   Package,
   BarChart3,
   Settings,
-  PlusCircle,
   Building2,
 } from 'lucide-react';
 import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } from '@/lib/utils/logo';
@@ -55,6 +55,7 @@ export function DashboardSidebar({
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Quotations', href: '/quotations', icon: FileText },
+    { name: 'Invoices', href: '/invoices', icon: Receipt },
     { name: 'Customers', href: '/customers', icon: Users },
     { name: 'Products & Services', href: '/products', icon: Package },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
@@ -107,14 +108,6 @@ export function DashboardSidebar({
             </p>
           </div>
         </div>
-
-        {/* Create Quotation Button */}
-        <Link href="/quotations/new">
-          <button className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand-color,#4f46e5)] hover:brightness-105 active:brightness-95 text-white px-4 py-2.5 text-sm font-semibold shadow-md active:scale-[0.98] transition-all">
-            <PlusCircle className="h-4 w-4" />
-            <span>Create Quotation</span>
-          </button>
-        </Link>
 
         {/* Navigation Menu */}
         <nav className="space-y-1">

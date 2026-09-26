@@ -25,6 +25,8 @@ import {
   ShieldCheck,
   Building2,
   History,
+  Paperclip,
+  FileText,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -303,7 +305,19 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   {(quotation.items || []).map((item, idx) => (
                     <tr key={item.id || idx}>
                       <td className="py-3 px-4 text-center text-xs text-slate-400">{idx + 1}</td>
-                      <td className="py-3 px-4 font-medium text-slate-800">{item.description}</td>
+                      <td className="py-3 px-4">
+                        <p className="font-medium text-slate-800">{item.description}</p>
+                        {item.classification_code && (
+                          <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                            <span className="text-slate-400">
+                              {item.classification_type || (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')}:
+                            </span>{' '}
+                            <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {item.classification_code}
+                            </span>
+                          </p>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-center text-slate-600">
                         {item.quantity} {item.unit}
                       </td>
@@ -321,6 +335,36 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 </tbody>
               </table>
             </div>
+
+            {/* Attachments Section */}
+            {quotation.attachments && quotation.attachments.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <Paperclip className="h-4 w-4 text-indigo-500" />
+                    <span>Quotation Attachments & Documents ({quotation.attachments.length})</span>
+                  </span>
+                  <span className="text-[11px] text-slate-400">Visible and downloadable on client link</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {quotation.attachments.map((att: any) => (
+                    <a
+                      key={att.id}
+                      href={att.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-xs transition-all text-xs group"
+                    >
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <FileText className="h-4 w-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                        <span className="font-medium text-slate-800 truncate">{att.name}</span>
+                      </div>
+                      <Download className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Totals Summary */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2">

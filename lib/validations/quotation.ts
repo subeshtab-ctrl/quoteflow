@@ -11,7 +11,17 @@ export const LineItemSchema = z.object({
   discount_value: z.coerce.number().min(0).default(0),
   tax_rate: z.coerce.number().min(0).max(100).default(0),
   sort_order: z.number().int().default(0),
-});
+  item_type: z.enum(['GOODS', 'SERVICE']).optional(),
+  classification_type: z.string().nullish().or(z.literal('')),
+  classification_code: z.string().nullish().or(z.literal('')),
+  cgst_rate: z.number().optional(),
+  cgst_amount: z.number().optional(),
+  sgst_rate: z.number().optional(),
+  sgst_amount: z.number().optional(),
+  igst_rate: z.number().optional(),
+  igst_amount: z.number().optional(),
+  tax_category: z.string().nullish().or(z.literal('')),
+}).passthrough();
 
 export const QuotationFormSchema = z.object({
   id: z.string().optional(),
@@ -25,20 +35,24 @@ export const QuotationFormSchema = z.object({
   tax_rate: z.coerce.number().min(0).max(100).default(0),
   notes: z.string().optional(),
   terms_conditions: z.string().optional(),
+  attachments: z.array(z.any()).optional().default([]),
   items: z.array(LineItemSchema).min(1, 'At least one line item is required'),
   status: z
     .enum([
       'DRAFT',
+      'PENDING',
       'SENT',
       'VIEWED',
       'PENDING_APPROVAL',
       'APPROVED',
+      'PAYMENT_COMPLETED',
+      'COMPLETED',
       'REJECTED',
       'EXPIRED',
       'CANCELLED',
     ])
     .default('DRAFT'),
-});
+}).passthrough();
 
 export const CustomerFormSchema = z.object({
   id: z.string().optional(),
@@ -114,4 +128,9 @@ export const OrganizationSettingsSchema = z.object({
   quotation_start_number: z.coerce.number().int().default(1),
   default_terms: z.string().nullish().or(z.literal('')),
   invoice_footer: z.string().nullish().or(z.literal('')),
+  tax_system: z.string().nullish().or(z.literal('')),
+  tax_id_label: z.string().nullish().or(z.literal('')),
+  goods_classification_label: z.string().nullish().or(z.literal('')),
+  service_classification_label: z.string().nullish().or(z.literal('')),
+  tax_rate_type: z.string().nullish().or(z.literal('')),
 }).passthrough();

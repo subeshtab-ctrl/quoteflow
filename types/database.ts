@@ -2,12 +2,24 @@ export type UserRole = 'OWNER' | 'ADMIN' | 'STAFF';
 
 export type QuotationStatus =
   | 'DRAFT'
+  | 'PENDING'
   | 'SENT'
   | 'VIEWED'
   | 'PENDING_APPROVAL'
   | 'APPROVED'
+  | 'PAYMENT_COMPLETED'
+  | 'COMPLETED'
   | 'REJECTED'
   | 'EXPIRED'
+  | 'CANCELLED';
+
+export type TaxSystem = 'GST' | 'VAT' | 'SALES_TAX' | 'CUSTOM';
+export type InvoiceStatus =
+  | 'DRAFT'
+  | 'ISSUED'
+  | 'PAID'
+  | 'PARTIAL'
+  | 'OVERDUE'
   | 'CANCELLED';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
@@ -36,6 +48,11 @@ export interface Organization {
   city?: string | null;
   state?: string | null;
   country?: string | null;
+  tax_system?: TaxSystem | string | null;
+  tax_id_label?: string | null;
+  goods_classification_label?: string | null;
+  service_classification_label?: string | null;
+  tax_rate_type?: 'INTRASTATE_INTERSTATE' | 'SINGLE';
   postal_code?: string | null;
   logo_url?: string | null;
   brand_color?: string | null;
@@ -121,6 +138,16 @@ export interface QuotationItem {
   tax_amount: number;
   line_total: number;
   sort_order: number;
+  item_type?: 'GOODS' | 'SERVICE';
+  classification_type?: string | null;
+  classification_code?: string | null;
+  cgst_rate?: number;
+  cgst_amount?: number;
+  sgst_rate?: number;
+  sgst_amount?: number;
+  igst_rate?: number;
+  igst_amount?: number;
+  tax_category?: string | null;
   created_at?: string;
 }
 
@@ -167,6 +194,15 @@ export interface QuotationAttachment {
   file_type: string;
   storage_path: string;
   uploaded_by?: string;
+  created_at: string;
+}
+
+export interface AttachmentItem {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  url: string;
   created_at: string;
 }
 
@@ -226,7 +262,78 @@ export interface Quotation {
   signature?: QuotationSignature | null;
   events?: QuotationEvent[];
   views?: QuotationView[];
-  attachments?: QuotationAttachment[];
+  attachments?: (QuotationAttachment | AttachmentItem)[];
+}
+
+export interface InvoiceItem {
+  id: string;
+  invoice_id: string;
+  product_id?: string | null;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  discount_type?: DiscountType;
+  discount_value?: number;
+  discount_amount?: number;
+  tax_rate: number;
+  tax_amount: number;
+  line_total: number;
+  sort_order: number;
+  item_type?: 'GOODS' | 'SERVICE';
+  classification_type?: string | null;
+  classification_code?: string | null;
+  cgst_rate?: number;
+  cgst_amount?: number;
+  sgst_rate?: number;
+  sgst_amount?: number;
+  igst_rate?: number;
+  igst_amount?: number;
+  tax_category?: string | null;
+  created_at?: string;
+}
+
+export interface InvoiceTaxBreakdown {
+  label: string;
+  rate: number;
+  amount: number;
+}
+
+export interface Invoice {
+  id: string;
+  organization_id: string;
+  customer_id: string;
+  quotation_id?: string | null;
+  invoice_number: string;
+  po_number?: string | null;
+  status: InvoiceStatus;
+  issue_date: string;
+  due_date: string;
+  currency: CurrencyCode;
+  subtotal: number;
+  discount_type?: DiscountType;
+  discount_value?: number;
+  discount_amount?: number;
+  tax_rate: number;
+  tax_amount: number;
+  grand_total: number;
+  tax_breakdown?: InvoiceTaxBreakdown[];
+  notes?: string | null;
+  terms_conditions?: string | null;
+  payment_terms?: string | null;
+  payment_method?: PaymentMethod | string | null;
+  is_paid: boolean;
+  paid_at?: string | null;
+  payment_notes?: string | null;
+  attachments?: AttachmentItem[];
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // Joined fields
+  customer?: Customer;
+  organization?: Organization;
+  items?: InvoiceItem[];
 }
 
 export interface QuotationChatMessage {

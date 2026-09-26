@@ -20,6 +20,8 @@ import {
   MessageSquare,
   Send,
   CheckCheck,
+  Paperclip,
+  FileText,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -30,10 +32,11 @@ import {
 
 interface PublicQuoteViewProps {
   initialQuotation: Quotation;
+  allQuotations?: Quotation[];
   token: string;
 }
 
-export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProps) {
+export function PublicQuoteView({ initialQuotation, allQuotations, token }: PublicQuoteViewProps) {
   const [quotation, setQuotation] = useState<Quotation>(initialQuotation);
   const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
@@ -99,11 +102,13 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
     return diffDays >= 0 ? diffDays : 0;
   })();
 
+  const currentToken = quotation.public_token || token;
+
   const loadChatMessages = async (forceMarkRead = false) => {
     try {
       const shouldMarkRead = forceMarkRead || isChatPopupOpenRef.current;
       const res = await fetch(
-        `/api/public/chat?token=${encodeURIComponent(token)}${shouldMarkRead ? '&markRead=true' : ''}`,
+        `/api/public/chat?token=${encodeURIComponent(currentToken)}${shouldMarkRead ? '&markRead=true' : ''}`,
         { cache: 'no-store' }
       );
       if (res.ok) {
@@ -126,10 +131,11 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
   };
 
   useEffect(() => {
+    prevChatCountRef.current = 0;
     loadChatMessages(false);
     const interval = setInterval(() => loadChatMessages(false), 2500);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [currentToken]);
 
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,7 +146,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          token,
+          token: currentToken,
           sender_name: senderName || customer?.name || 'Customer',
           message: chatInput.trim(),
         }),
@@ -273,6 +279,47 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
             )}
           </div>
         </div>
+
+        {/* Multi-Quotation Customer Portal Switcher */}
+        {allQuotations && allQuotations.length > 1 && (
+          <div className="rounded-2xl bg-white border border-slate-200/90 p-4 shadow-sm space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 px-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <Building2 className="h-4 w-4 text-indigo-500" />
+                <span>Your Estimates & Proposals ({allQuotations.length})</span>
+              </span>
+              <span className="text-[11px] text-slate-400">
+                You can review, chat, and independently approve each estimate below
+              </span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
+              {allQuotations.map((q) => {
+                const isSelected = q.id === quotation.id;
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => {
+                      setQuotation(q);
+                      window.history.pushState(null, '', `/q/${q.public_token}`);
+                    }}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
+                      isSelected
+                        ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
+                        : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span className="font-bold">{q.quotation_number}</span>
+                    <span className="text-slate-300 font-normal">|</span>
+                    <span className="font-medium truncate max-w-[140px]">{q.title}</span>
+                    <span className="font-bold text-slate-900">{formatCurrency(q.grand_total, q.currency)}</span>
+                    <StatusBadge status={q.status} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Status Alerts */}
         {quotation.status === 'DRAFT' && (
@@ -468,6 +515,16 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
                     </td>
                     <td className="py-3.5 px-4">
                       <p className="font-semibold text-slate-800">{item.description}</p>
+                      {item.classification_code && (
+                        <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                          <span className="text-slate-400">
+                            {item.classification_type || (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')}:
+                          </span>{' '}
+                          <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {item.classification_code}
+                          </span>
+                        </p>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-center text-slate-600">
                       {item.quantity} <span className="text-xs text-slate-400">{item.unit}</span>
@@ -486,6 +543,39 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
               </tbody>
             </table>
           </div>
+
+          {/* File Attachments Section for Customer */}
+          {quotation.attachments && quotation.attachments.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <Paperclip className="h-4 w-4 text-indigo-500" />
+                  <span>Attachments & Supporting Documents ({quotation.attachments.length})</span>
+                </span>
+                <span className="text-[11px] text-slate-400">Click to view or download</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {quotation.attachments.map((att: any) => (
+                  <a
+                    key={att.id}
+                    href={att.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-xs transition-all text-xs group"
+                  >
+                    <div className="flex items-center gap-2 truncate pr-2">
+                      <FileText className="h-4 w-4 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                      <span className="font-semibold text-slate-800 truncate">{att.name}</span>
+                    </div>
+                    <span className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 shrink-0">
+                      <span>Download</span>
+                      <Download className="h-3.5 w-3.5" />
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Financial Calculation Summary Breakdown */}
           <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2">
@@ -825,7 +915,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         onClose={() => setIsApprovalOpen(false)}
         quotationNumber={quotation.quotation_number}
         grandTotalFormatted={grandTotalFormatted}
-        token={token}
+        token={currentToken}
         customerName={customer?.name}
         customerEmail={customer?.email}
         customerCompany={customer?.company_name}
@@ -836,7 +926,7 @@ export function PublicQuoteView({ initialQuotation, token }: PublicQuoteViewProp
         isOpen={isRejectionOpen}
         onClose={() => setIsRejectionOpen(false)}
         quotationNumber={quotation.quotation_number}
-        token={token}
+        token={currentToken}
         onRejected={handleRejected}
       />
     </div>

@@ -51,10 +51,10 @@ export async function generateFinancialReportPdf({
 
   // Calculate Summary KPIs
   const totalCount = quotations.length;
-  const approvedQuotes = quotations.filter((q) => q.status === 'APPROVED');
+  const approvedQuotes = quotations.filter((q) => q.status === 'APPROVED' || q.status === 'PAYMENT_COMPLETED' || q.status === 'COMPLETED' || Boolean(q.approved_at));
   const approvedCount = approvedQuotes.length;
-  const paidQuotes = quotations.filter((q) => q.status === 'APPROVED' && q.is_paid);
-  const unpaidQuotes = quotations.filter((q) => q.status === 'APPROVED' && !q.is_paid);
+  const paidQuotes = quotations.filter((q) => (q.status === 'APPROVED' || q.status === 'PAYMENT_COMPLETED' || q.status === 'COMPLETED' || Boolean(q.approved_at)) && (Boolean(q.is_paid) || q.status === 'PAYMENT_COMPLETED'));
+  const unpaidQuotes = quotations.filter((q) => (q.status === 'APPROVED' || q.status === 'PAYMENT_COMPLETED' || q.status === 'COMPLETED' || Boolean(q.approved_at)) && !(Boolean(q.is_paid) || q.status === 'PAYMENT_COMPLETED'));
 
   const totalValue = quotations.reduce((sum, q) => sum + (q.grand_total || 0), 0);
   const approvedValue = approvedQuotes.reduce((sum, q) => sum + (q.grand_total || 0), 0);
@@ -185,8 +185,8 @@ export async function generateFinancialReportPdf({
       ? `${cust.name}\n(${cust.company_name})`
       : (cust?.name || 'Valued Client');
 
-    const isApproved = quote.status === 'APPROVED';
-    const isPaid = Boolean(quote.is_paid);
+    const isApproved = quote.status === 'APPROVED' || quote.status === 'PAYMENT_COMPLETED' || quote.status === 'COMPLETED' || Boolean(quote.approved_at);
+    const isPaid = Boolean(quote.is_paid) || quote.status === 'PAYMENT_COMPLETED';
 
     let paymentStr = '—';
     if (isApproved) {

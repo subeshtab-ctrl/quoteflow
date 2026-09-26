@@ -28,6 +28,8 @@ import {
   Square,
   Maximize2,
   Minimize2,
+  Globe,
+  Receipt,
 } from 'lucide-react';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
 import { ThemeSegmentedControl } from '@/components/theme/theme-toggle';
@@ -40,6 +42,7 @@ import {
   LogoShape,
   LogoFit,
 } from '@/lib/utils/logo';
+import { COUNTRIES, getCountryProfile } from '@/lib/tax/country-config';
 
 export function SettingsClientView({
   initialOrganization,
@@ -839,17 +842,63 @@ export function SettingsClientView({
             <span>Company Information</span>
           </h3>
 
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-1 space-y-1">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                Country *
+              </label>
+              <select
+                value={
+                  COUNTRIES.find(
+                    (c) =>
+                      c.name.toLowerCase() === (org.country || '').toLowerCase() ||
+                      c.code.toLowerCase() === (org.country || '').toLowerCase()
+                  )?.code || 'IN'
+                }
+                onChange={(e) => {
+                  const profile = getCountryProfile(e.target.value);
+                  setOrg((prev) => ({
+                    ...prev,
+                    country: profile.name,
+                    default_currency: profile.defaultCurrency,
+                    tax_system: profile.taxSystem,
+                    tax_id_label: profile.taxLabel,
+                    goods_classification_label: profile.goodsClassificationLabel,
+                    service_classification_label: profile.serviceClassificationLabel,
+                    default_tax_rate: profile.defaultTaxRate,
+                  }));
+                }}
+                className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              >
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.flag} {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Input
+                label="Company Name *"
+                value={org.name}
+                onChange={(e) => setOrg({ ...org, name: e.target.value })}
+                required
+              />
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Company Name *"
-              value={org.name}
-              onChange={(e) => setOrg({ ...org, name: e.target.value })}
-              required
-            />
             <Input
               label="Business Type / Industry"
               value={org.business_type || ''}
               onChange={(e) => setOrg({ ...org, business_type: e.target.value })}
+            />
+            <Input
+              label={org.tax_id_label || 'Tax Registration / GST Number'}
+              placeholder="e.g. GSTIN, TRN, or Tax ID"
+              value={org.gst_vat_number || ''}
+              onChange={(e) => setOrg({ ...org, gst_vat_number: e.target.value })}
             />
           </div>
 
@@ -874,12 +923,7 @@ export function SettingsClientView({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Input
-              label="GST / Tax ID Number"
-              value={org.gst_vat_number || ''}
-              onChange={(e) => setOrg({ ...org, gst_vat_number: e.target.value })}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="City"
               value={org.city || ''}
@@ -897,6 +941,63 @@ export function SettingsClientView({
             value={org.address_line1 || ''}
             onChange={(e) => setOrg({ ...org, address_line1: e.target.value })}
           />
+        </div>
+
+        {/* Country-Adaptive Tax & Item Classification Configuration */}
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Receipt className="h-5 w-5 text-indigo-500" />
+                <span>Tax System & Item Classification ({org.country || 'India'})</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Automatically adapts classification codes (HSN/SAC for India, HS Code for UAE, SKU for others) and tax rates without hardcoding India GST for other countries.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                Tax System
+              </label>
+              <select
+                value={org.tax_system || 'GST'}
+                onChange={(e) => setOrg({ ...org, tax_system: e.target.value })}
+                className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              >
+                <option value="GST">GST (Goods and Services Tax)</option>
+                <option value="VAT">VAT (Value Added Tax)</option>
+                <option value="SALES_TAX">Sales Tax</option>
+                <option value="CUSTOM">Custom / International</option>
+              </select>
+            </div>
+
+            <Input
+              label="Goods Classification Label"
+              placeholder="e.g. HSN Code or HS Code"
+              value={org.goods_classification_label || ''}
+              onChange={(e) => setOrg({ ...org, goods_classification_label: e.target.value })}
+            />
+
+            <Input
+              label="Services Classification Label"
+              placeholder="e.g. SAC Code or Service Category"
+              value={org.service_classification_label || ''}
+              onChange={(e) => setOrg({ ...org, service_classification_label: e.target.value })}
+            />
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 text-xs text-indigo-800 dark:text-indigo-300 space-y-1">
+            <p className="font-semibold flex items-center gap-1.5">
+              <span>Current Configuration Profile:</span>
+              <span className="font-bold underline">{org.country || 'India'}</span>
+            </p>
+            <p className="text-[11px] text-indigo-700/90 dark:text-indigo-400">
+              Goods items will prompt for <span className="font-bold">{org.goods_classification_label || 'HSN Code'}</span>. Services items will prompt for <span className="font-bold">{org.service_classification_label || 'SAC Code'}</span>. Invoices and quotations will display these fields according to this company profile.
+            </p>
+          </div>
         </div>
 
         {/* Quotation Numbering & Defaults */}

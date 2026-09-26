@@ -33,9 +33,9 @@ export async function generateMetadata({ params }: PublicQuotePageProps): Promis
 
 export default async function PublicQuotePage({ params }: PublicQuotePageProps) {
   const { token } = await params;
-  const quote = await store.getQuotationByPublicToken(token);
+  const { activeQuotation, allQuotations } = await store.getCustomerPortalQuotationsByToken(token);
 
-  if (!quote) {
+  if (!activeQuotation) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <div className="max-w-md rounded-2xl bg-white p-8 shadow-xl border border-slate-200 space-y-4">
@@ -57,13 +57,19 @@ export default async function PublicQuotePage({ params }: PublicQuotePageProps) 
   const userAgent = headerList.get('user-agent') || 'Unknown device';
   const ip = headerList.get('x-forwarded-for')?.split(',')[0] || headerList.get('x-real-ip') || 'Unknown IP';
 
-  await store.recordQuotationView(quote.id, {
+  await store.recordQuotationView(activeQuotation.id, {
     ip,
     userAgent,
   });
 
   // Re-fetch with fresh view state
-  const updatedQuote = (await store.getQuotationByPublicToken(token)) || quote;
+  const updatedQuote = (await store.getQuotationByPublicToken(token)) || activeQuotation;
 
-  return <PublicQuoteView initialQuotation={updatedQuote} token={token} />;
+  return (
+    <PublicQuoteView
+      initialQuotation={updatedQuote}
+      allQuotations={allQuotations}
+      token={token}
+    />
+  );
 }
