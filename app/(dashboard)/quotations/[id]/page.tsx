@@ -28,6 +28,9 @@ import {
   Paperclip,
   FileText,
   CreditCard,
+  Landmark,
+  QrCode,
+  Bitcoin,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -407,33 +410,118 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                     </p>
                   </div>
                 )}
-                {(quotation.payment_terms_instructions ||
-                  (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
-                  (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0)) && (
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2 mt-2">
-                    <div className="flex justify-between items-center text-slate-800 font-bold">
-                      <span className="flex items-center gap-1.5 text-xs">
-                        <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
-                        <span>Payment Terms & Instructions</span>
-                      </span>
-                      {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
-                        <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded text-[11px] font-semibold">
-                          {quotation.advance_percentage}% Advance
+                {(() => {
+                  const bankInfo = quotation.bank_details || org?.default_bank_details;
+                  const upiInfo = quotation.upi_details || org?.default_upi_details;
+                  const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
+
+                  const showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
+                  const showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
+                  const showCrypto = quotation.show_crypto_details ?? org?.default_show_crypto_details ?? false;
+
+                  const hasPaymentInfo =
+                    Boolean(quotation.payment_terms_instructions) ||
+                    (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
+                    Boolean(quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
+                    Boolean(showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
+                    Boolean(showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+                    Boolean(showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url));
+
+                  if (!hasPaymentInfo) return null;
+
+                  return (
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3 mt-2">
+                      <div className="flex justify-between items-center text-slate-800 font-bold border-b border-slate-200/60 pb-2">
+                        <span className="flex items-center gap-1.5 text-xs">
+                          <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
+                          <span>Payment Details & Instructions</span>
                         </span>
+                        {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
+                          <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded text-[11px] font-semibold">
+                            {quotation.advance_percentage}% Advance
+                          </span>
+                        )}
+                      </div>
+
+                      {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
+                        <p className="text-[11px] text-slate-600">
+                          <strong className="text-slate-700">Accepted:</strong> {quotation.accepted_payment_methods.join(', ')}
+                        </p>
+                      )}
+
+                      {/* Bank Details */}
+                      {showBank && (bankInfo?.bank_name || bankInfo?.account_number) && (
+                        <div className="rounded-lg bg-white p-3 border border-indigo-100 space-y-1.5 text-xs">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                            <Landmark className="h-3.5 w-3.5 text-indigo-600" />
+                            <span>Bank Remittance</span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-600">
+                            {bankInfo.bank_name && <div><span className="text-slate-400">Bank:</span> {bankInfo.bank_name}</div>}
+                            {bankInfo.account_name && <div><span className="text-slate-400">Account:</span> {bankInfo.account_name}</div>}
+                            {bankInfo.account_number && <div><span className="text-slate-400">A/C No / IBAN:</span> <span className="font-mono font-bold text-slate-800">{bankInfo.account_number}</span></div>}
+                            {bankInfo.ifsc_code && <div><span className="text-slate-400">IFSC:</span> <span className="font-mono font-bold text-slate-800">{bankInfo.ifsc_code}</span></div>}
+                            {bankInfo.swift_code && <div><span className="text-slate-400">SWIFT:</span> <span className="font-mono font-bold text-slate-800">{bankInfo.swift_code}</span></div>}
+                            {bankInfo.branch_name && <div><span className="text-slate-400">Branch:</span> {bankInfo.branch_name}</div>}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* UPI Details & QR */}
+                      {showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url) && (
+                        <div className="rounded-lg bg-white p-3 border border-emerald-100 flex items-center justify-between text-xs">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                              <QrCode className="h-3.5 w-3.5 text-emerald-600" />
+                              <span>UPI Payment</span>
+                            </div>
+                            {upiInfo.upi_id && (
+                              <p className="font-mono text-emerald-800 font-bold text-xs">{upiInfo.upi_id}</p>
+                            )}
+                            {upiInfo.payee_name && (
+                              <p className="text-[11px] text-slate-500">{upiInfo.payee_name}</p>
+                            )}
+                          </div>
+                          {upiInfo.qr_code_url && (
+                            <img
+                              src={upiInfo.qr_code_url}
+                              alt="UPI QR"
+                              className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      {/* Crypto Details & QR */}
+                      {showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url) && (
+                        <div className="rounded-lg bg-white p-3 border border-amber-100 flex items-center justify-between text-xs">
+                          <div className="space-y-1 max-w-[70%]">
+                            <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                              <Bitcoin className="h-3.5 w-3.5 text-amber-600" />
+                              <span>Crypto Settlement ({cryptoInfo.currency || 'USDT'} - {cryptoInfo.network || 'TRC20'})</span>
+                            </div>
+                            {cryptoInfo.wallet_address && (
+                              <p className="font-mono text-[10px] text-slate-700 truncate">{cryptoInfo.wallet_address}</p>
+                            )}
+                          </div>
+                          {cryptoInfo.qr_code_url && (
+                            <img
+                              src={cryptoInfo.qr_code_url}
+                              alt="Crypto QR"
+                              className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      {quotation.payment_terms_instructions && (
+                        <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed">
+                          {quotation.payment_terms_instructions}
+                        </p>
                       )}
                     </div>
-                    {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
-                      <p className="text-[11px] text-slate-600">
-                        <strong className="text-slate-700">Accepted:</strong> {quotation.accepted_payment_methods.join(', ')}
-                      </p>
-                    )}
-                    {quotation.payment_terms_instructions && (
-                      <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed">
-                        {quotation.payment_terms_instructions}
-                      </p>
-                    )}
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               <div className="w-full sm:w-5/12 space-y-2 text-xs rounded-xl bg-slate-50 p-4 border border-slate-200">

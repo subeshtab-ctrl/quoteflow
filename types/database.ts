@@ -34,6 +34,40 @@ export type PaymentMethod =
   | 'CARD'
   | 'OTHER';
 
+export type PaymentDisplayMode =
+  | 'BOTH'
+  | 'BANK_ONLY'
+  | 'UPI_ONLY'
+  | 'CRYPTO_ONLY'
+  | 'ALL'
+  | 'CUSTOM';
+
+export interface BankAccountDetails {
+  bank_name?: string;
+  account_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  swift_bic?: string;
+  swift_code?: string;
+  iban?: string;
+  branch?: string;
+  branch_name?: string;
+  upi_id?: string;
+}
+
+export interface UpiPaymentDetails {
+  upi_id?: string;
+  qr_code_url?: string;
+  payee_name?: string;
+}
+
+export interface CryptoPaymentDetails {
+  currency?: string;
+  network?: string;
+  wallet_address?: string;
+  qr_code_url?: string;
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -65,6 +99,13 @@ export interface Organization {
   default_terms?: string | null;
   invoice_footer?: string | null;
   require_full_payment_for_invoice?: boolean;
+  default_payment_display_mode?: PaymentDisplayMode;
+  default_show_bank_details?: boolean;
+  default_show_upi_details?: boolean;
+  default_show_crypto_details?: boolean;
+  default_bank_details?: BankAccountDetails | null;
+  default_upi_details?: UpiPaymentDetails | null;
+  default_crypto_details?: CryptoPaymentDetails | null;
   created_at: string;
   updated_at: string;
 }
@@ -259,6 +300,13 @@ export interface Quotation {
   payment_confirmed_by?: string | null;
   payment_terms_instructions?: string | null;
   accepted_payment_methods?: string[] | null;
+  payment_display_mode?: PaymentDisplayMode;
+  show_bank_details?: boolean;
+  show_upi_details?: boolean;
+  show_crypto_details?: boolean;
+  bank_details?: BankAccountDetails | null;
+  upi_details?: UpiPaymentDetails | null;
+  crypto_details?: CryptoPaymentDetails | null;
 
   // Chat Tracking
   has_unread_chat?: boolean;

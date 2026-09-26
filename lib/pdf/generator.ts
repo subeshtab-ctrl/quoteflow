@@ -270,13 +270,29 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   // 7. Payment Terms & Conditions / Notes
   let notesY = curY + 16;
 
+  const bankInfo = quotation.bank_details || org?.default_bank_details;
+  const upiInfo = quotation.upi_details || org?.default_upi_details;
+  const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
+
+  const showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
+  const showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
+  const showCrypto = quotation.show_crypto_details ?? org?.default_show_crypto_details ?? false;
+
   const hasPaymentDetails =
-    quotation.payment_terms_instructions ||
+    Boolean(quotation.payment_terms_instructions) ||
     (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
-    (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
-    (quotation.paid_amount !== undefined && quotation.paid_amount > 0);
+    Boolean(quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
+    Boolean(quotation.paid_amount !== undefined && quotation.paid_amount > 0) ||
+    Boolean(showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
+    Boolean(showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+    Boolean(showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url));
 
   if (hasPaymentDetails) {
+    if (notesY > pageHeight - 55) {
+      doc.addPage();
+      notesY = margin + 10;
+    }
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(30, 41, 59);
@@ -297,6 +313,76 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     if (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) {
       doc.text(`• Accepted Payment Modes: ${quotation.accepted_payment_methods.join(', ')}`, margin, notesY);
       notesY += 4;
+    }
+
+    // Bank Details in PDF
+    if (showBank && (bankInfo?.bank_name || bankInfo?.account_number)) {
+      doc.setFont('helvetica', 'bold');
+      doc.text(`• Bank Remittance: ${bankInfo.bank_name || 'Bank Transfer'}`, margin, notesY);
+      doc.setFont('helvetica', 'normal');
+      notesY += 3.8;
+
+      let bankLine = '';
+      if (bankInfo.account_number) bankLine += `A/C: ${bankInfo.account_number}  `;
+      if (bankInfo.account_name) bankLine += `Name: ${bankInfo.account_name}  `;
+      if (bankLine) {
+        doc.text(`   ${bankLine.trim()}`, margin, notesY);
+        notesY += 3.8;
+      }
+
+      let codeLine = '';
+      if (bankInfo.ifsc_code) codeLine += `IFSC: ${bankInfo.ifsc_code}  `;
+      if (bankInfo.swift_code) codeLine += `SWIFT: ${bankInfo.swift_code}  `;
+      if (bankInfo.branch_name) codeLine += `Branch: ${bankInfo.branch_name}`;
+      if (codeLine) {
+        doc.text(`   ${codeLine.trim()}`, margin, notesY);
+        notesY += 3.8;
+      }
+    }
+
+    // UPI Details & Embed QR Code in PDF
+    let hasQrRendered = false;
+    if (showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) {
+      doc.setFont('helvetica', 'bold');
+      doc.text(`• UPI Payment (India): ${upiInfo.upi_id || ''}${upiInfo.payee_name ? ` (${upiInfo.payee_name})` : ''}`, margin, notesY);
+      doc.setFont('helvetica', 'normal');
+      notesY += 3.8;
+
+      if (upiInfo.qr_code_url) {
+        try {
+          doc.addImage(upiInfo.qr_code_url, 'PNG', pageWidth - margin - 26, notesY - 6, 24, 24);
+          doc.setFontSize(6);
+          doc.setTextColor(100, 116, 139);
+          doc.text('Scan UPI QR', pageWidth - margin - 14, notesY + 20, { align: 'center' });
+          doc.setFontSize(7.5);
+          doc.setTextColor(71, 85, 105);
+          hasQrRendered = true;
+        } catch {}
+      }
+    }
+
+    // Crypto Details & Embed QR in PDF
+    if (showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url)) {
+      doc.setFont('helvetica', 'bold');
+      doc.text(`• Crypto Payment: ${cryptoInfo.currency || 'USDT'} (${cryptoInfo.network || 'TRC20'})`, margin, notesY);
+      doc.setFont('helvetica', 'normal');
+      notesY += 3.8;
+
+      if (cryptoInfo.wallet_address) {
+        doc.text(`   Wallet: ${cryptoInfo.wallet_address}`, margin, notesY);
+        notesY += 3.8;
+      }
+
+      if (cryptoInfo.qr_code_url && !hasQrRendered) {
+        try {
+          doc.addImage(cryptoInfo.qr_code_url, 'PNG', pageWidth - margin - 26, notesY - 6, 24, 24);
+          doc.setFontSize(6);
+          doc.setTextColor(100, 116, 139);
+          doc.text('Scan Crypto QR', pageWidth - margin - 14, notesY + 20, { align: 'center' });
+          doc.setFontSize(7.5);
+          doc.setTextColor(71, 85, 105);
+        } catch {}
+      }
     }
 
     if (quotation.payment_terms_instructions) {

@@ -24,6 +24,11 @@ import {
   FileText,
   Lock,
   CreditCard,
+  QrCode,
+  Landmark,
+  Bitcoin,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -131,6 +136,23 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     d.setHours(23, 59, 59, 999);
     return d.getTime();
   };
+
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const handleCopy = (text: string, fieldKey: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedField(fieldKey);
+      setTimeout(() => setCopiedField(null), 2000);
+    }
+  };
+
+  const bankInfo = quotation.bank_details || org?.default_bank_details;
+  const upiInfo = quotation.upi_details || org?.default_upi_details;
+  const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
+
+  const showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
+  const showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
+  const showCrypto = quotation.show_crypto_details ?? org?.default_show_crypto_details ?? false;
 
   const isPaid = Boolean(quotation.is_paid || quotation.status === 'PAYMENT_COMPLETED');
   const isCompleted = quotation.status === 'COMPLETED' || quotation.status === 'PAYMENT_COMPLETED';
@@ -933,26 +955,289 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
               {(quotation.payment_terms_instructions ||
                 (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
-                (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0)) && (
-                <div className="rounded-xl bg-slate-50 p-4 border border-slate-100 space-y-2">
-                  <div className="flex justify-between items-center text-slate-800 font-bold">
-                    <span className="flex items-center gap-1.5 text-xs">
-                      <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
-                      <span>Payment Terms & Instructions</span>
+                (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
+                (showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
+                (showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+                (showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url))) && (
+                <div className="rounded-xl bg-slate-50 p-4 sm:p-5 border border-slate-200/80 space-y-4">
+                  <div className="flex justify-between items-center text-slate-800 font-bold border-b border-slate-200/60 pb-2.5">
+                    <span className="flex items-center gap-2 text-xs uppercase tracking-wider">
+                      <CreditCard className="h-4 w-4 text-indigo-600" />
+                      <span>Payment & Remittance Instructions</span>
                     </span>
                     {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
-                      <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded text-[11px] font-semibold">
+                      <span className="text-indigo-600 bg-indigo-100/70 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
                         {quotation.advance_percentage}% Advance Required
                       </span>
                     )}
                   </div>
+
                   {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
-                    <p className="text-[11px] text-slate-600">
-                      <strong className="text-slate-700">Accepted Methods:</strong> {quotation.accepted_payment_methods.join(', ')}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="font-semibold text-slate-600 text-[11px]">Accepted:</span>
+                      {quotation.accepted_payment_methods.map((method: string) => (
+                        <span
+                          key={method}
+                          className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 text-[11px] font-medium"
+                        >
+                          {method}
+                        </span>
+                      ))}
+                    </div>
                   )}
+
+                  {/* 1. Bank Transfer / Wire Details */}
+                  {showBank && (bankInfo?.bank_name || bankInfo?.account_number) && (
+                    <div className="rounded-xl bg-white p-3.5 border border-indigo-100 shadow-2xs space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 rounded-md bg-indigo-50 text-indigo-600">
+                            <Landmark className="h-3.5 w-3.5" />
+                          </div>
+                          <h5 className="text-xs font-bold text-slate-900">
+                            Bank Transfer / Wire Remittance
+                          </h5>
+                        </div>
+                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                          Bank Details
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs pt-1">
+                        {bankInfo.bank_name && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Bank Name</span>
+                            <span className="font-semibold text-slate-800">{bankInfo.bank_name}</span>
+                          </div>
+                        )}
+
+                        {bankInfo.account_name && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Account Name</span>
+                            <span className="font-semibold text-slate-800">{bankInfo.account_name}</span>
+                          </div>
+                        )}
+
+                        {bankInfo.account_number && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Account Number / IBAN</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="font-mono font-bold text-slate-900 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                                {bankInfo.account_number}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(bankInfo.account_number!, 'bank_acc')}
+                                className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800"
+                                title="Copy Account Number"
+                              >
+                                {copiedField === 'bank_acc' ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {bankInfo.ifsc_code && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">IFSC Code (India)</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="font-mono font-bold text-slate-900 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                                {bankInfo.ifsc_code}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(bankInfo.ifsc_code!, 'bank_ifsc')}
+                                className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800"
+                                title="Copy IFSC"
+                              >
+                                {copiedField === 'bank_ifsc' ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {bankInfo.swift_code && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">SWIFT / BIC Code</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="font-mono font-bold text-slate-900 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                                {bankInfo.swift_code}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(bankInfo.swift_code!, 'bank_swift')}
+                                className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800"
+                                title="Copy SWIFT"
+                              >
+                                {copiedField === 'bank_swift' ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {bankInfo.branch_name && (
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Branch & Location</span>
+                            <span className="text-slate-700 font-medium">{bankInfo.branch_name}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. UPI Payment ID & Attached QR Code */}
+                  {showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url) && (
+                    <div className="rounded-xl bg-white p-3.5 border border-emerald-100 shadow-2xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 rounded-md bg-emerald-50 text-emerald-600">
+                            <QrCode className="h-3.5 w-3.5" />
+                          </div>
+                          <h5 className="text-xs font-bold text-slate-900">
+                            UPI Payment & QR Code (India)
+                          </h5>
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                          Instant UPI
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                        {upiInfo.qr_code_url && (
+                          <div className="shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                            <img
+                              src={upiInfo.qr_code_url}
+                              alt="Scan UPI QR Code"
+                              className="h-36 w-36 object-contain rounded-lg bg-white p-1 shadow-2xs"
+                            />
+                            <span className="text-[10px] font-bold text-slate-600 text-center">
+                              Scan with any UPI App
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="space-y-2 text-xs flex-1 w-full">
+                          {upiInfo.upi_id && (
+                            <div>
+                              <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+                                UPI ID / VPA
+                              </span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="font-mono font-bold text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 text-xs">
+                                  {upiInfo.upi_id}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(upiInfo.upi_id!, 'upi_id')}
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200"
+                                  title="Copy UPI ID"
+                                >
+                                  {copiedField === 'upi_id' ? (
+                                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {upiInfo.payee_name && (
+                            <div>
+                              <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+                                Payee Name
+                              </span>
+                              <span className="font-semibold text-slate-800">{upiInfo.payee_name}</span>
+                            </div>
+                          )}
+
+                          <p className="text-[11px] text-slate-500 pt-1">
+                            Compatible with Google Pay, PhonePe, Paytm, BHIM, Cred, and mobile banking apps.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. Crypto Payment Options */}
+                  {showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url) && (
+                    <div className="rounded-xl bg-white p-3.5 border border-amber-100 shadow-2xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 rounded-md bg-amber-50 text-amber-600">
+                            <Bitcoin className="h-3.5 w-3.5" />
+                          </div>
+                          <h5 className="text-xs font-bold text-slate-900">
+                            Cryptocurrency Settlement (International)
+                          </h5>
+                        </div>
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+                          {cryptoInfo.currency || 'USDT'} ({cryptoInfo.network || 'TRC20'})
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                        {cryptoInfo.qr_code_url && (
+                          <div className="shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                            <img
+                              src={cryptoInfo.qr_code_url}
+                              alt="Scan Crypto QR Code"
+                              className="h-32 w-32 object-contain rounded-lg bg-white p-1 shadow-2xs"
+                            />
+                            <span className="text-[10px] font-bold text-slate-600 text-center">
+                              Scan Wallet Address
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="space-y-2 text-xs flex-1 w-full">
+                          {cryptoInfo.wallet_address && (
+                            <div>
+                              <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+                                Wallet Address ({cryptoInfo.network || 'TRC20'})
+                              </span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="font-mono font-medium text-amber-950 bg-amber-50/70 px-2.5 py-1 rounded-lg border border-amber-200 text-[11px] break-all">
+                                  {cryptoInfo.wallet_address}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(cryptoInfo.wallet_address!, 'crypto_wallet')}
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200 shrink-0"
+                                  title="Copy Wallet Address"
+                                >
+                                  {copiedField === 'crypto_wallet' ? (
+                                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          <p className="text-[11px] text-slate-500 pt-1">
+                            Please ensure transfers are initiated strictly on the specified network ({cryptoInfo.network || 'TRC20'}) to prevent loss of funds.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {quotation.payment_terms_instructions && (
-                    <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed">
+                    <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed pt-1">
                       {quotation.payment_terms_instructions}
                     </p>
                   )}
