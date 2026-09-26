@@ -1,9 +1,31 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { store } from '@/lib/supabase/data-store';
 import { generateQuotationPdf } from '@/lib/pdf/generator';
 
 describe('Quotation Bank, UPI QR & Crypto Payment Options', () => {
   const orgId = 'a0000000-0000-0000-0000-000000000001';
+  let originalQuote: any = null;
+  let originalOrg: any = null;
+
+  beforeAll(async () => {
+    const quotations = await store.getQuotations(orgId);
+    if (quotations.length > 0) {
+      originalQuote = JSON.parse(JSON.stringify(quotations[0]));
+    }
+    const org = await store.getOrganization(orgId);
+    if (org) {
+      originalOrg = JSON.parse(JSON.stringify(org));
+    }
+  });
+
+  afterAll(async () => {
+    if (originalQuote) {
+      await store.updateQuotation(originalQuote.id, originalQuote);
+    }
+    if (originalOrg) {
+      await store.updateOrganization(orgId, originalOrg);
+    }
+  });
 
   it('saves and retrieves bank details, UPI ID with QR code, and crypto wallet with display modes', async () => {
     const quotations = await store.getQuotations(orgId);
@@ -63,7 +85,7 @@ describe('Quotation Bank, UPI QR & Crypto Payment Options', () => {
     const org = await store.getOrganization(orgId);
     expect(org).toBeDefined();
 
-    const pdfBuffer = await generateQuotationPdf(fetched!, org!);
+    const pdfBuffer = await generateQuotationPdf({ ...fetched!, organization: org! });
     expect(pdfBuffer).toBeDefined();
     expect(pdfBuffer.length).toBeGreaterThan(100);
     // Verify standard PDF magic header (%PDF-)

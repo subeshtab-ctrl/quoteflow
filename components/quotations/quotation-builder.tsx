@@ -43,6 +43,7 @@ import {
   X,
   Smartphone,
   Globe,
+  Loader2,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import {
@@ -243,34 +244,75 @@ export function QuotationBuilder({
     }
   };
 
-  const handleUpiQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingUpiQr, setIsUploadingUpiQr] = useState(false);
+  const [isUploadingCryptoQr, setIsUploadingCryptoQr] = useState(false);
+
+  const handleUpiQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      alert('QR code image must be under 3MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('QR code image must be under 5MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
-      setUpiDetails((prev) => ({ ...prev, qr_code_url: res }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      setIsUploadingUpiQr(true);
+      const formData = new FormData();
+      formData.append('qr', file);
+
+      const res = await fetch('/api/upload/qr', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to upload QR code');
+
+      setUpiDetails((prev) => ({ ...prev, qr_code_url: data.qr_url }));
+    } catch (err: any) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const res = event.target?.result as string;
+        setUpiDetails((prev) => ({ ...prev, qr_code_url: res }));
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingUpiQr(false);
+      e.target.value = '';
+    }
   };
 
-  const handleCryptoQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCryptoQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      alert('QR code image must be under 3MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('QR code image must be under 5MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
-      setCryptoDetails((prev) => ({ ...prev, qr_code_url: res }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      setIsUploadingCryptoQr(true);
+      const formData = new FormData();
+      formData.append('qr', file);
+
+      const res = await fetch('/api/upload/qr', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to upload QR code');
+
+      setCryptoDetails((prev) => ({ ...prev, qr_code_url: data.qr_url }));
+    } catch (err: any) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const res = event.target?.result as string;
+        setCryptoDetails((prev) => ({ ...prev, qr_code_url: res }));
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingCryptoQr(false);
+      e.target.value = '';
+    }
   };
 
   const validityDays = (() => {
@@ -1449,15 +1491,25 @@ export function QuotationBuilder({
                         <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
                           <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
                         </span>
-                        <div className="flex gap-2">
-                          <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline">
-                            Change
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleUpiQrUpload}
-                              className="hidden"
-                            />
+                        <div className="flex gap-2 items-center">
+                          <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline flex items-center gap-1">
+                            {isUploadingUpiQr ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>Uploading...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Change</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleUpiQrUpload}
+                                  className="hidden"
+                                  disabled={isUploadingUpiQr}
+                                />
+                              </>
+                            )}
                           </label>
                           <button
                             type="button"
@@ -1470,16 +1522,25 @@ export function QuotationBuilder({
                       </div>
                     </div>
                   ) : (
-                    <label className="border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-emerald-50/30">
-                      <QrCode className="h-6 w-6 text-slate-400 mb-1" />
-                      <span className="text-[11px] font-semibold text-slate-700">Attach UPI QR Code</span>
-                      <span className="text-[10px] text-slate-400">PNG, JPG up to 3MB</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleUpiQrUpload}
-                        className="hidden"
-                      />
+                    <label className={`border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-emerald-50/30 ${isUploadingUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {isUploadingUpiQr ? (
+                        <>
+                          <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
+                          <span className="text-[11px] font-semibold text-slate-700">Uploading QR Code...</span>
+                        </>
+                      ) : (
+                        <>
+                          <QrCode className="h-6 w-6 text-slate-400 mb-1" />
+                          <span className="text-[11px] font-semibold text-slate-700">Attach UPI QR Code</span>
+                          <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleUpiQrUpload}
+                            className="hidden"
+                          />
+                        </>
+                      )}
                     </label>
                   )}
                 </div>
@@ -1569,15 +1630,25 @@ export function QuotationBuilder({
                         <span className="text-[11px] font-bold text-amber-800 flex items-center gap-1">
                           <CheckCircle2 className="h-3 w-3 text-amber-600" /> Attached
                         </span>
-                        <div className="flex gap-2">
-                          <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline">
-                            Change
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleCryptoQrUpload}
-                              className="hidden"
-                            />
+                        <div className="flex gap-2 items-center">
+                          <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline flex items-center gap-1">
+                            {isUploadingCryptoQr ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>Uploading...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Change</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleCryptoQrUpload}
+                                  className="hidden"
+                                  disabled={isUploadingCryptoQr}
+                                />
+                              </>
+                            )}
                           </label>
                           <button
                             type="button"
@@ -1590,16 +1661,25 @@ export function QuotationBuilder({
                       </div>
                     </div>
                   ) : (
-                    <label className="border-2 border-dashed border-slate-200 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-amber-50/30">
-                      <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
-                      <span className="text-[11px] font-semibold text-slate-700">Attach Crypto QR Code</span>
-                      <span className="text-[10px] text-slate-400">PNG, JPG up to 3MB</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCryptoQrUpload}
-                        className="hidden"
-                      />
+                    <label className={`border-2 border-dashed border-slate-200 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-amber-50/30 ${isUploadingCryptoQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                      {isUploadingCryptoQr ? (
+                        <>
+                          <Loader2 className="h-6 w-6 text-amber-600 animate-spin mb-1" />
+                          <span className="text-[11px] font-semibold text-slate-700">Uploading QR Code...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
+                          <span className="text-[11px] font-semibold text-slate-700">Attach Crypto QR Code</span>
+                          <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleCryptoQrUpload}
+                            className="hidden"
+                          />
+                        </>
+                      )}
                     </label>
                   )}
                 </div>
@@ -1782,13 +1862,25 @@ export function QuotationBuilder({
                         <p className="text-[10px] text-emerald-700">{upiDetails.payee_name}</p>
                       )}
                     </div>
-                    {upiDetails.qr_code_url && (
-                      <img
-                        src={upiDetails.qr_code_url}
-                        alt="UPI QR"
-                        className="h-10 w-10 object-contain rounded border border-emerald-300 bg-white p-0.5"
-                      />
-                    )}
+                    {(() => {
+                      const upiQrSrc = upiDetails.qr_code_url || (
+                        upiDetails.upi_id
+                          ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiDetails.upi_id}&pn=${encodeURIComponent(upiDetails.payee_name || 'SUBESH M LLC')}&cu=INR`)}`
+                          : ''
+                      );
+                      return upiQrSrc ? (
+                        <img
+                          src={upiQrSrc}
+                          alt="UPI QR"
+                          className="h-10 w-10 object-contain rounded border border-emerald-300 bg-white p-0.5"
+                          onError={(e) => {
+                            if (upiDetails.upi_id && !e.currentTarget.src.includes('api.qrserver.com')) {
+                              e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiDetails.upi_id}&pn=${encodeURIComponent(upiDetails.payee_name || 'SUBESH M LLC')}&cu=INR`)}`;
+                            }
+                          }}
+                        />
+                      ) : null;
+                    })()}
                   </div>
                 )}
 
@@ -1803,13 +1895,25 @@ export function QuotationBuilder({
                         <p className="text-amber-800 font-mono text-[9px] truncate">{cryptoDetails.wallet_address}</p>
                       )}
                     </div>
-                    {cryptoDetails.qr_code_url && (
-                      <img
-                        src={cryptoDetails.qr_code_url}
-                        alt="Crypto QR"
-                        className="h-10 w-10 object-contain rounded border border-amber-300 bg-white p-0.5"
-                      />
-                    )}
+                    {(() => {
+                      const cryptoQrSrc = cryptoDetails.qr_code_url || (
+                        cryptoDetails.wallet_address
+                          ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoDetails.wallet_address)}`
+                          : ''
+                      );
+                      return cryptoQrSrc ? (
+                        <img
+                          src={cryptoQrSrc}
+                          alt="Crypto QR"
+                          className="h-10 w-10 object-contain rounded border border-amber-300 bg-white p-0.5"
+                          onError={(e) => {
+                            if (cryptoDetails.wallet_address && !e.currentTarget.src.includes('api.qrserver.com')) {
+                              e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoDetails.wallet_address)}`;
+                            }
+                          }}
+                        />
+                      ) : null;
+                    })()}
                   </div>
                 )}
               </div>

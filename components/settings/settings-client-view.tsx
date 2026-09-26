@@ -92,46 +92,111 @@ export function SettingsClientView({
   const [passwordChangeMsg, setPasswordChangeMsg] = useState<string | null>(null);
   const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
 
-  const handleDefaultUpiQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingDefaultUpiQr, setIsUploadingDefaultUpiQr] = useState(false);
+  const [isUploadingDefaultCryptoQr, setIsUploadingDefaultCryptoQr] = useState(false);
+
+  const handleDefaultUpiQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      alert('QR code image must be under 3MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('QR code image must be under 5MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
+
+    try {
+      setIsUploadingDefaultUpiQr(true);
+      const formData = new FormData();
+      formData.append('qr', file);
+
+      const res = await fetch('/api/upload/qr', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to upload QR code');
+
+      const uploadedUrl = data.qr_url;
+      const updatedUpiDetails = {
+        ...(org.default_upi_details || { upi_id: '' }),
+        qr_code_url: uploadedUrl,
+      };
+
       setOrg((prev) => ({
         ...prev,
-        default_upi_details: {
-          ...(prev.default_upi_details || { upi_id: '' }),
-          qr_code_url: res,
-        },
+        default_upi_details: updatedUpiDetails,
       }));
-    };
-    reader.readAsDataURL(file);
+
+      // Immediately auto-save to server
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...org,
+          default_upi_details: updatedUpiDetails,
+        }),
+      });
+
+      setSuccessMsg('UPI QR code uploaded and saved!');
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      alert(err.message || 'Error uploading QR code');
+    } finally {
+      setIsUploadingDefaultUpiQr(false);
+      e.target.value = '';
+    }
   };
 
-  const handleDefaultCryptoQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDefaultCryptoQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      alert('QR code image must be under 3MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('QR code image must be under 5MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
+
+    try {
+      setIsUploadingDefaultCryptoQr(true);
+      const formData = new FormData();
+      formData.append('qr', file);
+
+      const res = await fetch('/api/upload/qr', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to upload QR code');
+
+      const uploadedUrl = data.qr_url;
+      const updatedCryptoDetails = {
+        ...(org.default_crypto_details || { currency: 'USDT', network: 'TRC20', wallet_address: '' }),
+        qr_code_url: uploadedUrl,
+      };
+
       setOrg((prev) => ({
         ...prev,
-        default_crypto_details: {
-          ...(prev.default_crypto_details || { currency: 'USDT', network: 'TRC20', wallet_address: '' }),
-          qr_code_url: res,
-        },
+        default_crypto_details: updatedCryptoDetails,
       }));
-    };
-    reader.readAsDataURL(file);
+
+      // Immediately auto-save to server
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...org,
+          default_crypto_details: updatedCryptoDetails,
+        }),
+      });
+
+      setSuccessMsg('Crypto QR code uploaded and saved!');
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      alert(err.message || 'Error uploading QR code');
+    } finally {
+      setIsUploadingDefaultCryptoQr(false);
+      e.target.value = '';
+    }
   };
 
   const handleSelectDefaultPaymentMode = (mode: PaymentDisplayMode) => {
@@ -1504,27 +1569,48 @@ export function SettingsClientView({
                       <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
                       </span>
-                      <div className="flex gap-2">
-                        <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">
-                          Change
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleDefaultUpiQrUpload}
-                            className="hidden"
-                          />
+                      <div className="flex gap-2 items-center">
+                        <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
+                          {isUploadingDefaultUpiQr ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>Uploading...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>Change</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleDefaultUpiQrUpload}
+                                className="hidden"
+                                disabled={isUploadingDefaultUpiQr}
+                              />
+                            </>
+                          )}
                         </label>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={async () => {
+                            const updated = {
+                              ...(org.default_upi_details || {}),
+                              qr_code_url: '',
+                            };
                             setOrg((prev) => ({
                               ...prev,
-                              default_upi_details: {
-                                ...(prev.default_upi_details || {}),
-                                qr_code_url: '',
-                              },
-                            }))
-                          }
+                              default_upi_details: updated,
+                            }));
+                            await fetch('/api/settings', {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                ...org,
+                                default_upi_details: updated,
+                              }),
+                            });
+                            setSuccessMsg('UPI QR code removed.');
+                            setTimeout(() => setSuccessMsg(null), 2500);
+                          }}
                           className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
                         >
                           Remove
@@ -1533,16 +1619,25 @@ export function SettingsClientView({
                     </div>
                   </div>
                 ) : (
-                  <label className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30">
-                    <QrCode className="h-6 w-6 text-slate-400 mb-1" />
-                    <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload UPI QR Code</span>
-                    <span className="text-[10px] text-slate-400">PNG, JPG up to 3MB</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleDefaultUpiQrUpload}
-                      className="hidden"
-                    />
+                  <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30 ${isUploadingDefaultUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {isUploadingDefaultUpiQr ? (
+                      <>
+                        <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
+                      </>
+                    ) : (
+                      <>
+                        <QrCode className="h-6 w-6 text-slate-400 mb-1" />
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload UPI QR Code</span>
+                        <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleDefaultUpiQrUpload}
+                          className="hidden"
+                        />
+                      </>
+                    )}
                   </label>
                 )}
               </div>
@@ -1636,27 +1731,48 @@ export function SettingsClientView({
                       <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3 text-amber-600" /> Attached
                       </span>
-                      <div className="flex gap-2">
-                        <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">
-                          Change
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleDefaultCryptoQrUpload}
-                            className="hidden"
-                          />
+                      <div className="flex gap-2 items-center">
+                        <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
+                          {isUploadingDefaultCryptoQr ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>Uploading...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>Change</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleDefaultCryptoQrUpload}
+                                className="hidden"
+                                disabled={isUploadingDefaultCryptoQr}
+                              />
+                            </>
+                          )}
                         </label>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={async () => {
+                            const updated = {
+                              ...(org.default_crypto_details || {}),
+                              qr_code_url: '',
+                            };
                             setOrg((prev) => ({
                               ...prev,
-                              default_crypto_details: {
-                                ...(prev.default_crypto_details || {}),
-                                qr_code_url: '',
-                              },
-                            }))
-                          }
+                              default_crypto_details: updated,
+                            }));
+                            await fetch('/api/settings', {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                ...org,
+                                default_crypto_details: updated,
+                              }),
+                            });
+                            setSuccessMsg('Crypto QR code removed.');
+                            setTimeout(() => setSuccessMsg(null), 2500);
+                          }}
                           className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
                         >
                           Remove
@@ -1665,16 +1781,25 @@ export function SettingsClientView({
                     </div>
                   </div>
                 ) : (
-                  <label className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-amber-50/30">
-                    <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
-                    <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload Crypto QR Code</span>
-                    <span className="text-[10px] text-slate-400">PNG, JPG up to 3MB</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleDefaultCryptoQrUpload}
-                      className="hidden"
-                    />
+                  <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-amber-50/30 ${isUploadingDefaultCryptoQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {isUploadingDefaultCryptoQr ? (
+                      <>
+                        <Loader2 className="h-6 w-6 text-amber-600 animate-spin mb-1" />
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload Crypto QR Code</span>
+                        <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleDefaultCryptoQrUpload}
+                          className="hidden"
+                        />
+                      </>
+                    )}
                   </label>
                 )}
               </div>

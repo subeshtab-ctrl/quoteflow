@@ -482,13 +482,25 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                               <p className="text-[11px] text-slate-500">{upiInfo.payee_name}</p>
                             )}
                           </div>
-                          {upiInfo.qr_code_url && (
-                            <img
-                              src={upiInfo.qr_code_url}
-                              alt="UPI QR"
-                              className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
-                            />
-                          )}
+                          {(() => {
+                            const upiQrSrc = upiInfo.qr_code_url || (
+                              upiInfo.upi_id
+                                ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || quotation.organization?.name || 'SUBESH M LLC')}&cu=INR`)}`
+                                : ''
+                            );
+                            return upiQrSrc ? (
+                              <img
+                                src={upiQrSrc}
+                                alt="UPI QR"
+                                className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
+                                onError={(e) => {
+                                  if (upiInfo.upi_id && !e.currentTarget.src.includes('api.qrserver.com')) {
+                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || 'SUBESH M LLC')}&cu=INR`)}`;
+                                  }
+                                }}
+                              />
+                            ) : null;
+                          })()}
                         </div>
                       )}
 
@@ -504,13 +516,25 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                               <p className="font-mono text-[10px] text-slate-700 truncate">{cryptoInfo.wallet_address}</p>
                             )}
                           </div>
-                          {cryptoInfo.qr_code_url && (
-                            <img
-                              src={cryptoInfo.qr_code_url}
-                              alt="Crypto QR"
-                              className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
-                            />
-                          )}
+                          {(() => {
+                            const cryptoQrSrc = cryptoInfo.qr_code_url || (
+                              cryptoInfo.wallet_address
+                                ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoInfo.wallet_address)}`
+                                : ''
+                            );
+                            return cryptoQrSrc ? (
+                              <img
+                                src={cryptoQrSrc}
+                                alt="Crypto QR"
+                                className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
+                                onError={(e) => {
+                                  if (cryptoInfo.wallet_address && !e.currentTarget.src.includes('api.qrserver.com')) {
+                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoInfo.wallet_address)}`;
+                                  }
+                                }}
+                              />
+                            ) : null;
+                          })()}
                         </div>
                       )}
 

@@ -1115,18 +1115,30 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                       </div>
 
                       <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                        {upiInfo.qr_code_url && (
-                          <div className="shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
-                            <img
-                              src={upiInfo.qr_code_url}
-                              alt="Scan UPI QR Code"
-                              className="h-36 w-36 object-contain rounded-lg bg-white p-1 shadow-2xs"
-                            />
-                            <span className="text-[10px] font-bold text-slate-600 text-center">
-                              Scan with any UPI App
-                            </span>
-                          </div>
-                        )}
+                        {(() => {
+                          const upiQrSrc = upiInfo.qr_code_url || (
+                            upiInfo.upi_id
+                              ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || quotation.organization?.name || 'SUBESH M LLC')}&cu=INR`)}`
+                              : ''
+                          );
+                          return upiQrSrc ? (
+                            <div className="shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                              <img
+                                src={upiQrSrc}
+                                alt="Scan UPI QR Code"
+                                className="h-36 w-36 object-contain rounded-lg bg-white p-1 shadow-2xs"
+                                onError={(e) => {
+                                  if (upiInfo.upi_id && !e.currentTarget.src.includes('api.qrserver.com')) {
+                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || 'SUBESH M LLC')}&cu=INR`)}`;
+                                  }
+                                }}
+                              />
+                              <span className="text-[10px] font-bold text-slate-600 text-center">
+                                Scan with any UPI App
+                              </span>
+                            </div>
+                          ) : null;
+                        })()}
 
                         <div className="space-y-2 text-xs flex-1 w-full">
                           {upiInfo.upi_id && (
@@ -1189,18 +1201,30 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                       </div>
 
                       <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                        {cryptoInfo.qr_code_url && (
-                          <div className="shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
-                            <img
-                              src={cryptoInfo.qr_code_url}
-                              alt="Scan Crypto QR Code"
-                              className="h-32 w-32 object-contain rounded-lg bg-white p-1 shadow-2xs"
-                            />
-                            <span className="text-[10px] font-bold text-slate-600 text-center">
-                              Scan Wallet Address
-                            </span>
-                          </div>
-                        )}
+                        {(() => {
+                          const cryptoQrSrc = cryptoInfo.qr_code_url || (
+                            cryptoInfo.wallet_address
+                              ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoInfo.wallet_address)}`
+                              : ''
+                          );
+                          return cryptoQrSrc ? (
+                            <div className="shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                              <img
+                                src={cryptoQrSrc}
+                                alt="Scan Crypto QR Code"
+                                className="h-32 w-32 object-contain rounded-lg bg-white p-1 shadow-2xs"
+                                onError={(e) => {
+                                  if (cryptoInfo.wallet_address && !e.currentTarget.src.includes('api.qrserver.com')) {
+                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoInfo.wallet_address)}`;
+                                  }
+                                }}
+                              />
+                              <span className="text-[10px] font-bold text-slate-600 text-center">
+                                Scan Wallet Address
+                              </span>
+                            </div>
+                          ) : null;
+                        })()}
 
                         <div className="space-y-2 text-xs flex-1 w-full">
                           {cryptoInfo.wallet_address && (

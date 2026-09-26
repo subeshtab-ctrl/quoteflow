@@ -10,12 +10,13 @@
     "default_upi_details": {
       "upi_id": "subeshm@sbi",
       "payee_name": "SUBESH M LLC",
-      "qr_code_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      "qr_code_url": ""
     },
     "default_crypto_details": {
       "currency": "USDT",
       "network": "TRC20",
-      "wallet_address": "TDefaultWalletAddress123"
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
     },
     "default_payment_display_mode": "BOTH",
     "default_show_bank_details": true,
