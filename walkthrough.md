@@ -60,39 +60,76 @@
 
 ---
 
+---
+
+## 2. UPI & Crypto QR Code Upload & Display Resolution
+
+### The Issue
+- When uploading a UPI QR code or previewing quotations, a solid lime-green box was displayed instead of the actual QR code image.
+- **Root Cause**: An automated test (`tests/quotation-payment-options.test.ts`) had previously executed against the data store and saved a 1×1 pixel green placeholder (`#66FF66`, `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==`) directly into `data/org-payment-settings.json` and existing records. When rendered in the UI, that single pixel stretched across the 144×144 QR container.
+
+### What Was Fixed & Enhanced
+1. **Dedicated Server-Side QR Upload Route (`app/api/upload/qr/route.ts`)**:
+   - Accepts PNG, JPG, WebP, and SVG files up to 5MB via `multipart/form-data`.
+   - Automatically stores files in Supabase Storage (`logos` bucket) with local file storage fallback (`/public/uploads/qr-...`).
+   - Eliminates oversized base64 data URLs in JSON state files, ensuring fast loads and reliable rendering.
+2. **Purged Dummy Test Pixel**:
+   - Cleaned `data/org-payment-settings.json`, `data/payments.json`, and `data/invoices.json` to purge the green pixel.
+3. **Instant Auto-Save in Settings (`components/settings/settings-client-view.tsx`)**:
+   - Uploading or removing a UPI or Crypto QR code now saves instantly to `/api/settings` with a feedback spinner and notification. Users no longer need to scroll down to click save.
+4. **Dynamic QR Code Fallback & Resilience**:
+   - If a custom QR code image is uploaded, it takes highest priority.
+   - If no custom QR code image is uploaded, but a UPI ID is provided, QuoteFlow automatically generates and renders a live, scannable UPI QR code (`upi://pay?pa=...`) on the fly.
+   - Applied across the Public Quote Portal, Quotation Detail page, and Quotation Builder live preview card.
+5. **Test Isolation (`tests/quotation-payment-options.test.ts`)**:
+   - Added `beforeAll` and `afterAll` hooks to snapshot and restore original database state, preventing future test runs from ever polluting persistent files.
+
+---
+
+## 3. Server-Side Rendering (SSR) Exception Fix & Resilience
+
+### The Issue
+- Users encountered `Application error: a server-side exception has occurred while loading www.blendandbold.com. Digest: 405613107` when navigating to `/quotations/[id]`.
+- **Root Cause**: Next.js Server Components cannot have interactive client-side event handlers (like `onError={(e) => ...}`) passed to DOM elements (`<img />`). In React Server Component serialization, event handlers cannot be passed, triggering an unhandled server error during SSR.
+
+### The Fix
+1. **Removed Client Event Handlers from Server Component**:
+   - In [app/(dashboard)/quotations/[id]/page.tsx](file:///c:/Users/user/OneDrive/Desktop/ro%20app/app/%28dashboard%29/quotations/%5Bid%5D/page.tsx), removed the `onError` DOM prop. The QR image source is already computed safely on the server using `upiInfo.qr_code_url || (upiInfo.upi_id ? dynamicQrUrl : '')`.
+2. **Graceful Error Boundaries Added**:
+   - Created [app/(dashboard)/quotations/[id]/error.tsx](file:///c:/Users/user/OneDrive/Desktop/ro%20app/app/%28dashboard%29/quotations/%5Bid%5D/error.tsx) and [app/(dashboard)/error.tsx](file:///c:/Users/user/OneDrive/Desktop/ro%20app/app/%28dashboard%29/error.tsx). If any server or client runtime error occurs, users are shown an elegant fallback card with a "Try Again" retry action and "Back to Quotations" navigation rather than Next.js's default crash screen.
+3. **Verified Production Build**:
+   - Verified with full Next.js production build (`npx next build`) — compiled and generated all 24+ static and dynamic routes with 0 errors.
+
+---
+
 ## Verification & Test Results
 
-### 1. Automated Vitest Test Suite (15/15 Passed)
+### 1. Automated Vitest Test Suite (44/44 Passed across 12 files)
 ```bash
-> quoteflow-saas@1.0.0 test
-> vitest run
+> npx vitest run
 
- ✓ tests/calculations.test.ts (5 tests) 163ms
- ✓ tests/quotation-workflow.test.ts (1 test) 26ms
- ✓ tests/validations.test.ts (5 tests) 21ms
- ✓ tests/tokens.test.ts (3 tests) 17ms
- ✓ tests/pdf.test.ts (1 test) 167ms
+ ✓ tests/advance-payment-and-invoice-pdf.test.ts (4 tests)
+ ✓ tests/payment-proof-chat-and-invoice-terms.test.ts (2 tests)
+ ✓ tests/quotation-payment-options.test.ts (2 tests)
+ ✓ tests/portal-pin-and-invoice-audit.test.ts (2 tests)
+ ✓ tests/quotation-workflow.test.ts (4 tests)
+ ✓ tests/calculations.test.ts (5 tests)
+ ✓ tests/export-and-payment.test.ts (3 tests)
+ ✓ tests/invoice-and-completion.test.ts (4 tests)
+ ✓ tests/pdf.test.ts (1 test)
+ ✓ tests/validations.test.ts (8 tests)
+ ✓ tests/tokens.test.ts (3 tests)
+ ✓ tests/logo.test.ts (6 tests)
 
- Test Files  5 passed (5)
-      Tests  15 passed (15)
+ Test Files  12 passed (12)
+      Tests  44 passed (44)
 ```
 
 ### 2. TypeScript Compilation Check
 ```bash
-> npx tsc --noEmit
+> node ./node_modules/typescript/bin/tsc --noEmit
 # Result: 0 errors (clean exit code 0)
 ```
-
-### 3. Production Build
-```bash
-> next build
-# Result: Successfully compiled all 25 static & dynamic routes with 0 errors
-```
-
-### 4. End-to-End Live API & Lifecycle Verification
-- `GET /api/quotations` -> Returned seed quotations with joined customers and items.
-- `GET /q/demo_token_sent_q002` -> Returned `HTTP 200 OK` (Public Customer Approval Portal).
-- `GET /api/public/pdf?token=demo_token_sent_q002` -> Returned `HTTP 200 OK` with `application/pdf` binary stream.
 - `POST /api/public/approve` -> Successfully processed digital signature for John Mathew, transitioned status to `APPROVED`, created document hash `1937d29fb4...`.
 - `GET /api/notifications` -> Dispatched real-time notifications to business: `Quotation Q-000002 Viewed` and `Quotation Q-000002 Approved!`.
 - `POST /api/quotations/.../revision` -> Successfully created `Q-000002-V2` (DRAFT) while preserving `Q-000002` (APPROVED) as immutable.
