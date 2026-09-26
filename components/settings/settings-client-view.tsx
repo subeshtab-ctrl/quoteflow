@@ -1055,6 +1055,27 @@ export function SettingsClientView({
             value={org.invoice_footer || ''}
             onChange={(e) => setOrg({ ...org, invoice_footer: e.target.value })}
           />
+
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+            <label className="flex items-start gap-3 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={org.require_full_payment_for_invoice ?? true}
+                onChange={(e) =>
+                  setOrg({ ...org, require_full_payment_for_invoice: e.target.checked })
+                }
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <div className="space-y-0.5">
+                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 transition-colors">
+                  Require 100% Full Payment for Commercial Tax Invoice Generation
+                </span>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  When enabled, official commercial tax invoices are strictly held until the quotation is marked as 100% fully paid. Clients making advance payments (e.g. 10%, 20%, 50%) can download official verified Payment Receipts, and will see a note indicating their Tax Invoice will be generated upon full payment settlement.
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
 
         {/* Team Members & Staff Accounts Card */}

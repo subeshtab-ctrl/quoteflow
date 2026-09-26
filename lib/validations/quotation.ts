@@ -133,4 +133,5 @@ export const OrganizationSettingsSchema = z.object({
   goods_classification_label: z.string().nullish().or(z.literal('')),
   service_classification_label: z.string().nullish().or(z.literal('')),
   tax_rate_type: z.string().nullish().or(z.literal('')),
+  require_full_payment_for_invoice: z.boolean().optional().default(true),
 }).passthrough();

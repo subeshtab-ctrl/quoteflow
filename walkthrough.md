@@ -98,3 +98,65 @@
 - `POST /api/quotations/.../revision` -> Successfully created `Q-000002-V2` (DRAFT) while preserving `Q-000002` (APPROVED) as immutable.
 - `POST /api/quotations` -> Atomically incremented sequence and created `Q-000005`.
 - `POST /api/public/reject` -> Successfully processed rejection ("Need changes") with feedback comments, transitioned status to `REJECTED`, and recorded in audit log.
+
+---
+
+## 🚀 Advance Payments, Verified Receipts & Commercial Tax Invoices
+
+### 1. Advance Payments with Presets & Live Balance Calculations
+- **Payment Modal (`components/quotations/payment-modal.tsx`)**:
+  - Full Payment (100%), Advance Payment (10%, 20%, 50%, or Custom Amount), and Unpaid modes.
+  - Live calculations for **Paid Amount** and **Remaining Balance Due**.
+  - Internal company verification checkbox (`payment_confirmed_by_company`) and actor attribution.
+
+### 2. Client Portal Financial Summary & Verified Receipt Download
+- **Public Quote View (`components/public-quote/public-quote-view.tsx`)**:
+  - Financial breakdown displays Total Quotation Value, Amount Paid (with advance %), and Remaining Balance Due.
+  - **Payment Receipt Download**: Unlocked **strictly when company confirms payment** (`payment_confirmed_by_company === true`).
+  - When payment is recorded but unconfirmed, displays a clear verification pending notice: *"Receipt unlocks upon company confirmation"*.
+  - **Tax Invoice Holding Notice**: Shows *"Note: Official Commercial Tax Invoice will only be generated once the quotation is marked as fully paid."* When 100% paid, unlocks the official commercial invoice PDF download.
+
+### 3. Commercial Tax Invoice & Payment Receipt PDF Generators
+- **Receipt PDF Generator (`lib/pdf/receipt-pdf-generator.ts`)**:
+  - Generates official computer-generated receipt with company logo, payment breakdown, reference ID, and official verification seal.
+- **Invoice PDF Generator (`lib/pdf/invoice-pdf-generator.ts`)**:
+  - Generates high-DPI A4 commercial tax invoice with brand header bar, company logo, customer billing details, line items table with HSN/SAC classification, comprehensive CGST/SGST/IGST/VAT breakdown, and bank remittance instructions.
+- **Fixed Invoice Print & Blank Page Issue**:
+  - Attached `id="invoice-sheet"` to the printable container in `components/invoices/invoice-detail-view.tsx`.
+  - Configured `@media print` in `app/globals.css` with `@page { size: A4 portrait; margin: 12mm; }`, `-webkit-print-color-adjust: exact`, and clean background overrides.
+  - Added direct **"Download PDF"** buttons pointing to `/api/invoices/[id]/pdf`.
+
+### 4. 1-Hour Rolling Window IP View Counting & Staff IP Privacy
+- **Rolling Window Logic (`lib/supabase/data-store.ts`)**:
+  - Visits from the same IP within 1 hour are recorded in the audit log with `counted: false` without inflating `view_count`.
+  - Visits after 1 hour or from different IP addresses increment `view_count` normally.
+- **Staff IP Masking (`components/quotations/quotation-audit-history.tsx`)**:
+  - All IP addresses in audit events are automatically masked as `[Confidential - Admin Only]` when viewed by staff members.
+
+### 5. Admin Settings Configuration
+- **Company Settings (`components/settings/settings-client-view.tsx`)**:
+  - Added admin toggle switch: *"Require 100% Full Payment for Commercial Tax Invoice Generation"*.
+  - Persisted in `data/org-settings.json` and Supabase.
+
+---
+
+## 🧪 Comprehensive Automated Test Results
+
+```bash
+> cmd /c npx vitest run
+✓ tests/pdf.test.ts (1 test)
+✓ tests/advance-payment-and-invoice-pdf.test.ts (4 tests)
+✓ tests/export-and-payment.test.ts (3 tests)
+✓ tests/calculations.test.ts (5 tests)
+✓ tests/invoice-and-completion.test.ts (4 tests)
+✓ tests/portal-pin-and-invoice-audit.test.ts (2 tests)
+✓ tests/quotation-workflow.test.ts (4 tests)
+✓ tests/tokens.test.ts (3 tests)
+✓ tests/validations.test.ts (8 tests)
+✓ tests/logo.test.ts (6 tests)
+
+Test Files: 10 passed (10)
+Tests:      40 passed (40)
+Typecheck:  0 errors via tsc --noEmit
+```
+

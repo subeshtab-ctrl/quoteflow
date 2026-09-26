@@ -40,6 +40,35 @@ class QuoteFlowStore {
   private invoiceItems: Map<string, InvoiceItem[]> = new Map();
   private portalPins: Map<string, PortalPinRegistration> = new Map();
 
+  private getOrgSettingsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {}
+    }
+    return path.join(dir, 'org-settings.json');
+  }
+
+  private loadOrgSettingsFromFile(): Record<string, Partial<Organization>> {
+    try {
+      const p = this.getOrgSettingsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {}
+    return {};
+  }
+
+  private saveOrgSettingsToFile(orgId: string, data: Partial<Organization>): void {
+    try {
+      const all = this.loadOrgSettingsFromFile();
+      all[orgId] = { ...(all[orgId] || {}), ...data };
+      fs.writeFileSync(this.getOrgSettingsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
+    } catch {}
+  }
+
   private getPaymentsFilePath(): string {
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
@@ -50,7 +79,21 @@ class QuoteFlowStore {
     return path.join(dir, 'payments.json');
   }
 
-  private loadPaymentsFromFile(): Record<string, { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }> {
+  private loadPaymentsFromFile(): Record<
+    string,
+    {
+      is_paid: boolean;
+      paid_at?: string | null;
+      payment_method?: string | null;
+      payment_notes?: string | null;
+      paid_amount?: number;
+      balance_amount?: number;
+      advance_percentage?: number | null;
+      payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+      payment_confirmed_by_company?: boolean;
+      payment_confirmed_at?: string | null;
+    }
+  > {
     try {
       const p = this.getPaymentsFilePath();
       if (fs.existsSync(p)) {
@@ -63,7 +106,21 @@ class QuoteFlowStore {
     return {};
   }
 
-  private savePaymentToFile(quotationId: string, data: { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }): void {
+  private savePaymentToFile(
+    quotationId: string,
+    data: {
+      is_paid: boolean;
+      paid_at?: string | null;
+      payment_method?: string | null;
+      payment_notes?: string | null;
+      paid_amount?: number;
+      balance_amount?: number;
+      advance_percentage?: number | null;
+      payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+      payment_confirmed_by_company?: boolean;
+      payment_confirmed_at?: string | null;
+    }
+  ): void {
     try {
       const all = this.loadPaymentsFromFile();
       all[quotationId] = data;
@@ -788,8 +845,10 @@ class QuoteFlowStore {
           } else if (!data.invoice_footer) {
             data.invoice_footer = `Thank you for partnering with ${compName}.`;
           }
-          this.organizations.set(data.id, data as Organization);
-          return data as Organization;
+          const localSettings = this.loadOrgSettingsFromFile()[data.id] || {};
+          const fullOrg = { ...data, ...localSettings } as Organization;
+          this.organizations.set(data.id, fullOrg);
+          return fullOrg;
         }
       }
     } catch (err) {
@@ -801,7 +860,8 @@ class QuoteFlowStore {
       if (cached.invoice_footer && cached.invoice_footer.includes('The Mining Future')) {
         cached.invoice_footer = `Thank you for partnering with ${compName}.`;
       }
-      return cached;
+      const localSettings = this.loadOrgSettingsFromFile()[orgId] || {};
+      return { ...cached, ...localSettings } as Organization;
     }
     return null;
   }
@@ -830,6 +890,7 @@ class QuoteFlowStore {
       updated_at: new Date().toISOString(),
     };
     this.organizations.set(orgId, updated);
+    this.saveOrgSettingsToFile(orgId, updated);
 
     try {
       const supabase = createAdminClient();
@@ -2240,44 +2301,70 @@ class QuoteFlowStore {
   // --- PUBLIC CUSTOMER VIEW TRACKING ---
   public async recordQuotationView(
     quotationId: string,
-    meta: { ip?: string; userAgent?: string }
+    meta: { ip?: string; userAgent?: string; ip_address?: string; user_agent?: string }
   ): Promise<{ quotation: Quotation; firstView: boolean }> {
     const quote = this.quotations.get(quotationId) || (await this.getQuotationById(quotationId));
     if (!quote) throw new Error('Quotation not found');
 
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const ipInput = meta.ip || meta.ip_address;
+    const userAgentInput = meta.userAgent || meta.user_agent;
+    const rawIp = ipInput && ipInput !== 'Unknown IP' && ipInput !== '::1' ? ipInput : (ipInput || '127.0.0.1');
+
+    // 1-hour rolling window check for identical IP address
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const viewList = this.views.get(quotationId) || [];
+
+    let isViewCountEligible = true;
+    if (rawIp && rawIp !== 'Unknown IP') {
+      const recentViewFromIp = [...viewList]
+        .reverse()
+        .find((v) => v.ip_address === rawIp);
+
+      if (recentViewFromIp && recentViewFromIp.viewed_at) {
+        const timeDiff = now.getTime() - new Date(recentViewFromIp.viewed_at).getTime();
+        if (timeDiff < ONE_HOUR_MS) {
+          isViewCountEligible = false;
+        }
+      }
+    }
+
     const firstView = (quote.view_count || 0) === 0;
 
-    quote.view_count = (quote.view_count || 0) + 1;
-    if (!quote.first_viewed_at) {
-      quote.first_viewed_at = now;
+    if (isViewCountEligible) {
+      quote.view_count = (quote.view_count || 0) + 1;
+      if (!quote.first_viewed_at) {
+        quote.first_viewed_at = nowIso;
+      }
     }
-    quote.last_viewed_at = now;
+    quote.last_viewed_at = nowIso;
 
     // Transition SENT -> VIEWED
     if (quote.status === 'SENT') {
       quote.status = 'VIEWED';
     }
 
-    quote.updated_at = now;
+    quote.updated_at = nowIso;
     this.quotations.set(quotationId, quote);
 
     // Record view log
-    const viewList = this.views.get(quotationId) || [];
     viewList.push({
       id: `view_${Date.now()}`,
       quotation_id: quotationId,
-      ip_address: meta.ip,
+      ip_address: rawIp,
       user_agent: meta.userAgent,
-      viewed_at: now,
+      viewed_at: nowIso,
     });
     this.views.set(quotationId, viewList);
 
-    // Audit Event
+    // Audit Event - record IP in metadata
     this.logEvent(quote.organization_id, quotationId, 'CUSTOMER', 'VIEWED', {
       first_view: firstView,
       view_count: quote.view_count,
+      ip_address: rawIp,
       user_agent: meta.userAgent,
+      counted: isViewCountEligible,
     });
 
     if (firstView) {
@@ -2763,14 +2850,20 @@ class QuoteFlowStore {
     };
   }
 
-  // --- PAYMENT WORKFLOW (PAID / UNPAID STATUS TRACKING) ---
+  // --- PAYMENT WORKFLOW (PAID / UNPAID STATUS TRACKING & ADVANCE PAYMENTS) ---
   public async updateQuotationPayment(
     id: string,
     paymentData: {
-      is_paid: boolean;
+      is_paid?: boolean;
+      paid_amount?: number;
+      balance_amount?: number;
+      advance_percentage?: number | null;
+      payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+      payment_confirmed_by_company?: boolean;
       paid_at?: string | null;
       payment_method?: string | null;
       payment_notes?: string | null;
+      confirmed_by?: string | null;
     },
     orgId?: string
   ): Promise<Quotation> {
@@ -2785,17 +2878,69 @@ class QuoteFlowStore {
     }
 
     const now = new Date().toISOString();
-    const paidAt = paymentData.is_paid
+    const grandTotal = Number(quote.grand_total) || 0;
+
+    let isPaid = Boolean(paymentData.is_paid);
+    let paidAmount = 0;
+    let balanceAmount = grandTotal;
+    let advancePct = paymentData.advance_percentage ?? null;
+
+    if (paymentData.paid_amount !== undefined) {
+      paidAmount = Math.max(0, Math.min(grandTotal, Number(paymentData.paid_amount) || 0));
+      balanceAmount = Math.max(0, grandTotal - paidAmount);
+      isPaid = balanceAmount <= 0 && paidAmount > 0;
+      if (advancePct === null || advancePct === undefined) {
+        advancePct = grandTotal > 0 ? Math.round((paidAmount / grandTotal) * 100) : 0;
+      }
+    } else if (paymentData.is_paid !== undefined) {
+      if (paymentData.is_paid) {
+        paidAmount = grandTotal;
+        balanceAmount = 0;
+        advancePct = 100;
+        isPaid = true;
+      } else {
+        paidAmount = 0;
+        balanceAmount = grandTotal;
+        advancePct = 0;
+        isPaid = false;
+      }
+    } else {
+      paidAmount = quote.paid_amount ?? (quote.is_paid ? grandTotal : 0);
+      balanceAmount = quote.balance_amount ?? (quote.is_paid ? 0 : grandTotal);
+      isPaid = balanceAmount <= 0 && paidAmount > 0;
+    }
+
+    const paymentStatus: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' = isPaid
+      ? 'PAID'
+      : paidAmount > 0
+        ? 'PARTIALLY_PAID'
+        : 'UNPAID';
+
+    const confirmed = paymentStatus !== 'UNPAID'
+      ? (paymentData.payment_confirmed_by_company ?? true)
+      : false;
+
+    const paidAt = paymentStatus !== 'UNPAID'
       ? (paymentData.paid_at || quote.paid_at || now)
       : null;
 
-    quote.is_paid = paymentData.is_paid;
+    quote.is_paid = isPaid;
+    quote.paid_amount = paidAmount;
+    quote.balance_amount = balanceAmount;
+    quote.advance_percentage = advancePct;
+    quote.payment_status = paymentStatus;
+    quote.payment_confirmed_by_company = confirmed;
+    quote.payment_confirmed_at = confirmed ? (quote.payment_confirmed_at || now) : null;
+    quote.payment_confirmed_by = confirmed ? (paymentData.confirmed_by || 'Company Finance Team') : null;
     quote.paid_at = paidAt;
-    quote.payment_method = paymentData.is_paid ? (paymentData.payment_method ?? quote.payment_method ?? null) : null;
-    quote.payment_notes = paymentData.is_paid ? (paymentData.payment_notes ?? quote.payment_notes ?? null) : null;
+    quote.payment_method = paymentStatus !== 'UNPAID' ? (paymentData.payment_method ?? quote.payment_method ?? null) : null;
+    quote.payment_notes = paymentStatus !== 'UNPAID' ? (paymentData.payment_notes ?? quote.payment_notes ?? null) : null;
     quote.updated_at = now;
 
-    if (paymentData.is_paid) {
+    const org = await this.getOrganization(quote.organization_id);
+    const requireFullPayment = org?.require_full_payment_for_invoice ?? true;
+
+    if (quote.is_paid) {
       if (['APPROVED', 'SENT', 'VIEWED', 'PENDING', 'PENDING_APPROVAL'].includes(quote.status)) {
         quote.status = 'PAYMENT_COMPLETED';
       }
@@ -2808,6 +2953,13 @@ class QuoteFlowStore {
       if (quote.status === 'PAYMENT_COMPLETED') {
         quote.status = 'APPROVED';
       }
+      if (!requireFullPayment && quote.paid_amount && quote.paid_amount > 0) {
+        try {
+          await this.ensureInvoiceForQuotation(quote);
+        } catch (e) {
+          console.warn('Auto advance invoice generation failed:', e);
+        }
+      }
     }
 
     this.quotations.set(id, quote);
@@ -2818,6 +2970,12 @@ class QuoteFlowStore {
       paid_at: quote.paid_at,
       payment_method: quote.payment_method,
       payment_notes: quote.payment_notes,
+      paid_amount: quote.paid_amount,
+      balance_amount: quote.balance_amount,
+      advance_percentage: quote.advance_percentage,
+      payment_status: quote.payment_status,
+      payment_confirmed_by_company: quote.payment_confirmed_by_company,
+      payment_confirmed_at: quote.payment_confirmed_at,
     });
 
     // Audit Log Event
@@ -2825,9 +2983,18 @@ class QuoteFlowStore {
       quote.organization_id,
       id,
       'USER',
-      paymentData.is_paid ? 'MARKED_PAID' : 'MARKED_UNPAID',
+      quote.is_paid
+        ? 'MARKED_PAID'
+        : quote.payment_status === 'PARTIALLY_PAID'
+          ? 'ADVANCE_PAID'
+          : 'MARKED_UNPAID',
       {
         is_paid: quote.is_paid,
+        paid_amount: quote.paid_amount,
+        balance_amount: quote.balance_amount,
+        advance_percentage: quote.advance_percentage,
+        payment_status: quote.payment_status,
+        payment_confirmed_by_company: quote.payment_confirmed_by_company,
         paid_at: quote.paid_at,
         payment_method: quote.payment_method,
         payment_notes: quote.payment_notes,
@@ -2847,9 +3014,18 @@ class QuoteFlowStore {
             quotation_id: id,
             actor_type: 'USER',
             actor_name: 'Business User',
-            event_type: paymentData.is_paid ? 'MARKED_PAID' : 'MARKED_UNPAID',
+            event_type: quote.is_paid
+              ? 'MARKED_PAID'
+              : quote.payment_status === 'PARTIALLY_PAID'
+                ? 'ADVANCE_PAID'
+                : 'MARKED_UNPAID',
             metadata: {
               is_paid: quote.is_paid,
+              paid_amount: quote.paid_amount,
+              balance_amount: quote.balance_amount,
+              advance_percentage: quote.advance_percentage,
+              payment_status: quote.payment_status,
+              payment_confirmed_by_company: quote.payment_confirmed_by_company,
               paid_at: quote.paid_at,
               payment_method: quote.payment_method,
               payment_notes: quote.payment_notes,
@@ -3120,6 +3296,12 @@ class QuoteFlowStore {
       return existingInDb;
     }
 
+    const org = await this.getOrganization(quotation.organization_id);
+    const requireFullPayment = org?.require_full_payment_for_invoice ?? true;
+    if (requireFullPayment && !quotation.is_paid) {
+      return null as any;
+    }
+
     // 3. Create fresh invoice from quote
     const invoiceNumber =
       customInvoiceNumber || `INV-${quotation.quotation_number.replace(/^Q-/, '')}`;
@@ -3167,6 +3349,9 @@ class QuoteFlowStore {
       payment_terms: 'Net 30 Days',
       items: invoiceItems,
       attachments: (quotation.attachments || []) as any,
+      paid_amount: quotation.paid_amount,
+      balance_amount: quotation.balance_amount,
+      payment_confirmed_by_company: quotation.payment_confirmed_by_company,
     });
 
     return invoice;
@@ -3192,6 +3377,9 @@ class QuoteFlowStore {
     discount_value?: number;
     tax_rate?: number;
     created_by?: string;
+    paid_amount?: number;
+    balance_amount?: number;
+    payment_confirmed_by_company?: boolean;
   }): Promise<Invoice> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const invId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -3285,6 +3473,9 @@ class QuoteFlowStore {
       is_paid: isPaid,
       paid_at: isPaid ? new Date().toISOString() : null,
       payment_notes: null,
+      paid_amount: data.paid_amount !== undefined ? data.paid_amount : (isPaid ? calculated.grand_total : 0),
+      balance_amount: data.balance_amount !== undefined ? data.balance_amount : (isPaid ? 0 : calculated.grand_total),
+      payment_confirmed_by_company: data.payment_confirmed_by_company ?? isPaid,
       attachments: data.attachments || [],
       created_by: data.created_by || 'User',
       created_at: new Date().toISOString(),

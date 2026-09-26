@@ -64,6 +64,7 @@ export interface Organization {
   current_quotation_counter: number;
   default_terms?: string | null;
   invoice_footer?: string | null;
+  require_full_payment_for_invoice?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -249,6 +250,13 @@ export interface Quotation {
   paid_at?: string | null;
   payment_method?: PaymentMethod | string | null;
   payment_notes?: string | null;
+  paid_amount?: number;
+  balance_amount?: number;
+  advance_percentage?: number | null;
+  payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+  payment_confirmed_by_company?: boolean;
+  payment_confirmed_at?: string | null;
+  payment_confirmed_by?: string | null;
 
   // Chat Tracking
   has_unread_chat?: boolean;
@@ -329,6 +337,13 @@ export interface Invoice {
   is_paid: boolean;
   paid_at?: string | null;
   payment_notes?: string | null;
+  paid_amount?: number;
+  balance_amount?: number;
+  advance_percentage?: number | null;
+  payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | string | null;
+  payment_confirmed_by_company?: boolean;
+  payment_confirmed_at?: string | null;
+  payment_confirmed_by?: string | null;
   attachments?: AttachmentItem[];
   created_by?: string | null;
   created_at: string;

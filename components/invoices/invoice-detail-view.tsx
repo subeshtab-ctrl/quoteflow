@@ -113,13 +113,23 @@ export function InvoiceDetailView({
           </Button>
 
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(`/api/invoices/${invoice.id}/pdf`, '_blank')}
+            className="gap-1.5 text-xs text-slate-700 dark:text-slate-300"
+          >
+            <Download className="h-3.5 w-3.5 text-indigo-500" />
+            <span>Download PDF</span>
+          </Button>
+
+          <Button
             variant="primary"
             size="sm"
             onClick={handlePrint}
-            className="gap-1.5 text-xs shadow-sm"
+            className="gap-1.5 text-xs shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             <Printer className="h-3.5 w-3.5" />
-            <span>Print / PDF</span>
+            <span>Print Invoice</span>
           </Button>
         </div>
       </div>
@@ -237,7 +247,10 @@ export function InvoiceDetailView({
       )}
 
       {/* Printable Invoice Sheet */}
-      <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-sm space-y-8 print:border-none print:shadow-none print:p-0">
+      <div
+        id="invoice-sheet"
+        className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-sm space-y-8 print:border-none print:shadow-none print:p-0"
+      >
         {/* Company Header & Invoice Details */}
         <div className="flex flex-col sm:flex-row justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
           <div className="space-y-2">
@@ -442,11 +455,38 @@ export function InvoiceDetailView({
             )}
 
             <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex justify-between items-baseline">
-              <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Total Due</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Total Amount</span>
               <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">
                 {formatCurrency(invoice.grand_total, currency)}
               </span>
             </div>
+
+            {Boolean(invoice.paid_amount !== undefined && invoice.paid_amount > 0) && (
+              <div className="flex justify-between text-emerald-600 font-semibold pt-1">
+                <span>
+                  Amount Paid
+                  {invoice.advance_percentage ? ` (${invoice.advance_percentage}% Advance)` : ''}
+                </span>
+                <span>-{formatCurrency(invoice.paid_amount || 0, currency)}</span>
+              </div>
+            )}
+
+            {Boolean(invoice.balance_amount !== undefined) && (
+              <div className="flex justify-between items-baseline pt-1 border-t border-slate-200 dark:border-slate-800">
+                <span className="text-sm font-black text-slate-900 dark:text-slate-100">
+                  Remaining Balance Due
+                </span>
+                <span
+                  className={`text-base font-black ${
+                    invoice.balance_amount === 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-amber-600 dark:text-amber-400'
+                  }`}
+                >
+                  {formatCurrency(invoice.balance_amount || 0, currency)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

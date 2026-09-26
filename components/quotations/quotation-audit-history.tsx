@@ -10,6 +10,7 @@ interface QuotationAuditHistoryProps {
   viewCount?: number;
   firstViewedAt?: string | null;
   lastViewedAt?: string | null;
+  currentUserRole?: string;
 }
 
 export function QuotationAuditHistory({
@@ -17,8 +18,10 @@ export function QuotationAuditHistory({
   viewCount = 0,
   firstViewedAt,
   lastViewedAt,
+  currentUserRole = 'ADMIN',
 }: QuotationAuditHistoryProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const isStaff = currentUserRole === 'STAFF';
 
   return (
     <div className="space-y-3">
@@ -99,11 +102,18 @@ export function QuotationAuditHistory({
                       </p>
                       {evt.metadata && Object.keys(evt.metadata).length > 0 && (
                         <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded-lg font-mono">
-                          {Object.entries(evt.metadata).map(([k, v]) => (
-                            <div key={k}>
-                              <span className="text-slate-400">{k}:</span> {String(v)}
-                            </div>
-                          ))}
+                          {Object.entries(evt.metadata).map(([k, v]) => {
+                            const isIpKey = /ip(_address)?/i.test(k);
+                            const displayVal = isIpKey && isStaff
+                              ? '[Confidential - Admin Only]'
+                              : String(v);
+
+                            return (
+                              <div key={k}>
+                                <span className="text-slate-400">{k}:</span> {displayVal}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

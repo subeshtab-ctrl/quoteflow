@@ -7,8 +7,26 @@
   },
   "d0000000-0000-0000-0000-000000000003": {
     "is_paid": true,
-    "paid_at": "2026-09-22T10:00:00.000Z",
-    "payment_method": "BANK_TRANSFER",
-    "payment_notes": null
+    "paid_at": "2026-09-26T10:00:00.000Z",
+    "payment_method": "UPI",
+    "payment_notes": "Paid via PhonePe UPI Ref #998811",
+    "paid_amount": 35400,
+    "balance_amount": 0,
+    "advance_percentage": 100,
+    "payment_status": "PAID",
+    "payment_confirmed_by_company": true,
+    "payment_confirmed_at": "2026-09-26T10:46:27.772Z"
+  },
+  "d0000000-0000-0000-0000-000000000002": {
+    "is_paid": false,
+    "paid_at": "2026-09-26T10:46:25.961Z",
+    "payment_method": "UPI",
+    "payment_notes": "20% token advance for mobilization",
+    "paid_amount": 44250,
+    "balance_amount": 44250,
+    "advance_percentage": 50,
+    "payment_status": "PARTIALLY_PAID",
+    "payment_confirmed_by_company": true,
+    "payment_confirmed_at": "2026-09-26T10:46:25.961Z"
   }
 }

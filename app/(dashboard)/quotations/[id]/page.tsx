@@ -413,11 +413,32 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   </div>
                 )}
                 <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm">
-                  <span className="font-bold text-slate-900">Grand Total</span>
+                  <span className="font-bold text-slate-900">Total Value</span>
                   <span className="text-lg font-black text-indigo-700">
                     {grandTotalFormatted}
                   </span>
                 </div>
+                {Boolean(quotation.paid_amount && quotation.paid_amount > 0) && (
+                  <div className="flex justify-between text-emerald-600 font-semibold text-xs pt-1">
+                    <span>
+                      Amount Paid
+                      {quotation.advance_percentage ? ` (${quotation.advance_percentage}% Advance)` : ''}
+                    </span>
+                    <span>-{formatCurrency(quotation.paid_amount || 0, quotation.currency)}</span>
+                  </div>
+                )}
+                {Boolean(quotation.paid_amount && quotation.balance_amount !== undefined) && (
+                  <div className="flex justify-between items-baseline pt-1 border-t border-slate-200 text-xs">
+                    <span className="font-bold text-slate-900">Remaining Balance Due</span>
+                    <span
+                      className={`font-black ${
+                        quotation.balance_amount === 0 ? 'text-emerald-600' : 'text-amber-600'
+                      }`}
+                    >
+                      {formatCurrency(quotation.balance_amount || 0, quotation.currency)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -462,6 +483,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
               viewCount={quotation.view_count || 0}
               firstViewedAt={quotation.first_viewed_at}
               lastViewedAt={quotation.last_viewed_at}
+              currentUserRole={auth?.role || 'OWNER'}
             />
           </div>
         </div>

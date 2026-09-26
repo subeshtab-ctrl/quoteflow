@@ -338,7 +338,8 @@ export function InvoiceModal({
   };
 
   const handleDownloadPdf = () => {
-    window.open(`/api/public/pdf?id=${quotation.id}`, '_blank');
+    const targetId = invoiceId || quotation.id;
+    window.open(`/api/invoices/${targetId}/pdf`, '_blank');
   };
 
   const handleSaveInvoiceChanges = async () => {
@@ -1153,11 +1154,32 @@ export function InvoiceModal({
                   </div>
                 )}
                 <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm">
-                  <span className="font-bold text-slate-900">Total Due</span>
+                  <span className="font-bold text-slate-900">Total Amount</span>
                   <span className="text-xl font-black text-indigo-700">
                     {formatCurrency(grandTotal, currency)}
                   </span>
                 </div>
+                {Boolean(quotation.paid_amount && quotation.paid_amount > 0) && (
+                  <div className="flex justify-between text-emerald-600 font-semibold text-xs pt-1">
+                    <span>
+                      Amount Paid
+                      {quotation.advance_percentage ? ` (${quotation.advance_percentage}% Advance)` : ''}
+                    </span>
+                    <span>-{formatCurrency(quotation.paid_amount || 0, currency)}</span>
+                  </div>
+                )}
+                {Boolean(quotation.paid_amount && quotation.balance_amount !== undefined) && (
+                  <div className="flex justify-between items-baseline pt-1 border-t border-slate-200 text-xs">
+                    <span className="font-bold text-slate-900">Remaining Balance Due</span>
+                    <span
+                      className={`font-black ${
+                        quotation.balance_amount === 0 ? 'text-emerald-600' : 'text-amber-600'
+                      }`}
+                    >
+                      {formatCurrency(quotation.balance_amount || 0, currency)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

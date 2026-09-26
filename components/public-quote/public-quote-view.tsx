@@ -43,6 +43,8 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
 
   // Client Portal PIN Auth Gate state
   const [authChecked, setAuthChecked] = useState(false);
@@ -96,6 +98,12 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
   const isPaid = Boolean(quotation.is_paid || quotation.status === 'PAYMENT_COMPLETED');
   const isCompleted = quotation.status === 'COMPLETED' || quotation.status === 'PAYMENT_COMPLETED';
+  const hasPaymentRecorded = Boolean(
+    quotation.is_paid || (quotation.paid_amount && quotation.paid_amount > 0)
+  );
+  const isPaymentConfirmed = Boolean(
+    quotation.payment_confirmed_by_company ?? quotation.is_paid
+  );
 
   const isExpired =
     quotation.status === 'EXPIRED' ||
@@ -280,6 +288,66 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     }
   };
 
+  const handleDownloadReceipt = async () => {
+    try {
+      setIsDownloadingReceipt(true);
+      const res = await fetch(
+        `/api/public/receipt-pdf?token=${encodeURIComponent(currentToken || '')}&id=${encodeURIComponent(quotation.id)}`
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          data.error ||
+            'Payment receipt is only available once payment is officially confirmed by company finance.'
+        );
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Payment-Receipt-${quotation.quotation_number}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      console.error('Receipt download error:', err);
+      alert(err.message || 'Could not download payment receipt.');
+    } finally {
+      setIsDownloadingReceipt(false);
+    }
+  };
+
+  const handleDownloadInvoice = async () => {
+    try {
+      setIsDownloadingInvoice(true);
+      const res = await fetch(
+        `/api/public/invoice-pdf?token=${encodeURIComponent(currentToken || '')}&id=${encodeURIComponent(quotation.id)}`
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          data.error ||
+            'Commercial Tax Invoice is only generated once quotation is marked as fully paid.'
+        );
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Invoice-${quotation.quotation_number}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      console.error('Invoice download error:', err);
+      alert(err.message || 'Could not download invoice.');
+    } finally {
+      setIsDownloadingInvoice(false);
+    }
+  };
+
   const handleApproved = (updatedQuote?: Quotation) => {
     if (updatedQuote) {
       setQuotation(updatedQuote);
@@ -363,6 +431,19 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               <Download className="h-4 w-4 text-slate-600" />
               <span className="hidden sm:inline">Download</span> PDF
             </Button>
+
+            {hasPaymentRecorded && isPaymentConfirmed && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadReceipt}
+                isLoading={isDownloadingReceipt}
+                className="gap-1.5 shadow-sm text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+              >
+                <Download className="h-4 w-4 text-emerald-600" />
+                <span className="hidden sm:inline">Download</span> Receipt
+              </Button>
+            )}
 
             {canTakeAction && (
               <>
@@ -799,13 +880,137 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               )}
 
               <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
-                <span className="text-sm font-bold text-slate-900">Grand Total</span>
+                <span className="text-sm font-bold text-slate-900">Total Quotation Value</span>
                 <span className="text-xl font-extrabold text-indigo-700">
                   {grandTotalFormatted}
                 </span>
               </div>
+
+              {hasPaymentRecorded && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-200/80">
+                  <div className="flex justify-between text-xs text-emerald-700 font-semibold">
+                    <span>
+                      Amount Paid
+                      {quotation.advance_percentage ? ` (${quotation.advance_percentage}% Advance)` : ''}
+                    </span>
+                    <span>
+                      -{formatCurrency(
+                        quotation.paid_amount !== undefined
+                          ? quotation.paid_amount
+                          : (quotation.is_paid ? quotation.grand_total : 0),
+                        quotation.currency
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-baseline pt-1 border-t border-dashed border-slate-200 text-xs">
+                    <span className="font-bold text-slate-900">Remaining Balance Due</span>
+                    <span
+                      className={`font-black text-sm ${
+                        (quotation.balance_amount === 0 || quotation.is_paid)
+                          ? 'text-emerald-700'
+                          : 'text-amber-700'
+                      }`}
+                    >
+                      {formatCurrency(
+                        quotation.balance_amount !== undefined
+                          ? quotation.balance_amount
+                          : (quotation.is_paid ? 0 : quotation.grand_total),
+                        quotation.currency
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Payment Status, Official Receipt Download & Invoice Policy Card */}
+          {hasPaymentRecorded && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`p-2.5 rounded-xl shrink-0 ${
+                      isPaymentConfirmed
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    {isPaymentConfirmed ? (
+                      <CheckCircle2 className="h-5 w-5" />
+                    ) : (
+                      <Clock className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      {isPaymentConfirmed
+                        ? 'Payment Confirmed by Company'
+                        : 'Payment Verification in Progress'}
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      {isPaymentConfirmed
+                        ? `Official payment of ${formatCurrency(
+                            quotation.paid_amount || (quotation.is_paid ? quotation.grand_total : 0),
+                            quotation.currency
+                          )} has been confirmed and verified by company finance.`
+                        : `Payment has been logged and is currently awaiting verification by company finance before official receipt download is unlocked.`}
+                    </p>
+                  </div>
+                </div>
+
+                {isPaymentConfirmed ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadReceipt}
+                    isLoading={isDownloadingReceipt}
+                    className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 shrink-0 font-medium"
+                  >
+                    <Download className="h-4 w-4 text-emerald-600" />
+                    <span>Download Payment Receipt</span>
+                  </Button>
+                ) : (
+                  <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 font-medium shrink-0 flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Receipt available after company verification</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Commercial Tax Invoice Note / Action */}
+              <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 text-xs text-slate-600 flex items-start gap-3">
+                <FileText className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
+                <div className="space-y-1 flex-1">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="font-semibold text-slate-800">
+                      {quotation.is_paid
+                        ? 'Commercial Tax Invoice Available'
+                        : 'Official Tax Invoice Policy'}
+                    </p>
+                    {quotation.is_paid && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={handleDownloadInvoice}
+                        isLoading={isDownloadingInvoice}
+                        className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>Download Commercial Tax Invoice</span>
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-slate-500 leading-relaxed">
+                    {quotation.is_paid
+                      ? 'This quotation is fully paid. Your official Commercial Tax Invoice has been generated with all statutory GST/VAT and HSN details.'
+                      : 'Note: Official Commercial Tax Invoice will only be generated once the quotation is marked as fully paid.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Electronic Signature Audit Seal (When Approved) */}
           {quotation.status === 'APPROVED' && (
