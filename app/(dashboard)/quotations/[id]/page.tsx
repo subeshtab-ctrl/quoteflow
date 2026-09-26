@@ -493,11 +493,6 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                                 src={upiQrSrc}
                                 alt="UPI QR"
                                 className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
-                                onError={(e) => {
-                                  if (upiInfo.upi_id && !e.currentTarget.src.includes('api.qrserver.com')) {
-                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || 'SUBESH M LLC')}&cu=INR`)}`;
-                                  }
-                                }}
                               />
                             ) : null;
                           })()}
@@ -527,11 +522,6 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                                 src={cryptoQrSrc}
                                 alt="Crypto QR"
                                 className="h-14 w-14 object-contain rounded border border-slate-200 bg-white p-0.5"
-                                onError={(e) => {
-                                  if (cryptoInfo.wallet_address && !e.currentTarget.src.includes('api.qrserver.com')) {
-                                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoInfo.wallet_address)}`;
-                                  }
-                                }}
                               />
                             ) : null;
                           })()}
