@@ -5,6 +5,7 @@ import {
   Product,
   Quotation,
   QuotationChatMessage,
+  ChatAttachment,
   QuotationEvent,
   QuotationItem,
   QuotationSignature,
@@ -24,7 +25,17 @@ import path from 'path';
 import crypto from 'crypto';
 
 // Default Demo Organization
-const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
+export const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
+
+export const DEFAULT_INVOICE_NOTES =
+  'Thank you for your business. Please remit payment according to the agreed terms.';
+
+export const DEFAULT_INVOICE_TERMS = [
+  '1. Payment is due within agreed terms from the date of invoice.',
+  '2. Please quote the invoice number when making remittance.',
+  '3. Overdue payments may be subject to interest as permitted by applicable law.',
+  '4. Goods/services provided in accordance with approved scope are non-refundable.',
+].join('\n');
 
 class QuoteFlowStore {
   private organizations: Map<string, Organization> = new Map();
@@ -1244,6 +1255,10 @@ class QuoteFlowStore {
     return null;
   }
 
+  public async getCustomer(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Customer | null> {
+    return this.getCustomerById(id, orgId);
+  }
+
   public async createCustomer(data: Omit<Customer, 'id' | 'created_at' | 'updated_at'>): Promise<Customer> {
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
     const now = new Date().toISOString();
@@ -2057,6 +2072,9 @@ class QuoteFlowStore {
     items: any[];
     attachments?: any[];
     status?: any;
+    advance_percentage?: number | null;
+    accepted_payment_methods?: string[] | null;
+    payment_terms_instructions?: string | null;
   }): Promise<Quotation> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
@@ -2100,6 +2118,9 @@ class QuoteFlowStore {
       is_token_revoked: false,
       view_count: 0,
       attachments: data.attachments || [],
+      advance_percentage: data.advance_percentage !== undefined ? data.advance_percentage : 50,
+      accepted_payment_methods: data.accepted_payment_methods || ['Bank Transfer', 'Online / Card', 'Cheque'],
+      payment_terms_instructions: data.payment_terms_instructions || '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -2265,6 +2286,9 @@ class QuoteFlowStore {
       items?: any[];
       attachments?: any[];
       status?: any;
+      advance_percentage?: number | null;
+      accepted_payment_methods?: string[] | null;
+      payment_terms_instructions?: string | null;
     },
     orgId?: string
   ): Promise<Quotation> {
@@ -2346,6 +2370,9 @@ class QuoteFlowStore {
       notes: data.notes !== undefined ? data.notes : existing.notes,
       terms_conditions: data.terms_conditions !== undefined ? data.terms_conditions : existing.terms_conditions,
       attachments: data.attachments !== undefined ? data.attachments : existing.attachments,
+      advance_percentage: data.advance_percentage !== undefined ? data.advance_percentage : existing.advance_percentage,
+      accepted_payment_methods: data.accepted_payment_methods !== undefined ? data.accepted_payment_methods : existing.accepted_payment_methods,
+      payment_terms_instructions: data.payment_terms_instructions !== undefined ? data.payment_terms_instructions : existing.payment_terms_instructions,
       status: data.status || existing.status,
       updated_at: new Date().toISOString(),
     };
@@ -3111,6 +3138,65 @@ class QuoteFlowStore {
     quote.payment_notes = paymentStatus !== 'UNPAID' ? (paymentData.payment_notes ?? quote.payment_notes ?? null) : null;
     quote.updated_at = now;
 
+    if (confirmed) {
+      // Automatically purge payment proof screenshots upon company confirmation
+      const qEvents = this.events.get(id) || [];
+      let updatedLocal = false;
+      for (const ev of qEvents) {
+        if (ev.event_type === 'CHAT_MESSAGE' && ev.metadata?.attachment) {
+          const att = ev.metadata.attachment;
+          if (att.is_payment_proof || att.type?.startsWith('image/')) {
+            ev.metadata.attachment = {
+              ...att,
+              url: '',
+              deleted_at: now,
+              deleted_reason: 'Payment verified by company - screenshot automatically purged for privacy & security',
+            };
+            updatedLocal = true;
+          }
+        }
+      }
+      if (updatedLocal) {
+        this.events.set(id, qEvents);
+      }
+
+      try {
+        const supabase = createAdminClient();
+        if (supabase) {
+          const { data: dbEvents } = await supabase
+            .from('quotation_events')
+            .select('*')
+            .eq('quotation_id', id)
+            .eq('event_type', 'CHAT_MESSAGE');
+
+          if (dbEvents && dbEvents.length > 0) {
+            for (const ev of dbEvents) {
+              if (ev.metadata?.attachment) {
+                const att = ev.metadata.attachment;
+                if (att.is_payment_proof || att.type?.startsWith('image/')) {
+                  const updatedMetadata = {
+                    ...ev.metadata,
+                    attachment: {
+                      ...att,
+                      url: '',
+                      deleted_at: now,
+                      deleted_reason: 'Payment verified by company - screenshot automatically purged for privacy & security',
+                    },
+                  };
+                  await supabase
+                    .from('quotation_events')
+                    .update({ metadata: updatedMetadata })
+                    .eq('id', ev.id);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error purging payment attachments in Supabase:', err);
+      }
+    }
+
     const org = await this.getOrganization(quote.organization_id);
     const requireFullPayment = org?.require_full_payment_for_invoice ?? true;
 
@@ -3228,6 +3314,36 @@ class QuoteFlowStore {
       signature: this.signatures.get(id) || quote.signature || null,
       events: this.events.get(id) || quote.events || [],
     };
+  }
+
+  public async updateQuotationPaymentDetails(
+    id: string,
+    data: {
+      confirmed?: boolean;
+      confirmed_by?: string;
+      paid_amount?: number;
+      payment_method?: string;
+      payment_notes?: string;
+      is_paid?: boolean;
+      advance_percentage?: number | null;
+      payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+    },
+    orgId?: string
+  ): Promise<Quotation> {
+    return this.updateQuotationPayment(
+      id,
+      {
+        payment_confirmed_by_company: data.confirmed,
+        confirmed_by: data.confirmed_by,
+        paid_amount: data.paid_amount,
+        payment_method: data.payment_method,
+        payment_notes: data.payment_notes,
+        is_paid: data.is_paid,
+        advance_percentage: data.advance_percentage,
+        payment_status: data.payment_status || (data.confirmed ? 'PAID' : undefined),
+      },
+      orgId
+    );
   }
 
   // --- MARK AS COMPLETED WORKFLOW ---
@@ -3518,14 +3634,22 @@ class QuoteFlowStore {
       discount_type: quotation.discount_type,
       discount_value: quotation.discount_value,
       tax_rate: quotation.tax_rate,
-      notes: quotation.notes || '',
-      terms_conditions: quotation.terms_conditions || '',
+      notes: 'Thank you for your business. Please remit payment according to the agreed terms.',
+      terms_conditions: [
+        '1. Payment is due within agreed terms from the date of invoice.',
+        '2. Please quote the invoice number when making remittance.',
+        '3. Overdue payments may be subject to interest as permitted by applicable law.',
+        '4. Goods/services provided in accordance with approved scope are non-refundable.',
+      ].join('\n'),
       payment_terms: 'Net 30 Days',
       items: invoiceItems,
       attachments: (quotation.attachments || []) as any,
       paid_amount: quotation.paid_amount,
       balance_amount: quotation.balance_amount,
       payment_confirmed_by_company: quotation.payment_confirmed_by_company,
+      payment_method: quotation.payment_method,
+      payment_notes: quotation.payment_notes,
+      paid_at: quotation.paid_at,
     });
 
     return invoice;
@@ -3554,6 +3678,9 @@ class QuoteFlowStore {
     paid_amount?: number;
     balance_amount?: number;
     payment_confirmed_by_company?: boolean;
+    payment_method?: string | null;
+    payment_notes?: string | null;
+    paid_at?: string | null;
   }): Promise<Invoice> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const invId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -3621,6 +3748,23 @@ class QuoteFlowStore {
     const status: InvoiceStatus = data.status || 'ISSUED';
     const isPaid = status === 'PAID';
 
+    const defaultInvoiceTerms = [
+      '1. Payment is due within agreed terms from the date of invoice.',
+      '2. Please quote the invoice number when making remittance.',
+      '3. Overdue payments may be subject to interest as permitted by applicable law.',
+      '4. Goods/services provided in accordance with approved scope are non-refundable.',
+    ].join('\n');
+    const defaultInvoiceNotes = 'Thank you for your business. Please remit payment according to the agreed terms.';
+
+    let resolvedTerms = data.terms_conditions;
+    if (!resolvedTerms || resolvedTerms.includes('Quotation valid for 30 days') || resolvedTerms.includes('50% advance required')) {
+      resolvedTerms = defaultInvoiceTerms;
+    }
+    let resolvedNotes = data.notes;
+    if (!resolvedNotes || resolvedNotes.includes('Payment within 30 days of completion')) {
+      resolvedNotes = defaultInvoiceNotes;
+    }
+
     const newInvoice: Invoice = {
       id: invId,
       organization_id: orgId,
@@ -3640,13 +3784,13 @@ class QuoteFlowStore {
       tax_amount: calculated.tax_amount,
       grand_total: calculated.grand_total,
       tax_breakdown: data.tax_breakdown || [],
-      notes: data.notes || '',
-      terms_conditions: data.terms_conditions || '',
+      notes: resolvedNotes,
+      terms_conditions: resolvedTerms,
       payment_terms: data.payment_terms || 'Net 30 Days',
-      payment_method: isPaid ? 'BANK_TRANSFER' : null,
+      payment_method: data.payment_method ?? (isPaid ? 'BANK_TRANSFER' : null),
       is_paid: isPaid,
-      paid_at: isPaid ? new Date().toISOString() : null,
-      payment_notes: null,
+      paid_at: data.paid_at ?? (isPaid ? new Date().toISOString() : null),
+      payment_notes: data.payment_notes ?? null,
       paid_amount: data.paid_amount !== undefined ? data.paid_amount : (isPaid ? calculated.grand_total : 0),
       balance_amount: data.balance_amount !== undefined ? data.balance_amount : (isPaid ? 0 : calculated.grand_total),
       payment_confirmed_by_company: data.payment_confirmed_by_company ?? isPaid,
@@ -4001,6 +4145,7 @@ class QuoteFlowStore {
           message: ev.metadata?.message || '',
           created_at: ev.created_at,
           is_read: isRead,
+          attachment: ev.metadata?.attachment || null,
         };
       });
   }
@@ -4036,6 +4181,7 @@ class QuoteFlowStore {
     senderRole: 'CUSTOMER' | 'STAFF';
     senderName: string;
     message: string;
+    attachment?: ChatAttachment | null;
   }): Promise<QuotationChatMessage> {
     const now = new Date().toISOString();
     const trimmedMessage = params.message.trim();
@@ -4053,6 +4199,7 @@ class QuoteFlowStore {
         sender_role: params.senderRole,
         sender_name: params.senderName,
         message: trimmedMessage,
+        attachment: params.attachment || null,
       },
       created_at: now,
     };
@@ -4087,6 +4234,7 @@ class QuoteFlowStore {
               sender_role: params.senderRole,
               sender_name: params.senderName,
               message: trimmedMessage,
+              attachment: params.attachment || null,
             },
             created_at: now,
           })
@@ -4102,6 +4250,7 @@ class QuoteFlowStore {
             message: trimmedMessage,
             created_at: data.created_at || now,
             is_read: false,
+            attachment: params.attachment || null,
           };
         }
       }
@@ -4117,6 +4266,7 @@ class QuoteFlowStore {
       message: trimmedMessage,
       created_at: now,
       is_read: false,
+      attachment: params.attachment || null,
     };
   }
 
@@ -4320,4 +4470,8 @@ declare global {
 export const store: QuoteFlowStore = global.__quoteflow_store__ || new QuoteFlowStore();
 if (process.env.NODE_ENV !== 'production') {
   global.__quoteflow_store__ = store;
+}
+
+export function getDataStore(): QuoteFlowStore {
+  return store;
 }

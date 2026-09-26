@@ -153,16 +153,35 @@ export function InvoiceBuilder({
     initialInvoice?.attachments || fromQuotation?.attachments || []
   );
 
-  const [notes, setNotes] = useState<string>(
-    initialInvoice?.notes || fromQuotation?.notes || 'Thank you for your business. Please remit payment by the due date.'
-  );
+  const defaultInvoiceNotes =
+    'Thank you for your business. Please remit payment according to the agreed terms.';
+  const defaultInvoiceTerms = [
+    '1. Payment is due within agreed terms from the date of invoice.',
+    '2. Please quote the invoice number when making remittance.',
+    '3. Overdue payments may be subject to interest as permitted by applicable law.',
+    '4. Goods/services provided in accordance with approved scope are non-refundable.',
+  ].join('\n');
 
-  const [terms, setTerms] = useState<string>(
-    initialInvoice?.terms_conditions ||
-      fromQuotation?.terms_conditions ||
-      organization.default_terms ||
-      '1. Payment is due within agreed terms.\n2. Overdue interest may apply to delayed settlements.'
-  );
+  const [notes, setNotes] = useState<string>(() => {
+    if (
+      initialInvoice?.notes &&
+      !initialInvoice.notes.includes('Payment within 30 days of completion')
+    ) {
+      return initialInvoice.notes;
+    }
+    return defaultInvoiceNotes;
+  });
+
+  const [terms, setTerms] = useState<string>(() => {
+    if (
+      initialInvoice?.terms_conditions &&
+      !initialInvoice.terms_conditions.includes('Quotation valid for 30 days') &&
+      !initialInvoice.terms_conditions.includes('50% advance required')
+    ) {
+      return initialInvoice.terms_conditions;
+    }
+    return defaultInvoiceTerms;
+  });
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

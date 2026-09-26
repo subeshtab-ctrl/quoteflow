@@ -19,32 +19,64 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
 
-  const org = quotation.organization || {
-    name: 'QuoteFlow Technologies',
-    email: 'billing@quoteflow.app',
-    phone: '+91 98765 43210',
-    address_line1: 'Tech Park, Main Road',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    postal_code: '560038',
-    country: 'India',
-    gst_vat_number: '29ABCDE1234F1Z5',
-    brand_color: '#4f46e5',
-    invoice_footer: 'Thank you for choosing us!',
-    logo_url: null,
-  };
+  let org: any = quotation.organization;
+  if (!org || !org.name || org.name === 'QuoteFlow Technologies') {
+    try {
+      const { getDataStore } = await import('@/lib/supabase/data-store');
+      const store = getDataStore();
+      const dbOrg = await store.getOrganization(quotation.organization_id);
+      if (dbOrg) {
+        org = dbOrg;
+      }
+    } catch {
+      // fallback
+    }
+  }
 
-  const customer = quotation.customer || {
-    name: 'Valued Client',
-    company_name: '',
-    email: 'client@example.com',
-    phone: '',
-    billing_address: '',
-    city: '',
-    state: '',
-    country: '',
-    tax_number: '',
-  };
+  if (!org) {
+    org = {
+      name: 'QuoteFlow Technologies',
+      email: 'billing@quoteflow.app',
+      phone: '+91 98765 43210',
+      address_line1: 'Tech Park, Main Road',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      postal_code: '560038',
+      country: 'India',
+      gst_vat_number: '29ABCDE1234F1Z5',
+      brand_color: '#4f46e5',
+      invoice_footer: 'Thank you for choosing us!',
+      logo_url: null,
+    };
+  }
+
+  let customer: any = quotation.customer;
+  if (!customer || !customer.name || customer.name === 'Valued Client') {
+    try {
+      const { getDataStore } = await import('@/lib/supabase/data-store');
+      const store = getDataStore();
+      const dbCustomer = await store.getCustomer(quotation.customer_id);
+      if (dbCustomer) {
+        customer = dbCustomer;
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  if (!customer) {
+    customer = {
+      name: 'Valued Client',
+      company_name: '',
+      email: 'client@example.com',
+      phone: '',
+      billing_address: '',
+      city: '',
+      state: '',
+      country: '',
+      tax_number: '',
+    };
+  }
 
   // 1. Top Decorative Brand Bar
   doc.setFillColor(79, 70, 229); // Brand Indigo
@@ -61,10 +93,10 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
       const logoPath = path.join(process.cwd(), 'public', cleanUrl);
       if (fs.existsSync(logoPath)) {
         const imgBuffer = fs.readFileSync(logoPath);
-        const ext = logoPath.endsWith('.png') ? 'PNG' : 'JPEG';
+        const ext = (logoPath.toLowerCase().endsWith('.png') ? 'PNG' : 'JPEG') as 'PNG' | 'JPEG';
         const base64Img = `data:image/${ext.toLowerCase()};base64,${imgBuffer.toString('base64')}`;
-        doc.addImage(base64Img, ext, margin, compY - 4, 28, 12);
-        compY += 14;
+        doc.addImage(base64Img, ext, margin, compY - 4, 30, 14);
+        compY += 16;
       }
     } catch (e) {
       // Graceful fallback to text header
@@ -82,9 +114,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.setTextColor(100, 116, 139); // Slate-500
   const compLines: string[] = [
     org.address_line1 || '',
-    `${org.city || ''} ${org.state || ''} ${org.postal_code || ''} ${org.country || ''}`.trim(),
+    [org.city, org.state, org.postal_code].filter(Boolean).join(' ') + (org.country ? `, ${org.country}` : ''),
     `Email: ${org.email} | Phone: ${org.phone || 'N/A'}`,
-    org.gst_vat_number ? `Tax / GST: ${org.gst_vat_number}` : '',
+    org.gst_vat_number ? `Tax / VAT / GST: ${org.gst_vat_number}` : '',
   ].filter(Boolean) as string[];
 
   compLines.forEach((line: string) => {
@@ -235,8 +267,58 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.text('Grand Total:', summaryX, curY + 5);
   doc.text(formatCurrency(quotation.grand_total, quotation.currency), pageWidth - margin, curY + 5, { align: 'right' });
 
-  // 7. Terms & Conditions / Notes
+  // 7. Payment Terms & Conditions / Notes
   let notesY = curY + 16;
+
+  const hasPaymentDetails =
+    quotation.payment_terms_instructions ||
+    (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
+    (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
+    (quotation.paid_amount !== undefined && quotation.paid_amount > 0);
+
+  if (hasPaymentDetails) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text('PAYMENT DETAILS & INSTRUCTIONS:', margin, notesY);
+    notesY += 4.5;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105);
+
+    if (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && quotation.advance_percentage > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.text(`• Advance Required: ${quotation.advance_percentage}% to commence work`, margin, notesY);
+      doc.setFont('helvetica', 'normal');
+      notesY += 4;
+    }
+
+    if (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) {
+      doc.text(`• Accepted Payment Modes: ${quotation.accepted_payment_methods.join(', ')}`, margin, notesY);
+      notesY += 4;
+    }
+
+    if (quotation.payment_terms_instructions) {
+      const splitPayNotes = doc.splitTextToSize(quotation.payment_terms_instructions, 110);
+      doc.text(splitPayNotes, margin, notesY);
+      notesY += splitPayNotes.length * 3.5 + 1;
+    }
+
+    if (quotation.paid_amount && quotation.paid_amount > 0) {
+      doc.setFont('helvetica', 'italic');
+      doc.text(
+        `• Recorded Payment: ${formatCurrency(quotation.paid_amount, quotation.currency)} paid (${quotation.payment_status || 'PARTIAL'})`,
+        margin,
+        notesY
+      );
+      doc.setFont('helvetica', 'normal');
+      notesY += 4;
+    }
+
+    notesY += 3;
+  }
+
   if (quotation.terms_conditions || quotation.notes) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
@@ -248,7 +330,8 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     doc.setTextColor(100, 116, 139);
     const terms = quotation.terms_conditions || 'Standard terms apply.';
     const splitTerms = doc.splitTextToSize(terms, 105);
-    doc.text(splitTerms, margin, notesY + 5);
+    doc.text(splitTerms, margin, notesY + 4.5);
+    notesY += splitTerms.length * 3.5 + 4;
   }
 
   // 8. Digital Signature Seal (if Approved)

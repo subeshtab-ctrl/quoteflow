@@ -340,11 +340,12 @@ export function InvoiceDetailView({
             {invoice.is_paid && invoice.paid_at && (
               <p className="text-emerald-600 font-semibold mt-1">
                 Settled in full on {formatDate(invoice.paid_at)}
-                {invoice.payment_method && ` via ${invoice.payment_method}`}
               </p>
             )}
-            {invoice.payment_notes && (
-              <p className="text-slate-500 text-[11px]">Ref: {invoice.payment_notes}</p>
+            {(invoice.payment_method || invoice.payment_notes) && (
+              <p className="text-[11px] text-slate-500 italic mt-1 font-serif">
+                Mode of Payment: {invoice.payment_method?.replace(/_/g, ' ') || 'Bank Transfer'}{invoice.payment_notes ? ` • Ref/Txn No: ${invoice.payment_notes}` : ''}
+              </p>
             )}
           </div>
         </div>
@@ -486,6 +487,12 @@ export function InvoiceDetailView({
                   {formatCurrency(invoice.balance_amount || 0, currency)}
                 </span>
               </div>
+            )}
+
+            {(invoice.payment_method || invoice.payment_notes) && (
+              <p className="text-[11px] text-slate-500 italic mt-2 text-right font-serif">
+                Mode of Payment: {invoice.payment_method?.replace(/_/g, ' ') || 'Bank Transfer'}{invoice.payment_notes ? ` • Ref/Txn No: ${invoice.payment_notes}` : ''}
+              </p>
             )}
           </div>
         </div>

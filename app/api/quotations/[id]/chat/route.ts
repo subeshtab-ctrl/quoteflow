@@ -45,10 +45,11 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { message } = body;
+    const { message, attachment } = body;
 
-    if (!message || !String(message).trim()) {
-      return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 });
+    const trimmedMsg = String(message || '').trim();
+    if (!trimmedMsg && !attachment) {
+      return NextResponse.json({ error: 'Message or attachment cannot be empty' }, { status: 400 });
     }
 
     const senderName = auth?.fullName || quote.organization?.name || 'Team';
@@ -58,7 +59,8 @@ export async function POST(
       organizationId: quote.organization_id,
       senderRole: 'STAFF',
       senderName,
-      message: String(message).trim(),
+      message: trimmedMsg || (attachment ? `Attached: ${attachment.name}` : ''),
+      attachment: attachment || null,
     });
 
     await store.markQuotationChatRead(id, quote.organization_id, senderName);

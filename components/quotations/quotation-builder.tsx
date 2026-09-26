@@ -24,6 +24,7 @@ import {
   Percent,
   CheckCircle2,
   Paperclip,
+  CreditCard,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import {
@@ -142,6 +143,20 @@ export function QuotationBuilder({
   );
   const [terms, setTerms] = useState<string>(
     initialQuotation?.terms_conditions || organization.default_terms || ''
+  );
+
+  // Payment Details & Instructions
+  const [advancePercentage, setAdvancePercentage] = useState<number>(
+    initialQuotation?.advance_percentage !== undefined && initialQuotation.advance_percentage !== null
+      ? initialQuotation.advance_percentage
+      : 50
+  );
+  const [acceptedPaymentMethods, setAcceptedPaymentMethods] = useState<string[]>(
+    initialQuotation?.accepted_payment_methods || ['Bank Transfer', 'Online / Card', 'Cheque']
+  );
+  const [paymentTermsInstructions, setPaymentTermsInstructions] = useState<string>(
+    initialQuotation?.payment_terms_instructions ||
+      'Payment terms: 50% advance to commence work, balance upon completion. Remit via Bank Transfer.'
   );
 
   const validityDays = (() => {
@@ -327,6 +342,9 @@ export function QuotationBuilder({
         items,
         attachments,
         status: statusToSet,
+        advance_percentage: advancePercentage,
+        accepted_payment_methods: acceptedPaymentMethods,
+        payment_terms_instructions: paymentTermsInstructions,
       };
 
       const endpoint = initialQuotation?.id
@@ -905,11 +923,108 @@ export function QuotationBuilder({
             />
           </div>
 
-          {/* Step 5: Document Attachments */}
+          {/* Step 5: Payment Details & Instructions */}
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-indigo-600" />
+                <span>5. Payment Terms & Instructions</span>
+              </h3>
+              <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                Advance: {advancePercentage}%
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Advance Payment Required
+                </label>
+                <div className="flex flex-wrap gap-2 items-center">
+                  {[0, 10, 20, 50, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => setAdvancePercentage(pct)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                        advancePercentage === pct
+                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-2xs'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      {pct === 0 ? 'No Advance' : `${pct}%`}
+                    </button>
+                  ))}
+                  <div className="flex items-center gap-1 ml-auto">
+                    <span className="text-xs text-slate-500">Custom:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={advancePercentage}
+                      onChange={(e) =>
+                        setAdvancePercentage(
+                          Math.min(100, Math.max(0, parseInt(e.target.value) || 0))
+                        )
+                      }
+                      className="w-16 h-8 text-center text-xs font-semibold border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs text-slate-500">%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Accepted Payment Methods
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {['Bank Transfer', 'Online / Card', 'Cheque', 'Cash'].map((m) => {
+                    const isSelected = acceptedPaymentMethods.includes(m);
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            if (acceptedPaymentMethods.length > 1) {
+                              setAcceptedPaymentMethods(
+                                acceptedPaymentMethods.filter((x) => x !== m)
+                              );
+                            }
+                          } else {
+                            setAcceptedPaymentMethods([...acceptedPaymentMethods, m]);
+                          }
+                        }}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                          isSelected
+                            ? 'border-emerald-600 bg-emerald-50 text-emerald-700 shadow-2xs'
+                            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}
+                        {m}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <Textarea
+                label="Payment Instructions & Remittance Advice"
+                value={paymentTermsInstructions}
+                onChange={(e) => setPaymentTermsInstructions(e.target.value)}
+                rows={2}
+                placeholder="Bank account details, wire instructions or payment notes for client..."
+              />
+            </div>
+          </div>
+
+          {/* Step 6: Document Attachments */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
               <Paperclip className="h-3.5 w-3.5 text-indigo-500" />
-              <span>5. Quotation Attachments & Documents</span>
+              <span>6. Quotation Attachments & Documents</span>
             </h3>
             <p className="text-xs text-slate-400">
               Upload project specifications, reference images, drawings, or contract PDFs for your customer to review.
@@ -1016,6 +1131,27 @@ export function QuotationBuilder({
                   {formatCurrency(calculated.grand_total, currency)}
                 </span>
               </div>
+            </div>
+
+            {/* Payment Terms Preview */}
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center text-slate-800 font-bold">
+                <span className="flex items-center gap-1.5">
+                  <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Payment Terms</span>
+                </span>
+                <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded-md font-semibold text-[11px]">
+                  {advancePercentage}% Advance
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                <span className="font-medium text-slate-600">Accepted:</span> {acceptedPaymentMethods.join(', ')}
+              </p>
+              {paymentTermsInstructions && (
+                <p className="text-[11px] text-slate-600 italic pt-0.5 leading-relaxed">
+                  {paymentTermsInstructions}
+                </p>
+              )}
             </div>
 
             {/* Attachments Preview */}

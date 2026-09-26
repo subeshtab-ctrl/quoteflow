@@ -115,7 +115,8 @@ export function InvoiceModal({
               if (match.due_date) setDueDate(match.due_date.split('T')[0]);
               if (match.po_number) setPoNumber(match.po_number);
               if (match.payment_terms) setPaymentTerms(match.payment_terms);
-              if (match.notes) setFooterNotes(match.notes);
+              if (match.notes) setInvoiceNotes(match.notes);
+              if (match.terms_conditions) setInvoiceTerms(match.terms_conditions);
               if (match.items && match.items.length > 0) {
                 setItems(
                   match.items.map((it: any, idx: number) => ({
@@ -152,14 +153,18 @@ export function InvoiceModal({
       .join(', ')
   );
 
-  // Bank & Remittance
-  const [bankName, setBankName] = useState('HDFC Bank / Axis Bank');
-  const [accountName, setAccountName] = useState(organization?.name || 'QuoteFlow');
-  const [accountNumber, setAccountNumber] = useState('50200012345678');
-  const [ifscCode, setIfscCode] = useState('HDFC0001234');
-  const orgCompName = organization?.name || 'our company';
-  const defaultCleanFooter = (organization?.invoice_footer || `Thank you for partnering with ${orgCompName}.`).replace(/The Mining Future/gi, orgCompName);
-  const [footerNotes, setFooterNotes] = useState(defaultCleanFooter);
+  // Invoice Notes & Terms (Replacing Bank Remittance and Quotation Terms)
+  const defaultInvoiceNotes =
+    'Thank you for your business. Please remit payment according to the agreed terms.';
+  const defaultInvoiceTerms = [
+    '1. Payment is due within agreed terms from the date of invoice.',
+    '2. Please quote the invoice number when making remittance.',
+    '3. Overdue payments may be subject to interest as permitted by applicable law.',
+    '4. Goods/services provided in accordance with approved scope are non-refundable.',
+  ].join('\n');
+
+  const [invoiceNotes, setInvoiceNotes] = useState(defaultInvoiceNotes);
+  const [invoiceTerms, setInvoiceTerms] = useState(defaultInvoiceTerms);
 
   // Line Items
   const [items, setItems] = useState<InvoiceItem[]>(() =>
@@ -202,8 +207,7 @@ export function InvoiceModal({
           .filter(Boolean)
           .join(', ')
       );
-      setAccountName(organization?.name || 'QuoteFlow');
-      setFooterNotes(organization?.invoice_footer || 'Thank you for your business!');
+      setInvoiceNotes(organization?.invoice_footer || defaultInvoiceNotes);
       setItems(
         (quotation.items || []).map((item, idx) => ({
           id: item.id || `item_${idx}_${Date.now()}`,
@@ -314,11 +318,8 @@ export function InvoiceModal({
         .filter(Boolean)
         .join(', ')
     );
-    setBankName('HDFC Bank / Axis Bank');
-    setAccountName(organization?.name || 'QuoteFlow');
-    setAccountNumber('50200012345678');
-    setIfscCode('HDFC0001234');
-    setFooterNotes(organization?.invoice_footer || 'Thank you for your business!');
+    setInvoiceNotes(defaultInvoiceNotes);
+    setInvoiceTerms(defaultInvoiceTerms);
     setItems(
       (quotation.items || []).map((item, idx) => ({
         id: item.id || `item_${idx}_${Date.now()}`,
@@ -356,7 +357,8 @@ export function InvoiceModal({
         due_date: dueDate,
         currency: currency,
         payment_terms: paymentTerms,
-        notes: footerNotes,
+        notes: invoiceNotes,
+        terms_conditions: invoiceTerms,
         discount_type: discountType,
         discount_value: discountValue,
         items: items.map((it, idx) => ({
@@ -868,44 +870,25 @@ export function InvoiceModal({
               </div>
             </div>
 
-            {/* Section 4: Bank Details & Footer Notes */}
+            {/* Section 4: Invoice Notes & Terms and Conditions */}
             <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
               <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                <CreditCard className="h-4 w-4 text-indigo-600" />
-                <span>Bank Remittance Details & Invoice Notes</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Input
-                  label="Bank Name"
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  placeholder="e.g. HDFC Bank"
-                />
-                <Input
-                  label="Account Holder Name"
-                  value={accountName}
-                  onChange={(e) => setAccountName(e.target.value)}
-                  placeholder="e.g. QuoteFlow Technologies Pvt Ltd"
-                />
-                <Input
-                  label="Account Number"
-                  value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value)}
-                  placeholder="e.g. 50200012345678"
-                />
-                <Input
-                  label="IFSC / SWIFT Code"
-                  value={ifscCode}
-                  onChange={(e) => setIfscCode(e.target.value)}
-                  placeholder="e.g. HDFC0001234"
-                />
+                <FileText className="h-4 w-4 text-indigo-600" />
+                <span>Invoice Notes & Terms and Conditions</span>
               </div>
               <Textarea
                 label="Invoice Notes & Payment Instructions"
-                value={footerNotes}
-                onChange={(e) => setFooterNotes(e.target.value)}
+                value={invoiceNotes}
+                onChange={(e) => setInvoiceNotes(e.target.value)}
                 rows={2}
-                placeholder="Payment instructions, thank you note, or terms..."
+                placeholder="Payment instructions, remittance advice or thank you note..."
+              />
+              <Textarea
+                label="Invoice Terms & Conditions"
+                value={invoiceTerms}
+                onChange={(e) => setInvoiceTerms(e.target.value)}
+                rows={4}
+                placeholder="Invoice terms and conditions..."
               />
             </div>
 
@@ -1117,18 +1100,31 @@ export function InvoiceModal({
               </table>
             </div>
 
-            {/* Totals Breakdown & Bank Details */}
+            {/* Totals Breakdown & Terms/Payment Details */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2">
-              <div className="w-full sm:w-1/2 space-y-2 text-xs">
-                <span className="font-bold text-slate-700">Bank / Remittance Details:</span>
-                <div className="rounded-lg bg-slate-50 p-3 border border-slate-200 text-slate-600 space-y-1 font-mono text-[11px]">
-                  <p>Bank: {bankName}</p>
-                  <p>Account Name: {accountName}</p>
-                  <p>Account Number: {accountNumber}</p>
-                  <p>IFSC / SWIFT: {ifscCode}</p>
-                </div>
-                {footerNotes && (
-                  <p className="text-[11px] text-slate-500 italic pt-1">{footerNotes}</p>
+              <div className="w-full sm:w-1/2 space-y-3 text-xs">
+                {invoiceNotes && (
+                  <div>
+                    <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
+                      Notes:
+                    </span>
+                    <p className="text-slate-600 mt-0.5 leading-relaxed">{invoiceNotes}</p>
+                  </div>
+                )}
+                {invoiceTerms && (
+                  <div>
+                    <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
+                      Terms & Conditions:
+                    </span>
+                    <p className="text-slate-500 mt-0.5 whitespace-pre-line leading-relaxed text-[11px]">
+                      {invoiceTerms}
+                    </p>
+                  </div>
+                )}
+                {(quotation.payment_method || quotation.payment_notes) && (
+                  <p className="text-[11px] text-slate-500 italic font-serif pt-1">
+                    Mode of Payment: {quotation.payment_method?.replace(/_/g, ' ') || 'Bank Transfer'}{quotation.payment_notes ? ` • Ref/Txn No: ${quotation.payment_notes}` : ''}
+                  </p>
                 )}
               </div>
 
@@ -1179,6 +1175,11 @@ export function InvoiceModal({
                       {formatCurrency(quotation.balance_amount || 0, currency)}
                     </span>
                   </div>
+                )}
+                {(quotation.payment_method || quotation.payment_notes) && (
+                  <p className="text-[11px] text-slate-500 italic text-right mt-1 font-serif">
+                    Mode of Payment: {quotation.payment_method?.replace(/_/g, ' ') || 'Bank Transfer'}{quotation.payment_notes ? ` • Ref/Txn No: ${quotation.payment_notes}` : ''}
+                  </p>
                 )}
               </div>
             </div>

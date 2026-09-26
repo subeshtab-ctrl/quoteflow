@@ -257,6 +257,8 @@ export interface Quotation {
   payment_confirmed_by_company?: boolean;
   payment_confirmed_at?: string | null;
   payment_confirmed_by?: string | null;
+  payment_terms_instructions?: string | null;
+  accepted_payment_methods?: string[] | null;
 
   // Chat Tracking
   has_unread_chat?: boolean;
@@ -376,6 +378,16 @@ export interface PortalPinRegistration {
   updated_at?: string;
 }
 
+export interface ChatAttachment {
+  name: string;
+  url: string;
+  type: string;
+  size: number;
+  is_payment_proof?: boolean;
+  deleted_at?: string | null;
+  deleted_reason?: string | null;
+}
+
 export interface QuotationChatMessage {
   id: string;
   quotation_id: string;
@@ -385,6 +397,7 @@ export interface QuotationChatMessage {
   message: string;
   created_at: string;
   is_read?: boolean;
+  attachment?: ChatAttachment | null;
 }
 
 export interface Notification {

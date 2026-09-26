@@ -609,7 +609,7 @@ export function SettingsClientView({
                         {org.name || 'Company Name'}
                       </h4>
                       <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none mt-0.5">
-                        Quotation Workspace
+                        Workspace
                       </p>
                     </div>
                   </div>

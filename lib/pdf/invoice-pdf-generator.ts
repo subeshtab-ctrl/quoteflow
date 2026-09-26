@@ -18,33 +18,65 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
 
-  const org = invoice.organization || {
-    name: 'QuoteFlow Technologies',
-    email: 'billing@quoteflow.app',
-    phone: '+91 98765 43210',
-    address_line1: 'Corporate Business Center',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    postal_code: '560038',
-    country: 'India',
-    gst_vat_number: '29ABCDE1234F1Z5',
-    brand_color: '#4f46e5',
-    invoice_footer: 'Thank you for your business!',
-    logo_url: null,
-  };
+  let org: any = invoice.organization;
+  if (!org || !org.name || org.name === 'QuoteFlow Technologies') {
+    try {
+      const { getDataStore } = await import('@/lib/supabase/data-store');
+      const store = getDataStore();
+      const dbOrg = await store.getOrganization(invoice.organization_id);
+      if (dbOrg) {
+        org = dbOrg;
+      }
+    } catch {
+      // fallback
+    }
+  }
 
-  const customer = invoice.customer || {
-    name: 'Valued Client',
-    company_name: '',
-    email: 'client@example.com',
-    phone: '',
-    billing_address: '',
-    city: '',
-    state: '',
-    country: '',
-    postal_code: '',
-    tax_number: '',
-  };
+  if (!org) {
+    org = {
+      name: 'QuoteFlow Technologies',
+      email: 'billing@quoteflow.app',
+      phone: '+91 98765 43210',
+      address_line1: 'Corporate Business Center',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      postal_code: '560038',
+      country: 'India',
+      gst_vat_number: '29ABCDE1234F1Z5',
+      brand_color: '#4f46e5',
+      invoice_footer: 'Thank you for your business!',
+      logo_url: null,
+    };
+  }
+
+  let customer: any = invoice.customer;
+  if (!customer || !customer.name || customer.name === 'Valued Client') {
+    try {
+      const { getDataStore } = await import('@/lib/supabase/data-store');
+      const store = getDataStore();
+      const dbCustomer = await store.getCustomer(invoice.customer_id);
+      if (dbCustomer) {
+        customer = dbCustomer;
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  if (!customer) {
+    customer = {
+      name: 'Valued Client',
+      company_name: '',
+      email: 'client@example.com',
+      phone: '',
+      billing_address: '',
+      city: '',
+      state: '',
+      country: '',
+      postal_code: '',
+      tax_number: '',
+    };
+  }
 
   const currency = invoice.currency || 'INR';
   const grandTotal = Number(invoice.grand_total) || 0;
@@ -71,10 +103,10 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
       const logoPath = path.join(process.cwd(), 'public', cleanUrl);
       if (fs.existsSync(logoPath)) {
         const imgBuffer = fs.readFileSync(logoPath);
-        const ext = logoPath.endsWith('.png') ? 'PNG' : 'JPEG';
+        const ext = (logoPath.toLowerCase().endsWith('.png') ? 'PNG' : 'JPEG') as 'PNG' | 'JPEG';
         const base64Img = `data:image/${ext.toLowerCase()};base64,${imgBuffer.toString('base64')}`;
-        doc.addImage(base64Img, ext, margin, compY - 4, 28, 12);
-        compY += 14;
+        doc.addImage(base64Img, ext, margin, compY - 4, 30, 14);
+        compY += 16;
       }
     } catch {
       // Graceful fallback to text header
@@ -92,9 +124,9 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.setTextColor(100, 116, 139);
   const compLines: string[] = [
     org.address_line1 || '',
-    `${org.city || ''} ${org.state || ''} ${org.postal_code || ''} ${org.country || ''}`.trim(),
+    [org.city, org.state, org.postal_code].filter(Boolean).join(' ') + (org.country ? `, ${org.country}` : ''),
     `Email: ${org.email} | Phone: ${org.phone || 'N/A'}`,
-    org.gst_vat_number ? `GSTIN / Tax ID: ${org.gst_vat_number}` : '',
+    org.gst_vat_number ? `Tax / VAT / GST: ${org.gst_vat_number}` : '',
   ].filter(Boolean) as string[];
 
   compLines.forEach((line) => {
@@ -325,55 +357,92 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.text(formatCurrency(balanceAmount, currency), totalsBoxX + totalsBoxWidth - 5, totY + 3, { align: 'right' });
   }
 
-  // Bank & Remittance Box (Left)
-  const bankBoxWidth = 85;
+  // Left Box: Payment Terms & Instructions (replacing hardcoded bank remittance box)
+  const leftBoxWidth = 85;
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(margin, finalTableY, bankBoxWidth, 48, 3, 3, 'FD');
+  doc.roundedRect(margin, finalTableY, leftBoxWidth, 48, 3, 3, 'FD');
 
-  let bankY = finalTableY + 6;
+  let leftY = finalTableY + 6;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(30, 41, 59);
-  doc.text('BANK & REMITTANCE DETAILS:', margin + 5, bankY);
+  doc.text('PAYMENT TERMS & INSTRUCTIONS:', margin + 5, leftY);
 
-  bankY += 5;
+  leftY += 5;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  const bankDetails = [
-    ['Bank Name:', 'HDFC Bank / Axis Bank'],
-    ['Account Name:', org.name || 'QuoteFlow Technologies'],
-    ['Account Number:', '50200012345678'],
-    ['IFSC / SWIFT:', 'HDFC0001234'],
-    ['Payment Terms:', invoice.payment_terms || 'Net 30 Days'],
+  const payTerms = [
+    ['Payment Due:', invoice.payment_terms || 'Net 30 Days'],
+    ['Due Date:', dueDateFormatted],
   ];
 
-  bankDetails.forEach(([bLabel, bVal]) => {
-    doc.text(bLabel, margin + 5, bankY);
+  payTerms.forEach(([pLabel, pVal]) => {
+    doc.text(pLabel, margin + 5, leftY);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
-    doc.text(bVal, margin + 32, bankY);
+    doc.text(pVal, margin + 28, leftY);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    bankY += 4.5;
+    leftY += 4.5;
   });
 
-  // 8. Notes & Terms
-  let notesY = finalTableY + 54;
-  if (invoice.notes) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.setTextColor(71, 85, 105);
-    doc.text('NOTES & PAYMENT INSTRUCTIONS:', margin, notesY);
-    notesY += 4;
-    doc.setFont('helvetica', 'normal');
+  // Display mode of payment & transaction number in small italic format
+  if (invoice.payment_method || invoice.payment_notes) {
+    leftY += 1.5;
+    doc.setFont('helvetica', 'italic');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    const splitNotes = doc.splitTextToSize(invoice.notes, pageWidth - margin * 2);
-    doc.text(splitNotes, margin, notesY);
-    notesY += splitNotes.length * 3.5 + 2;
+    const methodStr = invoice.payment_method ? invoice.payment_method.replace(/_/g, ' ') : 'Bank Transfer';
+    const txnStr = invoice.payment_notes ? ` • Ref/Txn No: ${invoice.payment_notes}` : '';
+    const paymentModeText = `Mode of Payment: ${methodStr}${txnStr}`;
+    const splitPayMode = doc.splitTextToSize(paymentModeText, leftBoxWidth - 10);
+    doc.text(splitPayMode, margin + 5, leftY);
+    leftY += splitPayMode.length * 3.5;
   }
+
+  // Invoice notes (clean, not quotation notes)
+  const resolvedNotes =
+    invoice.notes && !invoice.notes.includes('Payment within 30 days of completion')
+      ? invoice.notes
+      : 'Thank you for your business. Please remit payment according to the agreed terms.';
+
+  if (resolvedNotes) {
+    leftY += 1;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    const splitNotes = doc.splitTextToSize(resolvedNotes, leftBoxWidth - 10);
+    doc.text(splitNotes.slice(0, 2), margin + 5, leftY);
+  }
+
+  // 8. Terms & Conditions
+  let termsY = finalTableY + 54;
+  let invTerms = invoice.terms_conditions;
+  if (
+    !invTerms ||
+    invTerms.includes('Quotation valid for 30 days') ||
+    invTerms.includes('50% advance required')
+  ) {
+    invTerms = [
+      '1. Payment is due within agreed terms from the date of invoice.',
+      '2. Please quote the invoice number when making remittance.',
+      '3. Overdue payments may be subject to interest as permitted by applicable law.',
+      '4. Goods/services provided in accordance with approved scope are non-refundable.',
+    ].join('\n');
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text('TERMS & CONDITIONS:', margin, termsY);
+  termsY += 4;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  const splitTerms = doc.splitTextToSize(invTerms, pageWidth - margin * 2);
+  doc.text(splitTerms, margin, termsY);
 
   // 9. Footer
   const footerY = pageHeight - 12;

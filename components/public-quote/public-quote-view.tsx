@@ -23,6 +23,7 @@ import {
   Paperclip,
   FileText,
   Lock,
+  CreditCard,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -66,6 +67,14 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   // Customer Chat Popup state
   const [chatMessages, setChatMessages] = useState<QuotationChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [chatAttachment, setChatAttachment] = useState<{
+    name: string;
+    url: string;
+    type: string;
+    size: number;
+    is_payment_proof?: boolean;
+  } | null>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [senderName, setSenderName] = useState(
     initialQuotation.customer?.name || initialQuotation.customer?.company_name || ''
   );
@@ -74,6 +83,33 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const isChatPopupOpenRef = useRef<boolean>(false);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const prevChatCountRef = useRef<number>(0);
+
+  const handleChatFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB limit.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const isImg = file.type.startsWith('image/');
+      setChatAttachment({
+        name: file.name,
+        url: dataUrl,
+        type: file.type || 'application/octet-stream',
+        size: file.size,
+        is_payment_proof:
+          isImg ||
+          file.name.toLowerCase().includes('payment') ||
+          file.name.toLowerCase().includes('receipt') ||
+          file.name.toLowerCase().includes('screenshot'),
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const unreadStaffCount = chatMessages.filter(
     (m) => m.sender_role === 'STAFF' && !m.is_read
@@ -220,7 +256,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || isSendingChat) return;
+    if ((!chatInput.trim() && !chatAttachment) || isSendingChat) return;
     try {
       setIsSendingChat(true);
       const res = await fetch('/api/public/chat', {
@@ -230,11 +266,13 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           token: currentToken,
           sender_name: senderName || customer?.name || 'Customer',
           message: chatInput.trim(),
+          attachment: chatAttachment,
         }),
       });
       if (res.ok) {
         const data = await res.json();
         setChatInput('');
+        setChatAttachment(null);
         if (Array.isArray(data.messages)) {
           prevChatCountRef.current = data.messages.length;
           setChatMessages(data.messages);
@@ -892,6 +930,34 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   </p>
                 </div>
               )}
+
+              {(quotation.payment_terms_instructions ||
+                (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
+                (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0)) && (
+                <div className="rounded-xl bg-slate-50 p-4 border border-slate-100 space-y-2">
+                  <div className="flex justify-between items-center text-slate-800 font-bold">
+                    <span className="flex items-center gap-1.5 text-xs">
+                      <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Payment Terms & Instructions</span>
+                    </span>
+                    {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
+                      <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded text-[11px] font-semibold">
+                        {quotation.advance_percentage}% Advance Required
+                      </span>
+                    )}
+                  </div>
+                  {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
+                    <p className="text-[11px] text-slate-600">
+                      <strong className="text-slate-700">Accepted Methods:</strong> {quotation.accepted_payment_methods.join(', ')}
+                    </p>
+                  )}
+                  {quotation.payment_terms_instructions && (
+                    <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed">
+                      {quotation.payment_terms_instructions}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="w-full sm:w-5/12 space-y-2.5 rounded-xl bg-slate-50/70 p-5 border border-slate-200">
@@ -1273,7 +1339,54 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                             : 'bg-white text-slate-800 border border-emerald-200 rounded-bl-xs'
                         }`}
                       >
-                        <div>{msg.message}</div>
+                        {msg.message && <div>{msg.message}</div>}
+                        {msg.attachment && (
+                          <div className={`mt-2 pt-2 border-t ${isCustomer ? 'border-white/20' : 'border-slate-200'}`}>
+                            {msg.attachment.deleted_at ? (
+                              <div
+                                className={`flex items-start gap-1.5 p-2 rounded-lg text-[10px] leading-snug ${
+                                  isCustomer
+                                    ? 'bg-white/10 text-amber-300'
+                                    : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                }`}
+                              >
+                                <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                <span>
+                                  {msg.attachment.deleted_reason ||
+                                    'Payment screenshot automatically deleted after company payment confirmation.'}
+                                </span>
+                              </div>
+                            ) : msg.attachment.url ? (
+                              <div className="space-y-1">
+                                {msg.attachment.is_payment_proof && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                                    <ShieldCheck className="h-3 w-3" />
+                                    Payment Screenshot
+                                  </span>
+                                )}
+                                <a
+                                  href={msg.attachment.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block overflow-hidden rounded-lg border border-white/20 hover:opacity-90 transition-opacity"
+                                >
+                                  {msg.attachment.type?.startsWith('image/') || msg.attachment.url.startsWith('data:image/') ? (
+                                    <img
+                                      src={msg.attachment.url}
+                                      alt={msg.attachment.name || 'Payment screenshot'}
+                                      className="max-h-36 max-w-full rounded object-contain bg-black/20"
+                                    />
+                                  ) : (
+                                    <div className="flex items-center gap-1.5 p-2 bg-white/10 text-[11px] rounded">
+                                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                                      <span className="truncate">{msg.attachment.name}</span>
+                                    </div>
+                                  )}
+                                </a>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
                         {isCustomer && (
                           <div
                             className="mt-1 flex items-center justify-end gap-1"
@@ -1303,18 +1416,58 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
             <form onSubmit={handleSendChat} className="space-y-2">
               <input
+                type="file"
+                ref={chatFileInputRef}
+                onChange={handleChatFileSelect}
+                accept="image/*,.pdf"
+                className="hidden"
+              />
+
+              <input
                 type="text"
                 value={senderName}
                 onChange={(e) => setSenderName(e.target.value)}
                 placeholder="Your Name"
                 className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
               />
+
+              {chatAttachment && (
+                <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg text-xs text-indigo-900">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Paperclip className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate text-[11px] font-medium">{chatAttachment.name}</span>
+                    <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded shrink-0">
+                      Payment Proof
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChatAttachment(null);
+                      if (chatFileInputRef.current) chatFileInputRef.current.value = '';
+                    }}
+                    className="text-slate-400 hover:text-rose-500 transition-colors p-0.5 shrink-0"
+                    title="Remove attachment"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => chatFileInputRef.current?.click()}
+                  title="Attach payment screenshot or proof"
+                  className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors border border-slate-200 shrink-0"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                </button>
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Type a message..."
+                  placeholder={chatAttachment ? 'Add a note / message...' : 'Type a message...'}
                   className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
                 />
                 <Button
@@ -1322,7 +1475,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   variant="primary"
                   size="sm"
                   isLoading={isSendingChat}
-                  disabled={!chatInput.trim() || isSendingChat}
+                  disabled={(!chatInput.trim() && !chatAttachment) || isSendingChat}
                   className="px-3 py-2"
                 >
                   <Send className="h-3.5 w-3.5" />

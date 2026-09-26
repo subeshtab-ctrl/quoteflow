@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { QuotationChatMessage } from '@/types/database';
 import { formatDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { MessageSquare, Send, CheckCheck } from 'lucide-react';
+import { MessageSquare, Send, CheckCheck, ShieldCheck, Lock, FileText, Download, Paperclip } from 'lucide-react';
 
 interface QuotationChatPanelProps {
   quotationId: string;
@@ -159,6 +159,52 @@ export function QuotationChatPanel({
                     }`}
                   >
                     <div>{msg.message}</div>
+                    {msg.attachment && (
+                      <div className={`mt-2 pt-2 border-t ${isStaff ? 'border-white/20' : 'border-slate-200'}`}>
+                        {msg.attachment.deleted_at ? (
+                          <div
+                            className={`flex items-start gap-1.5 p-2 rounded-lg text-[10px] leading-snug ${
+                              isStaff
+                                ? 'bg-white/10 text-amber-300'
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                            }`}
+                          >
+                            <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                            <span>
+                              {msg.attachment.deleted_reason ||
+                                'Payment screenshot automatically deleted after company verification.'}
+                            </span>
+                          </div>
+                        ) : msg.attachment.url ? (
+                          <div className="space-y-1.5">
+                            {msg.attachment.is_payment_proof && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <ShieldCheck className="h-3 w-3 text-emerald-600" /> Payment Screenshot
+                              </span>
+                            )}
+                            <a
+                              href={msg.attachment.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block overflow-hidden rounded-lg border border-slate-200 hover:opacity-90 transition-opacity"
+                            >
+                              {msg.attachment.type?.startsWith('image/') || msg.attachment.url.startsWith('data:image/') ? (
+                                <img
+                                  src={msg.attachment.url}
+                                  alt={msg.attachment.name || 'Payment screenshot'}
+                                  className="max-h-48 max-w-full rounded object-contain bg-slate-100"
+                                />
+                              ) : (
+                                <div className="flex items-center gap-2 p-2 bg-slate-100 text-xs text-slate-800 rounded">
+                                  <FileText className="h-4 w-4 text-indigo-600" />
+                                  <span className="truncate font-medium">{msg.attachment.name}</span>
+                                </div>
+                              )}
+                            </a>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                     {isStaff && (
                       <div
                         className="mt-1 flex items-center justify-end gap-1"

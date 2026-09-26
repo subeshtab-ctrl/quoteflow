@@ -34,10 +34,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token, sender_name, message } = body;
+    const { token, sender_name, message, attachment } = body;
 
-    if (!token || !message || !String(message).trim()) {
-      return NextResponse.json({ error: 'Token and message are required' }, { status: 400 });
+    const trimmedMsg = String(message || '').trim();
+    if (!token || (!trimmedMsg && !attachment)) {
+      return NextResponse.json({ error: 'Token and message or attachment are required' }, { status: 400 });
     }
 
     const quotation = await store.getQuotationByPublicToken(token);
@@ -56,7 +57,8 @@ export async function POST(request: NextRequest) {
       organizationId: quotation.organization_id,
       senderRole: 'CUSTOMER',
       senderName,
-      message: String(message).trim(),
+      message: trimmedMsg || (attachment ? `Attached: ${attachment.name}` : ''),
+      attachment: attachment || null,
     });
 
     await store.markCustomerChatRead(quotation.id, quotation.organization_id, senderName);

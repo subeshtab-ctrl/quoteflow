@@ -27,6 +27,7 @@ import {
   History,
   Paperclip,
   FileText,
+  CreditCard,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -404,6 +405,33 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                     <p className="text-slate-500 whitespace-pre-line leading-relaxed">
                       {quotation.terms_conditions}
                     </p>
+                  </div>
+                )}
+                {(quotation.payment_terms_instructions ||
+                  (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
+                  (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0)) && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2 mt-2">
+                    <div className="flex justify-between items-center text-slate-800 font-bold">
+                      <span className="flex items-center gap-1.5 text-xs">
+                        <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
+                        <span>Payment Terms & Instructions</span>
+                      </span>
+                      {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
+                        <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded text-[11px] font-semibold">
+                          {quotation.advance_percentage}% Advance
+                        </span>
+                      )}
+                    </div>
+                    {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
+                      <p className="text-[11px] text-slate-600">
+                        <strong className="text-slate-700">Accepted:</strong> {quotation.accepted_payment_methods.join(', ')}
+                      </p>
+                    )}
+                    {quotation.payment_terms_instructions && (
+                      <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed">
+                        {quotation.payment_terms_instructions}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
