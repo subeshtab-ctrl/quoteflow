@@ -50,21 +50,33 @@ class QuoteFlowStore {
     return path.join(dir, 'org-settings.json');
   }
 
-  private loadOrgSettingsFromFile(): Record<string, Partial<Organization>> {
+  private loadOrgSettingsFromFile(): Record<string, { require_full_payment_for_invoice?: boolean }> {
     try {
       const p = this.getOrgSettingsFilePath();
       if (fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || {};
+        const parsed = JSON.parse(raw) || {};
+        const result: Record<string, { require_full_payment_for_invoice?: boolean }> = {};
+        for (const [key, val] of Object.entries(parsed)) {
+          if (val && typeof val === 'object' && 'require_full_payment_for_invoice' in val) {
+            result[key] = {
+              require_full_payment_for_invoice: Boolean((val as any).require_full_payment_for_invoice),
+            };
+          }
+        }
+        return result;
       }
     } catch {}
     return {};
   }
 
   private saveOrgSettingsToFile(orgId: string, data: Partial<Organization>): void {
+    if (data.require_full_payment_for_invoice === undefined) return;
     try {
       const all = this.loadOrgSettingsFromFile();
-      all[orgId] = { ...(all[orgId] || {}), ...data };
+      all[orgId] = {
+        require_full_payment_for_invoice: Boolean(data.require_full_payment_for_invoice),
+      };
       fs.writeFileSync(this.getOrgSettingsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
     } catch {}
   }
@@ -255,20 +267,30 @@ class QuoteFlowStore {
       // Set baseline organization fallback in case remote DB is temporarily unreachable
       this.organizations.set(DEFAULT_ORG_ID, {
         id: DEFAULT_ORG_ID,
-        name: 'My Company',
-        slug: 'my-company',
+        name: 'SUBESH M LLC',
+        slug: 'subesh-m-llc',
         business_type: 'Services & Products',
-        email: 'contact@example.com',
+        email: 'subeshtab@gmail.com',
+        phone: '+91 99999 88888',
+        website: '',
+        gst_vat_number: '',
+        address_line1: 'Business Center',
+        address_line2: null,
+        city: 'Metropolis',
+        state: 'State',
+        country: 'United Arab Emirates',
+        postal_code: '10001',
         brand_color: '#4f46e5',
-        default_currency: 'INR',
-        default_tax_rate: 18,
+        default_currency: 'AED',
+        default_tax_rate: 5,
         default_validity_days: 30,
         quotation_prefix: 'Q-',
         quotation_start_number: 1,
-        current_quotation_counter: 0,
-        default_terms: '1. Quotation valid for 30 days.\n2. Payment terms as agreed.',
+        current_quotation_counter: 19,
+        default_terms: '1. Quotation valid for 30 days.\n2. 50% advance required to commence work.\n3. Taxes applicable as per local regulations.',
         invoice_footer: 'Thank you for your business!',
-        logo_url: null,
+        logo_url: '/uploads/logo-1790062784938.jpg',
+        require_full_payment_for_invoice: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -279,28 +301,30 @@ class QuoteFlowStore {
     // 1. Organization
     const demoOrg: Organization = {
       id: DEFAULT_ORG_ID,
-      name: 'My Company',
-      logo_url: null,
-      slug: 'my-company',
+      name: 'SUBESH M LLC',
+      logo_url: '/uploads/logo-1790062784938.jpg',
+      slug: 'subesh-m-llc',
       business_type: 'Services & Products',
-      email: 'contact@mycompany.com',
-      phone: '+1 234 567 8900',
+      email: 'subeshtab@gmail.com',
+      phone: '+91 99999 88888',
       website: '',
       gst_vat_number: '',
       address_line1: 'Business Center',
+      address_line2: null,
       city: 'Metropolis',
       state: 'State',
-      country: 'USA',
+      country: 'United Arab Emirates',
       postal_code: '10001',
       brand_color: '#4f46e5',
-      default_currency: 'USD',
-      default_tax_rate: 0,
+      default_currency: 'AED',
+      default_tax_rate: 5,
       default_validity_days: 30,
       quotation_prefix: 'Q-',
       quotation_start_number: 1,
-      current_quotation_counter: 4,
+      current_quotation_counter: 19,
       default_terms: '1. Quotation valid for 30 days.\n2. 50% advance required to commence work.\n3. Taxes applicable as per local regulations.',
       invoice_footer: 'Thank you for your business!',
+      require_full_payment_for_invoice: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -846,7 +870,13 @@ class QuoteFlowStore {
             data.invoice_footer = `Thank you for partnering with ${compName}.`;
           }
           const localSettings = this.loadOrgSettingsFromFile()[data.id] || {};
-          const fullOrg = { ...data, ...localSettings } as Organization;
+          const fullOrg = {
+            ...data,
+            require_full_payment_for_invoice:
+              localSettings.require_full_payment_for_invoice !== undefined
+                ? localSettings.require_full_payment_for_invoice
+                : ((data as any).require_full_payment_for_invoice ?? true),
+          } as Organization;
           this.organizations.set(data.id, fullOrg);
           return fullOrg;
         }
@@ -861,7 +891,13 @@ class QuoteFlowStore {
         cached.invoice_footer = `Thank you for partnering with ${compName}.`;
       }
       const localSettings = this.loadOrgSettingsFromFile()[orgId] || {};
-      return { ...cached, ...localSettings } as Organization;
+      return {
+        ...cached,
+        require_full_payment_for_invoice:
+          localSettings.require_full_payment_for_invoice !== undefined
+            ? localSettings.require_full_payment_for_invoice
+            : ((cached as any).require_full_payment_for_invoice ?? true),
+      } as Organization;
     }
     return null;
   }
@@ -896,9 +932,8 @@ class QuoteFlowStore {
       const supabase = createAdminClient();
       if (supabase) {
         const dbPayload: Record<string, any> = {
-          id: orgId,
           name: updated.name,
-          slug: updated.slug,
+          slug: updated.slug || 'my-company',
           business_type: updated.business_type,
           email: updated.email,
           phone: updated.phone,
@@ -923,17 +958,37 @@ class QuoteFlowStore {
           updated_at: new Date().toISOString(),
         };
 
-        const { data: saved, error } = await supabase
+        let { data: saved, error } = await supabase
           .from('organizations')
-          .upsert(dbPayload)
+          .update(dbPayload)
+          .eq('id', orgId)
           .select()
           .maybeSingle();
+
+        if (!saved && !error) {
+          const insertPayload = { ...dbPayload, id: orgId };
+          const insertRes = await supabase
+            .from('organizations')
+            .insert(insertPayload)
+            .select()
+            .maybeSingle();
+          saved = insertRes.data;
+          error = insertRes.error;
+        }
 
         if (error) {
           console.error('Supabase organization update error:', error);
         } else if (saved) {
-          this.organizations.set(orgId, saved as Organization);
-          return saved as Organization;
+          const localSettings = this.loadOrgSettingsFromFile()[orgId] || {};
+          const fullSaved = {
+            ...saved,
+            require_full_payment_for_invoice:
+              localSettings.require_full_payment_for_invoice !== undefined
+                ? localSettings.require_full_payment_for_invoice
+                : ((saved as any).require_full_payment_for_invoice ?? true),
+          } as Organization;
+          this.organizations.set(orgId, fullSaved);
+          return fullSaved;
         }
       }
     } catch (err) {
