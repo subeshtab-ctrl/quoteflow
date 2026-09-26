@@ -21,6 +21,9 @@ import {
   Globe,
   Receipt,
   CreditCard,
+  Package,
+  Briefcase,
+  Copy,
 } from 'lucide-react';
 import { getCountryProfile, COUNTRIES, calculateItemTaxBreakdown } from '@/lib/tax/country-config';
 import { FileAttachmentsUploader } from '@/components/common/file-attachments-uploader';
@@ -205,14 +208,14 @@ export function InvoiceBuilder({
     }
   };
 
-  // Item Management
-  const addItem = () => {
+  // Item Management: Products & Services
+  const addProductItem = () => {
     setItems((prev) => [
       ...prev,
       {
         description: '',
         quantity: 1,
-        unit: 'unit',
+        unit: 'pcs',
         unit_price: 0,
         discount_type: 'PERCENTAGE',
         discount_value: 0,
@@ -222,6 +225,78 @@ export function InvoiceBuilder({
         classification_code: '',
       },
     ]);
+  };
+
+  const addServiceItem = () => {
+    setItems((prev) => [
+      ...prev,
+      {
+        description: '',
+        quantity: 1,
+        unit: 'service',
+        unit_price: 0,
+        discount_type: 'PERCENTAGE',
+        discount_value: 0,
+        tax_rate: organization.default_tax_rate ?? countryProfile.defaultTaxRate,
+        item_type: 'SERVICE',
+        classification_type: countryProfile.isIndiaGst ? 'SAC' : (countryProfile.isUaeVat ? 'SERVICE_CATEGORY' : 'CUSTOM'),
+        classification_code: countryProfile.isIndiaGst ? '998311' : '',
+      },
+    ]);
+  };
+
+  const addItem = () => {
+    addProductItem();
+  };
+
+  const handleDuplicateItem = (index: number) => {
+    const itemToClone = items[index];
+    setItems((prev) => [
+      ...prev.slice(0, index + 1),
+      { ...itemToClone, id: undefined },
+      ...prev.slice(index + 1),
+    ]);
+  };
+
+  const handleSelectProduct = (index: number, productId: string) => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return;
+
+    const unitLower = (prod.unit || '').toLowerCase();
+    const nameLower = prod.name.toLowerCase();
+    const isService =
+      unitLower === 'service' ||
+      unitLower === 'hrs' ||
+      unitLower === 'hour' ||
+      nameLower.includes('service') ||
+      nameLower.includes('consult') ||
+      nameLower.includes('amc') ||
+      nameLower.includes('maintenance') ||
+      nameLower.includes('support');
+
+    const itemType: 'GOODS' | 'SERVICE' = isService ? 'SERVICE' : 'GOODS';
+
+    setItems((prev) => {
+      const copy = [...prev];
+      copy[index] = {
+        ...copy[index],
+        product_id: prod.id,
+        description: prod.name + (prod.description ? ` - ${prod.description}` : ''),
+        unit: prod.unit || (isService ? 'service' : 'pcs'),
+        unit_price: prod.unit_price,
+        tax_rate: prod.tax_rate ?? (organization.default_tax_rate || countryProfile.defaultTaxRate),
+        item_type: itemType,
+        classification_type: countryProfile.isIndiaGst
+          ? isService
+            ? 'SAC'
+            : 'HSN'
+          : isService
+          ? 'SERVICE_CATEGORY'
+          : 'HS_CODE',
+        classification_code: countryProfile.isIndiaGst ? (isService ? '998311' : '') : '',
+      };
+      return copy;
+    });
   };
 
   const removeItem = (index: number) => {
@@ -235,12 +310,21 @@ export function InvoiceBuilder({
         if (i !== index) return item;
         const updated = { ...item, ...updates };
 
-        // When item_type toggles, automatically switch classification type
+        // When item_type toggles between Product and Service, adapt classification and unit
         if (updates.item_type && updates.item_type !== item.item_type) {
           if (countryProfile.isIndiaGst) {
             updated.classification_type = updates.item_type === 'GOODS' ? 'HSN' : 'SAC';
+            if (updates.item_type === 'SERVICE' && !updated.classification_code) {
+              updated.classification_code = '998311';
+            }
           } else if (countryProfile.isUaeVat) {
             updated.classification_type = updates.item_type === 'GOODS' ? 'HS_CODE' : 'SERVICE_CATEGORY';
+          }
+
+          if (updates.item_type === 'SERVICE' && (updated.unit === 'unit' || updated.unit === 'pcs')) {
+            updated.unit = 'service';
+          } else if (updates.item_type === 'GOODS' && (updated.unit === 'service' || updated.unit === 'hrs')) {
+            updated.unit = 'pcs';
           }
         }
 
@@ -649,111 +733,222 @@ export function InvoiceBuilder({
 
       {/* Invoice Line Items Card */}
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-              Invoice Line Items
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-indigo-600" />
+              <span>Invoice Products & Services</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Classified according to {countryProfile.goodsClassificationLabel} / {countryProfile.serviceClassificationLabel}.
+              Add Products (Goods) or Services with automated {countryProfile.goodsClassificationLabel} / {countryProfile.serviceClassificationLabel} tax classification.
             </p>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={addItem} className="gap-1.5 text-xs">
-            <Plus className="h-3.5 w-3.5" />
-            <span>Add Item</span>
-          </Button>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addProductItem}
+              className="gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950 font-bold shadow-xs"
+            >
+              <Package className="h-3.5 w-3.5 text-emerald-600" />
+              <span>+ Add Product</span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addServiceItem}
+              className="gap-1.5 text-xs text-indigo-700 dark:text-indigo-300 border-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold shadow-xs"
+            >
+              <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+              <span>+ Add Service</span>
+            </Button>
+          </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           {items.map((item, idx) => {
             const isGoods = item.item_type === 'GOODS';
             const classificationLabel = isGoods
               ? countryProfile.goodsClassificationLabel
               : countryProfile.serviceClassificationLabel;
             const classificationPlaceholder = isGoods
-              ? countryProfile.goodsPlaceholder
-              : countryProfile.servicePlaceholder;
+              ? `${countryProfile.goodsClassificationLabel} (e.g. 8421)`
+              : `${countryProfile.serviceClassificationLabel} (e.g. 998311)`;
 
             return (
               <div
                 key={idx}
-                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-850/40 space-y-3"
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-850/40 space-y-3 relative group"
               >
-                <div className="grid grid-cols-12 gap-3 items-start">
-                  {/* Item Type & Classification */}
-                  <div className="col-span-12 sm:col-span-3 flex gap-2">
-                    <select
-                      value={item.item_type}
-                      onChange={(e) => updateItem(idx, { item_type: e.target.value as 'GOODS' | 'SERVICE' })}
-                      className="h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-xs font-bold text-slate-800 dark:text-slate-200 w-28 shrink-0"
-                    >
-                      <option value="GOODS">Goods</option>
-                      <option value="SERVICE">Service</option>
-                    </select>
+                {/* Header row: Item # + Product/Service Toggle + Catalog Select + Actions */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-200/60 dark:border-slate-800">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      {idx + 1}
+                    </span>
 
-                    <div className="flex-1">
-                      <input
-                        type="text"
-                        value={item.classification_code || ''}
-                        onChange={(e) => updateItem(idx, { classification_code: e.target.value })}
-                        placeholder={classificationLabel}
-                        title={classificationLabel}
-                        className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-900 dark:text-slate-100 font-mono"
-                      />
+                    {/* Segmented Pill Toggle: Product vs Service */}
+                    <div className="inline-flex rounded-lg p-0.5 bg-slate-200/70 dark:bg-slate-800 border border-slate-300/80 dark:border-slate-700 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => updateItem(idx, { item_type: 'GOODS' })}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-bold transition-all ${
+                          isGoods
+                            ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-xs ring-1 ring-emerald-500/20'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        <Package className="h-3 w-3" />
+                        <span>Product</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateItem(idx, { item_type: 'SERVICE' })}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-bold transition-all ${
+                          !isGoods
+                            ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-400 shadow-xs ring-1 ring-indigo-500/20'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        <Briefcase className="h-3 w-3" />
+                        <span>Service</span>
+                      </button>
                     </div>
+
+                    {/* Catalog Picker */}
+                    {products && products.length > 0 && (
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value) handleSelectProduct(idx, e.target.value);
+                        }}
+                        defaultValue=""
+                        className="h-7 max-w-[260px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-[11px] text-slate-700 dark:text-slate-300 font-medium truncate"
+                      >
+                        <option value="">-- Load from Product/Service Catalog --</option>
+                        <optgroup label="Products (Goods)">
+                          {products
+                            .filter((p) => !(p.unit?.toLowerCase() === 'service' || p.unit?.toLowerCase() === 'hrs' || p.unit?.toLowerCase() === 'hour'))
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>
+                                📦 {p.name} ({formatCurrency(p.unit_price, currency)})
+                              </option>
+                            ))}
+                        </optgroup>
+                        <optgroup label="Services">
+                          {products
+                            .filter((p) => p.unit?.toLowerCase() === 'service' || p.unit?.toLowerCase() === 'hrs' || p.unit?.toLowerCase() === 'hour')
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>
+                                💼 {p.name} ({formatCurrency(p.unit_price, currency)})
+                              </option>
+                            ))}
+                        </optgroup>
+                      </select>
+                    )}
                   </div>
 
+                  <div className="flex items-center gap-1 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicateItem(idx)}
+                      className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                      title="Duplicate row"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                    {items.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeItem(idx)}
+                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors"
+                        title="Delete row"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Primary Row: Description & Classification */}
+                <div className="grid grid-cols-12 gap-3 items-start">
                   {/* Description */}
-                  <div className="col-span-12 sm:col-span-5">
+                  <div className="col-span-12 sm:col-span-8">
                     <input
                       type="text"
                       value={item.description}
                       onChange={(e) => updateItem(idx, { description: e.target.value })}
-                      placeholder="Item description or scope of work *"
+                      placeholder={
+                        isGoods
+                          ? 'Product name, part number, or goods description *'
+                          : 'Service title, consultancy, or scope of work *'
+                      }
                       className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-xs text-slate-900 dark:text-slate-100 font-medium"
                     />
                   </div>
 
-                  {/* Qty & Unit */}
-                  <div className="col-span-4 sm:col-span-2 flex gap-1">
+                  {/* Classification Code */}
+                  <div className="col-span-12 sm:col-span-4">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={item.classification_code || ''}
+                        onChange={(e) => updateItem(idx, { classification_code: e.target.value })}
+                        placeholder={classificationPlaceholder}
+                        title={classificationLabel}
+                        className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 pl-2.5 pr-14 text-xs text-slate-900 dark:text-slate-100 font-mono"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase pointer-events-none">
+                        {item.classification_type || (isGoods ? 'HSN' : 'SAC')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quantitative Row: Qty, Unit, Unit Price */}
+                <div className="grid grid-cols-12 gap-3 items-center">
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">
+                      Quantity
+                    </label>
                     <input
                       type="number"
                       min="0.01"
                       step="any"
                       value={item.quantity}
                       onChange={(e) => updateItem(idx, { quantity: parseFloat(e.target.value) || 0 })}
-                      className="h-9 w-16 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-xs text-center text-slate-900 dark:text-slate-100 font-semibold"
+                      className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-xs text-center text-slate-900 dark:text-slate-100 font-semibold"
                     />
+                  </div>
+
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className="block text-[10px] uppercase font-semibold text-slate-500 mb-1">
+                      Unit
+                    </label>
                     <input
                       type="text"
                       value={item.unit}
                       onChange={(e) => updateItem(idx, { unit: e.target.value })}
-                      placeholder="unit"
-                      className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-xs text-slate-500"
+                      placeholder={isGoods ? 'pcs, kg, box' : 'service, hrs'}
+                      className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-700 dark:text-slate-300"
                     />
                   </div>
 
-                  {/* Unit Price */}
-                  <div className="col-span-4 sm:col-span-2 flex items-center justify-between gap-1">
+                  <div className="col-span-12 sm:col-span-6">
+                    <label className="block text-[10px] uppercase font-bold text-indigo-700 dark:text-indigo-400 mb-1">
+                      Unit Price ({currency}) *
+                    </label>
                     <input
                       type="number"
                       min="0"
                       step="any"
                       value={item.unit_price}
                       onChange={(e) => updateItem(idx, { unit_price: parseFloat(e.target.value) || 0 })}
-                      className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-xs text-right text-slate-900 dark:text-slate-100 font-bold"
+                      className="h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-xs text-right text-slate-900 dark:text-slate-100 font-bold"
                     />
-
-                    {items.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeItem(idx)}
-                        className="p-1 text-slate-400 hover:text-rose-600 transition-colors shrink-0"
-                        title="Remove row"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
                   </div>
                 </div>
 

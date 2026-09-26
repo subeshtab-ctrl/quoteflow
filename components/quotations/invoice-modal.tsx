@@ -26,6 +26,8 @@ import {
   AlertCircle,
   ExternalLink,
   Check,
+  Package,
+  Briefcase,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -42,6 +44,9 @@ interface InvoiceItem {
   unit: string;
   unit_price: number;
   tax_rate: number;
+  item_type?: 'GOODS' | 'SERVICE';
+  classification_type?: string;
+  classification_code?: string;
 }
 
 interface InvoiceModalProps {
@@ -120,6 +125,9 @@ export function InvoiceModal({
                     unit: it.unit || 'unit',
                     unit_price: Number(it.unit_price) || 0,
                     tax_rate: Number(it.tax_rate) || 0,
+                    item_type: it.item_type || (it.unit === 'service' || it.unit === 'hrs' ? 'SERVICE' : 'GOODS'),
+                    classification_type: it.classification_type,
+                    classification_code: it.classification_code,
                   }))
                 );
               }
@@ -162,6 +170,9 @@ export function InvoiceModal({
       unit: item.unit || 'unit',
       unit_price: Number(item.unit_price) || 0,
       tax_rate: Number(item.tax_rate) || 0,
+      item_type: (item as any).item_type || (item.unit === 'service' || item.unit === 'hrs' ? 'SERVICE' : 'GOODS'),
+      classification_type: (item as any).classification_type,
+      classification_code: (item as any).classification_code,
     }))
   );
 
@@ -201,6 +212,9 @@ export function InvoiceModal({
           unit: item.unit || 'unit',
           unit_price: Number(item.unit_price) || 0,
           tax_rate: Number(item.tax_rate) || 0,
+          item_type: (item as any).item_type || (item.unit === 'service' || item.unit === 'hrs' ? 'SERVICE' : 'GOODS'),
+          classification_type: (item as any).classification_type,
+          classification_code: (item as any).classification_code,
         }))
       );
       setDiscountType(quotation.discount_type || 'PERCENTAGE');
@@ -234,18 +248,42 @@ export function InvoiceModal({
     });
   };
 
-  const handleAddItem = () => {
+  const handleAddProduct = () => {
     setItems((prev) => [
       ...prev,
       {
-        id: `new_item_${Date.now()}`,
-        description: 'New Line Item / Service',
+        id: `prod_${Date.now()}`,
+        description: '',
         quantity: 1,
-        unit: 'unit',
+        unit: 'pcs',
         unit_price: 1000,
         tax_rate: 18,
+        item_type: 'GOODS',
+        classification_type: 'HSN',
+        classification_code: '',
       },
     ]);
+  };
+
+  const handleAddService = () => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: `serv_${Date.now()}`,
+        description: '',
+        quantity: 1,
+        unit: 'service',
+        unit_price: 1000,
+        tax_rate: 18,
+        item_type: 'SERVICE',
+        classification_type: 'SAC',
+        classification_code: '998311',
+      },
+    ]);
+  };
+
+  const handleAddItem = () => {
+    handleAddProduct();
   };
 
   const handleRemoveItem = (index: number) => {
@@ -330,6 +368,9 @@ export function InvoiceModal({
           tax_amount: (it.quantity * it.unit_price * it.tax_rate) / 100,
           line_total: (it.quantity * it.unit_price) * (1 + it.tax_rate / 100),
           sort_order: idx + 1,
+          item_type: it.item_type || (it.unit === 'service' || it.unit === 'hrs' ? 'SERVICE' : 'GOODS'),
+          classification_type: it.classification_type || (it.item_type === 'GOODS' ? 'HSN' : 'SAC'),
+          classification_code: it.classification_code || '',
         })),
       };
 
@@ -601,116 +642,193 @@ export function InvoiceModal({
 
             {/* Section 3: Line Items Editor */}
             <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
                   <Receipt className="h-4 w-4 text-indigo-600" />
-                  <span>Invoice Line Items & Rates</span>
+                  <span>Invoice Products & Services</span>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddItem}
-                  className="gap-1.5 text-xs text-indigo-700 border-indigo-200 hover:bg-indigo-50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Add Line Item</span>
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddProduct}
+                    className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 font-bold"
+                  >
+                    <Package className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>+ Add Product</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddService}
+                    className="gap-1.5 text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-bold"
+                  >
+                    <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>+ Add Service</span>
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-3">
                 {items.map((item, idx) => {
                   const lineTotal = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                  const isGoods = item.item_type !== 'SERVICE';
                   return (
                     <div
                       key={item.id || idx}
-                      className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end"
+                      className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3"
                     >
-                      <div className="sm:col-span-5">
-                        <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                          Description #{idx + 1}
-                        </label>
-                        <input
-                          type="text"
-                          value={item.description}
-                          onChange={(e) => handleItemChange(idx, 'description', e.target.value)}
-                          placeholder="Service / Product Description"
-                          className="w-full h-9 px-3 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                        />
+                      {/* Item Type & Classification Top Row */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-200/80">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold text-slate-500">#{idx + 1}</span>
+                          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleItemChange(idx, 'item_type', 'GOODS');
+                                if (item.unit === 'service' || item.unit === 'hrs') handleItemChange(idx, 'unit', 'pcs');
+                                handleItemChange(idx, 'classification_type', 'HSN');
+                              }}
+                              className={cn(
+                                'flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-md transition-colors',
+                                isGoods
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              )}
+                            >
+                              <Package className="h-3 w-3" />
+                              <span>Product (Goods)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleItemChange(idx, 'item_type', 'SERVICE');
+                                if (item.unit === 'pcs') handleItemChange(idx, 'unit', 'service');
+                                handleItemChange(idx, 'classification_type', 'SAC');
+                                if (!item.classification_code) handleItemChange(idx, 'classification_code', '998311');
+                              }}
+                              className={cn(
+                                'flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-md transition-colors',
+                                !isGoods
+                                  ? 'bg-indigo-600 text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              )}
+                            >
+                              <Briefcase className="h-3 w-3" />
+                              <span>Service</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={item.classification_code || ''}
+                              onChange={(e) => handleItemChange(idx, 'classification_code', e.target.value)}
+                              placeholder={isGoods ? 'HSN Code' : 'SAC Code (e.g. 998311)'}
+                              className="h-7 w-40 px-2 pr-12 text-[11px] bg-white border border-slate-200 rounded-lg font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-slate-400 pointer-events-none uppercase">
+                              {item.classification_type || (isGoods ? 'HSN' : 'SAC')}
+                            </span>
+                          </div>
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                              title="Remove item"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                          Qty & Unit
-                        </label>
-                        <div className="flex gap-1.5">
-                          <input
-                            type="number"
-                            min="1"
-                            step="any"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              handleItemChange(idx, 'quantity', parseFloat(e.target.value) || 0)
-                            }
-                            className="w-16 h-9 px-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
-                          />
+                      {/* Item Details Row */}
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                        <div className="sm:col-span-5">
+                          <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                            Description
+                          </label>
                           <input
                             type="text"
-                            value={item.unit}
-                            onChange={(e) => handleItemChange(idx, 'unit', e.target.value)}
-                            placeholder="unit"
-                            className="w-full h-9 px-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            value={item.description}
+                            onChange={(e) => handleItemChange(idx, 'description', e.target.value)}
+                            placeholder={isGoods ? 'Product name or goods description *' : 'Service title or consultancy scope *'}
+                            className="w-full h-9 px-3 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                           />
                         </div>
-                      </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                          Rate ({currency})
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={item.unit_price}
-                          onChange={(e) =>
-                            handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-full h-9 px-3 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-semibold"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-1">
-                        <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
-                          Tax %
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={item.tax_rate}
-                          onChange={(e) =>
-                            handleItemChange(idx, 'tax_rate', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-full h-9 px-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2 flex items-center justify-between gap-2">
-                        <div className="text-right flex-1">
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase">Total</p>
-                          <p className="text-xs font-bold text-slate-900">
-                            {formatCurrency(lineTotal, currency)}
-                          </p>
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                            Qty & Unit
+                          </label>
+                          <div className="flex gap-1.5">
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="any"
+                              value={item.quantity}
+                              onChange={(e) =>
+                                handleItemChange(idx, 'quantity', parseFloat(e.target.value) || 0)
+                              }
+                              className="w-16 h-9 px-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-center font-semibold"
+                            />
+                            <input
+                              type="text"
+                              value={item.unit}
+                              onChange={(e) => handleItemChange(idx, 'unit', e.target.value)}
+                              placeholder={isGoods ? 'pcs' : 'service'}
+                              className="w-full h-9 px-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            />
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(idx)}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Remove item"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                            Rate ({currency})
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={item.unit_price}
+                            onChange={(e) =>
+                              handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
+                            }
+                            className="w-full h-9 px-3 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-bold"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-1">
+                          <label className="text-[11px] font-semibold text-slate-500 mb-1 block">
+                            Tax %
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={item.tax_rate}
+                            onChange={(e) =>
+                              handleItemChange(idx, 'tax_rate', parseFloat(e.target.value) || 0)
+                            }
+                            className="w-full h-9 px-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2 flex items-center justify-end">
+                          <div className="text-right">
+                            <p className="text-[10px] text-slate-400 font-semibold uppercase">Total</p>
+                            <p className="text-xs font-bold text-slate-900">
+                              {formatCurrency(lineTotal, currency)}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
@@ -965,7 +1083,20 @@ export function InvoiceModal({
                     return (
                       <tr key={item.id || idx}>
                         <td className="py-3 px-3 text-center text-slate-400">{idx + 1}</td>
-                        <td className="py-3 px-3 font-medium text-slate-800">{item.description}</td>
+                        <td className="py-3 px-3 font-medium text-slate-800">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {item.item_type === 'SERVICE' ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0">
+                                Service{item.classification_code ? ` • SAC ${item.classification_code}` : ''}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 shrink-0">
+                                Product{item.classification_code ? ` • HSN ${item.classification_code}` : ''}
+                              </span>
+                            )}
+                            <span>{item.description}</span>
+                          </div>
+                        </td>
                         <td className="py-3 px-3 text-center text-slate-600">
                           {item.quantity} {item.unit}
                         </td>
