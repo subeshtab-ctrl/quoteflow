@@ -13,12 +13,15 @@ import {
   InvoiceItem,
   InvoiceStatus,
   AttachmentItem,
+  InvoiceAuditEvent,
+  PortalPinRegistration,
 } from '@/types/database';
 import { calculateQuotationTotals } from '@/lib/quotations/calculations';
 import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quotations/tokens';
 import { createAdminClient } from '@/lib/supabase/service-role';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 // Default Demo Organization
 const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -35,6 +38,7 @@ class QuoteFlowStore {
   private notifications: Map<string, Notification> = new Map();
   private invoices: Map<string, Invoice> = new Map();
   private invoiceItems: Map<string, InvoiceItem[]> = new Map();
+  private portalPins: Map<string, PortalPinRegistration> = new Map();
 
   private getPaymentsFilePath(): string {
     const dir = path.join(process.cwd(), 'data');
@@ -2333,6 +2337,161 @@ class QuoteFlowStore {
     return { quotation: quote, firstView };
   }
 
+  // --- CLIENT PORTAL 6-DIGIT PIN AUTHENTICATION ---
+  public hashPin(pin: string): string {
+    return crypto.createHash('sha256').update(pin.trim()).digest('hex');
+  }
+
+  public async getPortalPin(quotationId: string): Promise<PortalPinRegistration | null> {
+    if (this.portalPins.has(quotationId)) {
+      return this.portalPins.get(quotationId)!;
+    }
+
+    const quote = await this.getQuotationById(quotationId);
+    const customerEmail = quote?.customer?.email?.toLowerCase().trim();
+
+    // Check if another quotation for this same customer already has a PIN
+    for (const reg of this.portalPins.values()) {
+      if (
+        (customerEmail && reg.customer_email.toLowerCase().trim() === customerEmail) ||
+        (quote?.customer_id && reg.customer_id === quote.customer_id)
+      ) {
+        this.portalPins.set(quotationId, reg);
+        return reg;
+      }
+    }
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        let query = supabase
+          .from('quotation_events')
+          .select('*')
+          .eq('event_type', 'PORTAL_PIN_REGISTERED')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (customerEmail) {
+          query = query.or(`quotation_id.eq.${quotationId},metadata->>customer_email.eq.${customerEmail}`);
+        } else {
+          query = query.eq('quotation_id', quotationId);
+        }
+
+        const { data, error } = await query;
+
+        if (!error && data && data.length > 0) {
+          const evt = data[0];
+          const reg: PortalPinRegistration = {
+            id: evt.id,
+            quotation_id: quotationId,
+            customer_id: quote?.customer_id,
+            customer_email: evt.metadata?.customer_email || customerEmail || '',
+            pin_hash: evt.metadata?.pin_hash,
+            registered_at: evt.metadata?.registered_at || evt.created_at,
+          };
+          this.portalPins.set(quotationId, reg);
+          return reg;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch portal pin from Supabase:', e);
+    }
+
+    return null;
+  }
+
+  public async registerPortalPin(
+    quotationId: string,
+    email: string,
+    pin: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const quote = await this.getQuotationById(quotationId);
+    if (!quote) throw new Error('Quotation not found');
+
+    const cleanInputEmail = email.toLowerCase().trim();
+    const customerEmail = (quote.customer?.email || '').toLowerCase().trim();
+
+    if (!customerEmail) {
+      throw new Error('This quotation does not have a registered customer email. Please contact the company.');
+    }
+
+    if (cleanInputEmail !== customerEmail) {
+      throw new Error(`Email address does not match the registered client email on quotation ${quote.quotation_number}.`);
+    }
+
+    const cleanPin = pin.trim();
+    if (!/^\d{6}$/.test(cleanPin)) {
+      throw new Error('Security PIN must be exactly 6 digits (numbers only).');
+    }
+
+    const pinHash = this.hashPin(cleanPin);
+    const now = new Date().toISOString();
+
+    const reg: PortalPinRegistration = {
+      id: `pin_${Date.now()}`,
+      quotation_id: quotationId,
+      customer_id: quote.customer_id,
+      customer_email: cleanInputEmail,
+      pin_hash: pinHash,
+      registered_at: now,
+    };
+
+    this.portalPins.set(quotationId, reg);
+
+    // Also link to other quotations belonging to this customer
+    for (const [qId, q] of this.quotations.entries()) {
+      if (
+        q.customer_id === quote.customer_id ||
+        (q.customer?.email && q.customer.email.toLowerCase().trim() === cleanInputEmail)
+      ) {
+        this.portalPins.set(qId, {
+          ...reg,
+          quotation_id: qId,
+        });
+      }
+    }
+
+    // Persist registration event in Supabase
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('quotation_events').insert({
+          organization_id: quote.organization_id,
+          quotation_id: quotationId,
+          actor_type: 'CUSTOMER',
+          actor_name: quote.customer?.name || 'Customer',
+          event_type: 'PORTAL_PIN_REGISTERED',
+          metadata: {
+            customer_email: cleanInputEmail,
+            pin_hash: pinHash,
+            registered_at: now,
+          },
+          created_at: now,
+        });
+      }
+    } catch (e) {
+      console.warn('Could not persist portal pin to Supabase:', e);
+    }
+
+    return { success: true, message: '6-digit PIN registered successfully' };
+  }
+
+  public async verifyPortalPin(quotationId: string, pin: string): Promise<boolean> {
+    const reg = await this.getPortalPin(quotationId);
+    if (!reg) return false;
+
+    const inputHash = this.hashPin(pin);
+    return inputHash === reg.pin_hash;
+  }
+
+  public async resetPortalPin(
+    quotationId: string,
+    email: string,
+    newPin: string
+  ): Promise<{ success: boolean; message?: string }> {
+    return await this.registerPortalPin(quotationId, email, newPin);
+  }
+
   // --- APPROVAL WORKFLOW (ATOMIC TRANSACTION) ---
   public async approveQuotation(params: {
     token: string;
@@ -3032,6 +3191,7 @@ class QuoteFlowStore {
     discount_type?: any;
     discount_value?: number;
     tax_rate?: number;
+    created_by?: string;
   }): Promise<Invoice> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const invId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -3126,10 +3286,20 @@ class QuoteFlowStore {
       paid_at: isPaid ? new Date().toISOString() : null,
       payment_notes: null,
       attachments: data.attachments || [],
-      created_by: 'User',
+      created_by: data.created_by || 'User',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       items: invoiceItems,
+      audit_history: [
+        {
+          id: `inv_audit_${Date.now()}_0`,
+          user_name: data.created_by || 'Admin User',
+          user_role: 'ADMIN',
+          action: 'CREATED',
+          details: status === 'PAID' ? 'Invoice created as PAID' : 'Invoice created and issued',
+          timestamp: new Date().toISOString(),
+        },
+      ],
     };
 
     this.invoices.set(invId, newInvoice);
@@ -3150,16 +3320,40 @@ class QuoteFlowStore {
   public async updateInvoice(
     id: string,
     data: Partial<Invoice>,
-    orgId: string = DEFAULT_ORG_ID
+    orgId: string = DEFAULT_ORG_ID,
+    actor?: { name?: string; role?: string }
   ): Promise<Invoice> {
     const inv = await this.getInvoiceById(id, orgId);
     if (!inv) throw new Error('Invoice not found');
+
+    const now = new Date().toISOString();
+    const existingAudit = inv.audit_history || [];
+    let changeDetails = 'Invoice particulars and settings updated';
+    if (data.status && data.status !== inv.status) {
+      changeDetails = `Status updated from ${inv.status} to ${data.status}`;
+    } else if (data.items) {
+      changeDetails = `Line items and calculation rates updated (${data.items.length} items)`;
+    } else if (data.payment_terms) {
+      changeDetails = `Payment terms updated to: ${data.payment_terms}`;
+    } else if (data.notes) {
+      changeDetails = 'Invoice notes and terms updated';
+    }
+
+    const auditItem: InvoiceAuditEvent = {
+      id: `inv_audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_name: actor?.name || inv.created_by || 'Admin User',
+      user_role: actor?.role || 'ADMIN',
+      action: 'UPDATED',
+      details: changeDetails,
+      timestamp: now,
+    };
 
     const updated: Invoice = {
       ...inv,
       ...data,
       id,
-      updated_at: new Date().toISOString(),
+      audit_history: [auditItem, ...existingAudit],
+      updated_at: now,
     };
 
     if (data.items) {
@@ -3178,7 +3372,8 @@ class QuoteFlowStore {
     id: string,
     orgId: string = DEFAULT_ORG_ID,
     status: InvoiceStatus,
-    paymentDetails?: { payment_method?: string; payment_notes?: string }
+    paymentDetails?: { payment_method?: string; payment_notes?: string },
+    actor?: { name?: string; role?: string }
   ): Promise<Invoice> {
     const inv = await this.getInvoiceById(id, orgId);
     if (!inv) throw new Error('Invoice not found');
@@ -3196,6 +3391,16 @@ class QuoteFlowStore {
       inv.payment_notes = paymentDetails.payment_notes;
     }
     inv.updated_at = now;
+
+    const auditItem: InvoiceAuditEvent = {
+      id: `inv_audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_name: actor?.name || 'Admin User',
+      user_role: actor?.role || 'ADMIN',
+      action: 'STATUS_CHANGED',
+      details: `Invoice status changed to ${status}${isPaid ? ' (Payment recorded)' : ''}`,
+      timestamp: now,
+    };
+    inv.audit_history = [auditItem, ...(inv.audit_history || [])];
 
     this.invoices.set(id, inv);
     this.saveInvoicesToFile();

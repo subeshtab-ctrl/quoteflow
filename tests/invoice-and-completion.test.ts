@@ -28,7 +28,7 @@ describe('Invoice Persistence and Quotation Completion Locking', () => {
 
     expect(invoiceForQuote).toBeDefined();
     expect(invoiceForQuote!.status).toBe('PAID');
-    expect(invoiceForQuote!.items.length).toBeGreaterThan(0);
+    expect(invoiceForQuote!.items?.length).toBeGreaterThan(0);
 
     // Retrieve directly by ID (must not be null / 404)
     const fetchedById = await store.getInvoiceById(invoiceForQuote!.id, orgId);
@@ -80,9 +80,7 @@ describe('Invoice Persistence and Quotation Completion Locking', () => {
             line_total: 10000,
           },
         ],
-      },
-      orgId
-    );
+      });
 
     expect(newQuote.is_paid).toBeFalsy();
 

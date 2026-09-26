@@ -22,6 +22,7 @@ import {
   CheckCheck,
   Paperclip,
   FileText,
+  Lock,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -29,6 +30,7 @@ import {
   getLogoFitClass,
   getCompanyInitials,
 } from '@/lib/utils/logo';
+import { PortalPinGate } from '@/components/public-quote/portal-pin-gate';
 
 interface PublicQuoteViewProps {
   initialQuotation: Quotation;
@@ -41,6 +43,23 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  // Client Portal PIN Auth Gate state
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [hasPin, setHasPin] = useState(false);
+  const [customerEmailMasked, setCustomerEmailMasked] = useState('');
+
+  // Unopened / "NEW" quotation tracking
+  const [openedQuoteIds, setOpenedQuoteIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const saved = localStorage.getItem('quoteflow_client_opened_quotes');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
 
   // Customer Chat Popup state
   const [chatMessages, setChatMessages] = useState<QuotationChatMessage[]>([]);
@@ -75,6 +94,9 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     return d.getTime();
   };
 
+  const isPaid = Boolean(quotation.is_paid || quotation.status === 'PAYMENT_COMPLETED');
+  const isCompleted = quotation.status === 'COMPLETED' || quotation.status === 'PAYMENT_COMPLETED';
+
   const isExpired =
     quotation.status === 'EXPIRED' ||
     (Date.now() > getValidityEndTime(quotation.valid_until) &&
@@ -83,6 +105,8 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
   const canTakeAction =
     !isExpired &&
+    !isCompleted &&
+    !isPaid &&
     !quotation.is_token_revoked &&
     quotation.status !== 'APPROVED' &&
     quotation.status !== 'REJECTED' &&
@@ -103,6 +127,55 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   })();
 
   const currentToken = quotation.public_token || token;
+
+  // Track quotation opened state and remove "NEW" badge
+  useEffect(() => {
+    if (quotation?.id) {
+      setOpenedQuoteIds((prev) => {
+        if (prev.has(quotation.id)) return prev;
+        const next = new Set(prev);
+        next.add(quotation.id);
+        try {
+          localStorage.setItem(
+            'quoteflow_client_opened_quotes',
+            JSON.stringify(Array.from(next))
+          );
+        } catch {}
+        return next;
+      });
+    }
+  }, [quotation?.id]);
+
+  // Client Portal PIN Auth Verification
+  useEffect(() => {
+    let active = true;
+    const verifyPortalAuth = async () => {
+      try {
+        const res = await fetch(
+          `/api/public/portal-auth?token=${encodeURIComponent(currentToken)}`,
+          { cache: 'no-store' }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (active) {
+            setHasPin(Boolean(data.hasPin));
+            setIsAuthenticated(Boolean(data.authenticated));
+            setCustomerEmailMasked(data.customerEmailMasked || '');
+            setAuthChecked(true);
+          }
+        } else {
+          if (active) setAuthChecked(true);
+        }
+      } catch {
+        if (active) setAuthChecked(true);
+      }
+    };
+
+    verifyPortalAuth();
+    return () => {
+      active = false;
+    };
+  }, [currentToken]);
 
   const loadChatMessages = async (forceMarkRead = false) => {
     try {
@@ -233,6 +306,38 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     } catch {}
   };
 
+  // If PIN authentication state is still loading, show secure skeleton
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-center">
+        <div className="space-y-4 max-w-sm">
+          <div className="mx-auto h-12 w-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center animate-pulse">
+            <Lock className="h-6 w-6" />
+          </div>
+          <p className="text-sm font-semibold text-slate-300">
+            Verifying client portal security...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // If PIN gate is not passed yet, render PortalPinGate
+  if (!isAuthenticated) {
+    return (
+      <PortalPinGate
+        token={currentToken}
+        quotationNumber={quotation.quotation_number}
+        companyName={org?.name || 'QuoteFlow'}
+        hasPin={hasPin}
+        customerEmailMasked={customerEmailMasked}
+        onAuthenticated={() => {
+          setIsAuthenticated(true);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100/70 pb-16 pt-4 sm:pt-8 px-3 sm:px-6">
       <div className="mx-auto max-w-4xl space-y-4">
@@ -299,13 +404,29 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
             <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
               {allQuotations.map((q) => {
                 const isSelected = q.id === quotation.id;
+                const isNew =
+                  (q.status === 'SENT' || (q.view_count || 0) === 0) &&
+                  !openedQuoteIds.has(q.id);
+
                 return (
                   <button
                     key={q.id}
                     type="button"
                     onClick={() => {
+                      setOpenedQuoteIds((prev) => {
+                        const next = new Set(prev);
+                        next.add(q.id);
+                        try {
+                          localStorage.setItem(
+                            'quoteflow_client_opened_quotes',
+                            JSON.stringify(Array.from(next))
+                          );
+                        } catch {}
+                        return next;
+                      });
                       setQuotation(q);
                       window.history.pushState(null, '', `/q/${q.public_token}`);
+                      fetch(`/api/public/quote?token=${encodeURIComponent(q.public_token)}&recordView=true`);
                     }}
                     className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
                       isSelected
@@ -313,6 +434,12 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                         : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
                     }`}
                   >
+                    {isNew && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 text-white px-1.5 py-0.2 text-[9px] font-black uppercase tracking-wider shadow-xs animate-pulse">
+                        <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        NEW
+                      </span>
+                    )}
                     <span className="font-bold">{q.quotation_number}</span>
                     <span className="text-slate-300 font-normal">|</span>
                     <span className="font-medium truncate max-w-[140px]">{q.title}</span>
@@ -330,6 +457,35 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         )}
 
         {/* Status Alerts */}
+        {isPaid && (
+          <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 shadow-sm animate-in fade-in">
+            <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700 shrink-0">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm sm:text-base">Quotation Settled & Fully Paid</h4>
+              <p className="text-xs sm:text-sm text-emerald-700">
+                Payment for this quotation has been successfully recorded and settled in full. Thank you for your business!
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isCompleted && !isPaid && (
+          <div className="flex items-center gap-3 rounded-2xl bg-indigo-50 border border-indigo-200 p-4 text-indigo-900 shadow-sm animate-in fade-in">
+            <div className="rounded-xl bg-indigo-100 p-2 text-indigo-700 shrink-0">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm sm:text-base">
+                {quotation.completed_unpaid ? 'Quotation Completed (Unpaid)' : 'Quotation Completed'}
+              </h4>
+              <p className="text-xs sm:text-sm text-indigo-700">
+                This quotation scope and order has been officially completed.
+              </p>
+            </div>
+          </div>
+        )}
         {quotation.status === 'DRAFT' && (
           <div className="flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-200 p-4 text-amber-900 shadow-sm">
             <Clock className="h-6 w-6 text-amber-600 shrink-0" />
@@ -741,25 +897,37 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl bg-indigo-600 p-5 text-white text-center shadow-xl space-y-3">
+          <div className="rounded-2xl bg-slate-900 p-5 text-white text-center shadow-xl space-y-3">
             <h3 className="text-base sm:text-lg font-bold">
-              {quotation.status === 'REJECTED'
-                ? 'Need to discuss changes or send a message?'
-                : quotation.status === 'APPROVED'
-                  ? 'Have a question about your approved quotation?'
-                  : 'Need assistance with this quotation?'}
+              {isPaid
+                ? 'Quotation Settled & Fully Paid'
+                : isCompleted
+                  ? 'Quotation Scope Completed'
+                  : isExpired
+                    ? 'Quotation Expired'
+                    : quotation.status === 'REJECTED'
+                      ? 'Need to discuss changes or send a message?'
+                      : quotation.status === 'APPROVED'
+                        ? 'Have a question about your approved quotation?'
+                        : 'Need assistance with this quotation?'}
             </h3>
-            <p className="text-xs text-indigo-100 max-w-md mx-auto">
-              Click Chat below to open the live chat box with {org?.name || 'our team'}.
+            <p className="text-xs text-slate-300 max-w-md mx-auto">
+              {isPaid
+                ? 'Your payment has been received and confirmed. Contact us anytime if you need receipts or assistance.'
+                : isCompleted
+                  ? 'This quotation lifecycle is completed and locked. Reach out to our team via chat anytime.'
+                  : isExpired
+                    ? 'This quotation validity period has ended. Contact us via chat if you would like a renewed estimate.'
+                    : `Click Chat below to open the live chat box with ${org?.name || 'our team'}.`}
             </p>
             <div className="flex justify-center">
               <Button
                 variant="outline"
                 onClick={openChatPopup}
-                className="relative bg-white text-indigo-700 border-white hover:bg-indigo-50 font-bold px-6 shadow-md"
+                className="relative bg-white text-slate-900 border-white hover:bg-slate-100 font-bold px-6 shadow-md"
               >
-                <MessageSquare className="h-4 w-4 mr-1.5" />
-                Chat
+                <MessageSquare className="h-4 w-4 mr-1.5 text-indigo-600" />
+                <span>Chat with Team</span>
                 {unreadStaffCount > 0 && (
                   <span className="ml-1.5 inline-flex items-center gap-1 justify-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
                     <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />

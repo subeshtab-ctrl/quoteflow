@@ -17,8 +17,11 @@ import {
   FileText,
   ArrowLeft,
   CheckCircle2,
-  Trash2,
   Paperclip,
+  History,
+  Shield,
+  Clock,
+  UserCheck,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -41,7 +44,7 @@ export function InvoiceDetailView({
   const router = useRouter();
   const [invoice, setInvoice] = useState<Invoice>(initialInvoice);
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
 
   const org = invoice.organization;
   const customer = invoice.customer;
@@ -52,23 +55,7 @@ export function InvoiceDetailView({
     window.print();
   };
 
-  const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to permanently delete invoice ${invoice.invoice_number}?`)) {
-      return;
-    }
-
-    try {
-      setIsDeleting(true);
-      const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
-      router.push('/invoices');
-      router.refresh();
-    } catch (err: any) {
-      alert(err.message || 'Error deleting invoice');
-      setIsDeleting(false);
-    }
-  };
-
+  const auditCount = invoice.audit_history?.length || (invoice.created_at ? 1 : 0);
   const logoConfig = parseLogoUrl(org?.logo_url);
 
   return (
@@ -99,6 +86,25 @@ export function InvoiceDetailView({
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setShowAuditHistory(!showAuditHistory)}
+            className={`gap-1.5 text-xs transition-colors ${
+              showAuditHistory
+                ? 'bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-800 dark:text-indigo-300'
+                : 'text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <History className="h-3.5 w-3.5 text-indigo-500" />
+            <span>Audit History</span>
+            {auditCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                {auditCount}
+              </span>
+            )}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setIsStatusModalOpen(true)}
             className="gap-1.5 text-xs"
           >
@@ -115,21 +121,120 @@ export function InvoiceDetailView({
             <Printer className="h-3.5 w-3.5" />
             <span>Print / PDF</span>
           </Button>
-
-          {currentUserRole !== 'STAFF' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="gap-1.5 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Delete</span>
-            </Button>
-          )}
         </div>
       </div>
+
+      {/* Collapsible Audit History (Hidden during print) */}
+      {showAuditHistory && (
+        <div className="print:hidden rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-indigo-100 dark:border-indigo-900/40">
+            <div className="flex items-center gap-2">
+              <History className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Invoice Audit Trail & Activity Log
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Every change to this invoice is permanently tracked with the responsible staff or admin. Deletions are strictly prohibited.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowAuditHistory(false)}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {invoice.audit_history && invoice.audit_history.length > 0 ? (
+              invoice.audit_history.map((audit) => {
+                const isOwnerOrAdmin =
+                  audit.user_role === 'ADMIN' || audit.user_role === 'OWNER';
+                return (
+                  <div
+                    key={audit.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs shadow-2xs"
+                  >
+                    <div className="flex items-start sm:items-center gap-2.5">
+                      <div
+                        className={`p-1.5 rounded-lg shrink-0 ${
+                          isOwnerOrAdmin
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                        }`}
+                      >
+                        {isOwnerOrAdmin ? (
+                          <Shield className="h-3.5 w-3.5" />
+                        ) : (
+                          <UserCheck className="h-3.5 w-3.5" />
+                        )}
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900 dark:text-slate-100">
+                            {audit.user_name}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              isOwnerOrAdmin
+                                ? 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                                : 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                            }`}
+                          >
+                            {audit.user_role}
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                            {audit.action}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 dark:text-slate-300">{audit.details}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-slate-400 text-[11px] shrink-0 sm:self-center self-end">
+                      <Clock className="h-3 w-3" />
+                      <span>{new Date(audit.timestamp).toLocaleString()}</span>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg shrink-0 bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                    <Shield className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900 dark:text-slate-100">
+                        {invoice.created_by || 'Admin User'}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                        ADMIN
+                      </span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                        CREATED
+                      </span>
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-300">Initial invoice created</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
+                  <Clock className="h-3 w-3" />
+                  <span>
+                    {invoice.created_at
+                      ? new Date(invoice.created_at).toLocaleString()
+                      : 'Initial creation'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Printable Invoice Sheet */}
       <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-sm space-y-8 print:border-none print:shadow-none print:p-0">

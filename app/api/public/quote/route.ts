@@ -17,5 +17,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
   }
 
+  if (searchParams.get('recordView') === 'true') {
+    const userAgent = req.headers.get('user-agent') || 'Unknown device';
+    const ip =
+      req.headers.get('x-forwarded-for')?.split(',')[0] ||
+      req.headers.get('x-real-ip') ||
+      'Unknown IP';
+    await store.recordQuotationView(quote.id, { ip, userAgent });
+  }
+
   return NextResponse.json({ success: true, quotation: quote });
 }

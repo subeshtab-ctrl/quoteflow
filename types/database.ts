@@ -332,12 +332,33 @@ export interface Invoice {
   attachments?: AttachmentItem[];
   created_by?: string | null;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
+  // Audit History
+  audit_history?: InvoiceAuditEvent[];
 
   // Joined fields
   customer?: Customer;
   organization?: Organization;
   items?: InvoiceItem[];
+}
+
+export interface InvoiceAuditEvent {
+  id: string;
+  user_name: string;
+  user_role: string;
+  action: string;
+  details?: string;
+  timestamp: string;
+}
+
+export interface PortalPinRegistration {
+  id: string;
+  quotation_id: string;
+  customer_id?: string;
+  customer_email: string;
+  pin_hash: string;
+  registered_at: string;
+  updated_at?: string;
 }
 
 export interface QuotationChatMessage {

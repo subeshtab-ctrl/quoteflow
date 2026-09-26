@@ -20,7 +20,6 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { InvoicesFilterTabs } from '@/components/invoices/invoices-filter-tabs';
-import { InvoiceDeleteButton } from '@/components/invoices/invoice-delete-button';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 interface InvoicesPageProps {
@@ -147,13 +146,6 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
                               <Eye className="h-4 w-4" />
                             </button>
                           </Link>
-
-                          {auth?.role !== 'STAFF' && (
-                            <InvoiceDeleteButton
-                              invoiceId={inv.id}
-                              invoiceNumber={inv.invoice_number}
-                            />
-                          )}
                         </div>
                       </td>
                     </tr>

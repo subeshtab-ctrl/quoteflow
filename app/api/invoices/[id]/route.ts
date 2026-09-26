@@ -37,7 +37,12 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
 
-    const updated = await store.updateInvoice(id, body, orgId);
+    const actor = {
+      name: auth?.fullName || auth?.email || 'Admin',
+      role: auth?.role || 'ADMIN',
+    };
+
+    const updated = await store.updateInvoice(id, body, orgId, actor);
 
     return NextResponse.json({
       success: true,
@@ -70,6 +75,11 @@ export async function PATCH(
       );
     }
 
+    const actor = {
+      name: auth?.fullName || auth?.email || 'Admin',
+      role: auth?.role || 'ADMIN',
+    };
+
     const updated = await store.updateInvoiceStatus(
       id,
       orgId,
@@ -77,7 +87,8 @@ export async function PATCH(
       {
         payment_method: body.payment_method,
         payment_notes: body.payment_notes,
-      }
+      },
+      actor
     );
 
     return NextResponse.json({
@@ -94,26 +105,9 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
-    const { id } = await params;
-
-    await store.deleteInvoice(id, orgId);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Invoice deleted successfully',
-    });
-  } catch (err: any) {
-    console.error('Error deleting invoice:', err);
-    return NextResponse.json(
-      { error: err.message || 'Failed to delete invoice' },
-      { status: 500 }
-    );
-  }
+export async function DELETE() {
+  return NextResponse.json(
+    { error: 'Invoices cannot be deleted once created for financial auditing and legal compliance.' },
+    { status: 403 }
+  );
 }
