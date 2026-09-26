@@ -104,6 +104,7 @@ class QuoteFlowStore {
       payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
       payment_confirmed_by_company?: boolean;
       payment_confirmed_at?: string | null;
+      payment_confirmed_by?: string | null;
     }
   > {
     try {
@@ -131,6 +132,7 @@ class QuoteFlowStore {
       payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
       payment_confirmed_by_company?: boolean;
       payment_confirmed_at?: string | null;
+      payment_confirmed_by?: string | null;
     }
   ): void {
     try {
@@ -141,6 +143,143 @@ class QuoteFlowStore {
     } catch {
       // Fallback
     }
+  }
+
+  private resolvePaymentDetails(
+    quotationId: string,
+    grandTotal: number,
+    eventsData: any[] | null | undefined,
+    filePayments: Record<string, any>,
+    existingQuote?: Quotation
+  ): {
+    is_paid: boolean;
+    paid_at: string | null;
+    payment_method: string | null;
+    payment_notes: string | null;
+    paid_amount: number;
+    balance_amount: number;
+    advance_percentage: number | null;
+    payment_status: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+    payment_confirmed_by_company: boolean;
+    payment_confirmed_at: string | null;
+    payment_confirmed_by: string | null;
+  } {
+    // 1. Look for latest payment event in eventsData
+    const latestPaymentEvent = eventsData?.find(
+      (e: any) =>
+        e.event_type === 'MARKED_PAID' ||
+        e.event_type === 'ADVANCE_PAID' ||
+        e.event_type === 'MARKED_UNPAID'
+    );
+
+    const filePayment = filePayments[quotationId];
+
+    if (latestPaymentEvent) {
+      const meta = latestPaymentEvent.metadata || {};
+      if (latestPaymentEvent.event_type === 'MARKED_PAID') {
+        const pAmt = meta.paid_amount !== undefined ? Number(meta.paid_amount) : grandTotal;
+        return {
+          is_paid: true,
+          paid_at: meta.paid_at || latestPaymentEvent.created_at,
+          payment_method: meta.payment_method || null,
+          payment_notes: meta.payment_notes || null,
+          paid_amount: pAmt,
+          balance_amount: 0,
+          advance_percentage: 100,
+          payment_status: 'PAID',
+          payment_confirmed_by_company: meta.payment_confirmed_by_company !== undefined ? Boolean(meta.payment_confirmed_by_company) : true,
+          payment_confirmed_at: meta.payment_confirmed_at || latestPaymentEvent.created_at,
+          payment_confirmed_by: meta.confirmed_by || meta.payment_confirmed_by || null,
+        };
+      } else if (latestPaymentEvent.event_type === 'ADVANCE_PAID') {
+        const pAmt = meta.paid_amount !== undefined ? Number(meta.paid_amount) : 0;
+        const bAmt = meta.balance_amount !== undefined ? Number(meta.balance_amount) : Math.max(0, grandTotal - pAmt);
+        const advPct = meta.advance_percentage !== undefined && meta.advance_percentage !== null
+          ? Number(meta.advance_percentage)
+          : (grandTotal > 0 && pAmt > 0 ? Math.round((pAmt / grandTotal) * 100) : null);
+        return {
+          is_paid: false,
+          paid_at: meta.paid_at || latestPaymentEvent.created_at,
+          payment_method: meta.payment_method || null,
+          payment_notes: meta.payment_notes || null,
+          paid_amount: pAmt,
+          balance_amount: bAmt,
+          advance_percentage: advPct,
+          payment_status: 'PARTIALLY_PAID',
+          payment_confirmed_by_company: meta.payment_confirmed_by_company !== undefined ? Boolean(meta.payment_confirmed_by_company) : true,
+          payment_confirmed_at: meta.payment_confirmed_at || latestPaymentEvent.created_at,
+          payment_confirmed_by: meta.confirmed_by || meta.payment_confirmed_by || null,
+        };
+      } else if (latestPaymentEvent.event_type === 'MARKED_UNPAID') {
+        return {
+          is_paid: false,
+          paid_at: null,
+          payment_method: null,
+          payment_notes: null,
+          paid_amount: 0,
+          balance_amount: grandTotal,
+          advance_percentage: 0,
+          payment_status: 'UNPAID',
+          payment_confirmed_by_company: false,
+          payment_confirmed_at: null,
+          payment_confirmed_by: null,
+        };
+      }
+    }
+
+    if (filePayment !== undefined) {
+      const isPaid = Boolean(filePayment.is_paid);
+      const pAmt = filePayment.paid_amount !== undefined ? Number(filePayment.paid_amount) : (isPaid ? grandTotal : 0);
+      const bAmt = filePayment.balance_amount !== undefined ? Number(filePayment.balance_amount) : (isPaid ? 0 : Math.max(0, grandTotal - pAmt));
+      const advPct = filePayment.advance_percentage !== undefined ? filePayment.advance_percentage : (isPaid ? 100 : (grandTotal > 0 && pAmt > 0 ? Math.round((pAmt / grandTotal) * 100) : null));
+      const payStatus = filePayment.payment_status || (isPaid ? 'PAID' : (pAmt > 0 ? 'PARTIALLY_PAID' : 'UNPAID'));
+      return {
+        is_paid: isPaid,
+        paid_at: filePayment.paid_at || null,
+        payment_method: filePayment.payment_method || null,
+        payment_notes: filePayment.payment_notes || null,
+        paid_amount: pAmt,
+        balance_amount: bAmt,
+        advance_percentage: advPct,
+        payment_status: payStatus,
+        payment_confirmed_by_company: filePayment.payment_confirmed_by_company !== undefined ? Boolean(filePayment.payment_confirmed_by_company) : isPaid,
+        payment_confirmed_at: filePayment.payment_confirmed_at || null,
+        payment_confirmed_by: filePayment.payment_confirmed_by || null,
+      };
+    }
+
+    if (existingQuote) {
+      const isPaid = Boolean(existingQuote.is_paid);
+      const pAmt = existingQuote.paid_amount !== undefined ? Number(existingQuote.paid_amount) : (isPaid ? grandTotal : 0);
+      const bAmt = existingQuote.balance_amount !== undefined ? Number(existingQuote.balance_amount) : (isPaid ? 0 : Math.max(0, grandTotal - pAmt));
+      return {
+        is_paid: isPaid,
+        paid_at: existingQuote.paid_at || null,
+        payment_method: existingQuote.payment_method || null,
+        payment_notes: existingQuote.payment_notes || null,
+        paid_amount: pAmt,
+        balance_amount: bAmt,
+        advance_percentage: existingQuote.advance_percentage ?? (isPaid ? 100 : null),
+        payment_status: existingQuote.payment_status || (isPaid ? 'PAID' : (pAmt > 0 ? 'PARTIALLY_PAID' : 'UNPAID')),
+        payment_confirmed_by_company: existingQuote.payment_confirmed_by_company ?? isPaid,
+        payment_confirmed_at: existingQuote.payment_confirmed_at || null,
+        payment_confirmed_by: existingQuote.payment_confirmed_by || null,
+      };
+    }
+
+    return {
+      is_paid: false,
+      paid_at: null,
+      payment_method: null,
+      payment_notes: null,
+      paid_amount: 0,
+      balance_amount: grandTotal,
+      advance_percentage: null,
+      payment_status: 'UNPAID',
+      payment_confirmed_by_company: false,
+      payment_confirmed_at: null,
+      payment_confirmed_by: null,
+    };
   }
 
   private getInvoicesFilePath(): string {
@@ -1417,7 +1556,7 @@ class QuoteFlowStore {
           const filePayments = this.loadPaymentsFromFile();
 
           // Fetch payment and chat events from Supabase to ensure accurate status across all clients
-          const paymentMap: Record<string, { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }> = {};
+          const eventsByQuote: Record<string, any[]> = {};
           const completedMap: Record<string, { completed_at: string; unpaid: boolean }> = {};
           const chatEventsByQuote: Record<string, { messages: Array<{ senderRole: string; createdAt: string }>; lastReadAt: string | null }> = {};
           try {
@@ -1425,26 +1564,17 @@ class QuoteFlowStore {
               .from('quotation_events')
               .select('quotation_id, actor_type, event_type, metadata, created_at')
               .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED'])
+              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED'])
               .order('created_at', { ascending: true });
 
             if (orgEvents) {
               for (const pe of orgEvents) {
-                if (pe.event_type === 'MARKED_PAID') {
-                  paymentMap[pe.quotation_id] = {
-                    is_paid: true,
-                    paid_at: pe.metadata?.paid_at || pe.created_at,
-                    payment_method: pe.metadata?.payment_method || null,
-                    payment_notes: pe.metadata?.payment_notes || null,
-                  };
-                } else if (pe.event_type === 'MARKED_UNPAID') {
-                  paymentMap[pe.quotation_id] = {
-                    is_paid: false,
-                    paid_at: null,
-                    payment_method: null,
-                    payment_notes: null,
-                  };
-                } else if (pe.event_type === 'COMPLETED') {
+                if (!eventsByQuote[pe.quotation_id]) {
+                  eventsByQuote[pe.quotation_id] = [];
+                }
+                eventsByQuote[pe.quotation_id].push(pe);
+
+                if (pe.event_type === 'COMPLETED') {
                   completedMap[pe.quotation_id] = {
                     completed_at: pe.metadata?.completed_at || pe.created_at,
                     unpaid: Boolean(pe.metadata?.unpaid),
@@ -1475,25 +1605,16 @@ class QuoteFlowStore {
 
           for (const q of data) {
             const existing = this.quotations.get(q.id);
-            const filePay = filePayments[q.id];
-            const eventPay = paymentMap[q.id];
-
-            let isPaid = q.is_paid !== undefined && q.is_paid !== null ? Boolean(q.is_paid) : (existing?.is_paid ?? false);
-            let paidAt = q.paid_at || existing?.paid_at || null;
-            let paymentMethod = q.payment_method || existing?.payment_method || null;
-            let paymentNotes = q.payment_notes || existing?.payment_notes || null;
-
-            if (eventPay !== undefined) {
-              isPaid = eventPay.is_paid;
-              paidAt = eventPay.paid_at || null;
-              paymentMethod = eventPay.payment_method || null;
-              paymentNotes = eventPay.payment_notes || null;
-            } else if (filePay !== undefined) {
-              isPaid = filePay.is_paid;
-              paidAt = filePay.paid_at || null;
-              paymentMethod = filePay.payment_method || null;
-              paymentNotes = filePay.payment_notes || null;
-            }
+            const quoteEvents = (eventsByQuote[q.id] || []).sort(
+              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            const payDetails = this.resolvePaymentDetails(
+              q.id,
+              Number(q.grand_total) || 0,
+              quoteEvents,
+              filePayments,
+              existing
+            );
 
             // Auto-expire at the end of valid_until date (23:59:59.999) or check COMPLETED
             let currentStatus = q.status;
@@ -1520,7 +1641,7 @@ class QuoteFlowStore {
                 ).length
               : 0;
 
-            const finalIsPaid = completedInfo && completedInfo.unpaid ? false : isPaid;
+            const finalIsPaid = completedInfo && completedInfo.unpaid ? false : payDetails.is_paid;
 
             const merged: Quotation = {
               ...(existing || {}),
@@ -1528,9 +1649,16 @@ class QuoteFlowStore {
               status: currentStatus,
               expired_at: expiredAt,
               is_paid: finalIsPaid,
-              paid_at: paidAt,
-              payment_method: paymentMethod,
-              payment_notes: paymentNotes,
+              paid_at: payDetails.paid_at,
+              payment_method: payDetails.payment_method,
+              payment_notes: payDetails.payment_notes,
+              paid_amount: completedInfo && completedInfo.unpaid ? 0 : payDetails.paid_amount,
+              balance_amount: completedInfo && completedInfo.unpaid ? Number(q.grand_total) : payDetails.balance_amount,
+              advance_percentage: completedInfo && completedInfo.unpaid ? 0 : payDetails.advance_percentage,
+              payment_status: completedInfo && completedInfo.unpaid ? 'UNPAID' : payDetails.payment_status,
+              payment_confirmed_by_company: completedInfo && completedInfo.unpaid ? false : payDetails.payment_confirmed_by_company,
+              payment_confirmed_at: completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_at,
+              payment_confirmed_by: completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_by,
               completed_at: completedInfo?.completed_at || existing?.completed_at || null,
               completed_unpaid: Boolean(completedInfo?.unpaid || existing?.completed_unpaid),
               chat_count: chatCount,
@@ -1659,27 +1787,13 @@ class QuoteFlowStore {
             this.views.set(data.id, viewsData as QuotationView[]);
           }
 
-          // Check if there is any payment event in eventsData
-          const latestPaymentEvent = eventsData?.find(
-            (e: any) => e.event_type === 'MARKED_PAID' || e.event_type === 'MARKED_UNPAID'
+          const payDetails = this.resolvePaymentDetails(
+            data.id,
+            Number(data.grand_total) || 0,
+            eventsData,
+            filePayments,
+            existing
           );
-
-          let isPaid = data.is_paid !== undefined && data.is_paid !== null ? Boolean(data.is_paid) : (existing?.is_paid ?? false);
-          let paidAt = data.paid_at || existing?.paid_at || null;
-          let paymentMethod = data.payment_method || existing?.payment_method || null;
-          let paymentNotes = data.payment_notes || existing?.payment_notes || null;
-
-          if (latestPaymentEvent) {
-            isPaid = latestPaymentEvent.event_type === 'MARKED_PAID';
-            paidAt = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.paid_at || latestPaymentEvent.created_at) : null;
-            paymentMethod = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_method || null) : null;
-            paymentNotes = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_notes || null) : null;
-          } else if (filePayment !== undefined) {
-            isPaid = filePayment.is_paid;
-            paidAt = filePayment.paid_at || null;
-            paymentMethod = filePayment.payment_method || null;
-            paymentNotes = filePayment.payment_notes || null;
-          }
 
           // Check for COMPLETED event or auto-expire at end of valid_until date
           let currentStatus = data.status;
@@ -1688,6 +1802,8 @@ class QuoteFlowStore {
           const latestCompletedEvent = eventsData?.find(
             (e: any) => e.event_type === 'COMPLETED'
           );
+
+          let isPaid = payDetails.is_paid;
 
           if (latestCompletedEvent) {
             currentStatus = 'COMPLETED';
@@ -1715,9 +1831,16 @@ class QuoteFlowStore {
             status: currentStatus,
             expired_at: expiredAt,
             is_paid: isPaid,
-            paid_at: paidAt,
-            payment_method: paymentMethod,
-            payment_notes: paymentNotes,
+            paid_at: payDetails.paid_at,
+            payment_method: payDetails.payment_method,
+            payment_notes: payDetails.payment_notes,
+            paid_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount,
+            balance_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount,
+            advance_percentage: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage,
+            payment_status: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 'UNPAID' : payDetails.payment_status,
+            payment_confirmed_by_company: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? false : payDetails.payment_confirmed_by_company,
+            payment_confirmed_at: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_at,
+            payment_confirmed_by: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_by,
             completed_at: latestCompletedEvent ? (latestCompletedEvent.metadata?.completed_at || latestCompletedEvent.created_at) : existing?.completed_at || null,
             completed_unpaid: Boolean(latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid),
             chat_count: chatState.chatCount,
@@ -1819,26 +1942,13 @@ class QuoteFlowStore {
             this.events.set(data.id, eventsData as QuotationEvent[]);
           }
 
-          const latestPaymentEvent = eventsData?.find(
-            (e: any) => e.event_type === 'MARKED_PAID' || e.event_type === 'MARKED_UNPAID'
+          const payDetails = this.resolvePaymentDetails(
+            data.id,
+            Number(data.grand_total) || 0,
+            eventsData,
+            filePayments,
+            existing
           );
-
-          let isPaid = data.is_paid !== undefined && data.is_paid !== null ? Boolean(data.is_paid) : (existing?.is_paid ?? false);
-          let paidAt = data.paid_at || existing?.paid_at || null;
-          let paymentMethod = data.payment_method || existing?.payment_method || null;
-          let paymentNotes = data.payment_notes || existing?.payment_notes || null;
-
-          if (latestPaymentEvent) {
-            isPaid = latestPaymentEvent.event_type === 'MARKED_PAID';
-            paidAt = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.paid_at || latestPaymentEvent.created_at) : null;
-            paymentMethod = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_method || null) : null;
-            paymentNotes = latestPaymentEvent.event_type === 'MARKED_PAID' ? (latestPaymentEvent.metadata?.payment_notes || null) : null;
-          } else if (filePayment !== undefined) {
-            isPaid = filePayment.is_paid;
-            paidAt = filePayment.paid_at || null;
-            paymentMethod = filePayment.payment_method || null;
-            paymentNotes = filePayment.payment_notes || null;
-          }
 
           // Check for COMPLETED event or auto-expire at end of valid_until date
           let currentStatus = data.status;
@@ -1847,6 +1957,8 @@ class QuoteFlowStore {
           const latestCompletedEvent = eventsData?.find(
             (e: any) => e.event_type === 'COMPLETED'
           );
+
+          let isPaid = payDetails.is_paid;
 
           if (latestCompletedEvent) {
             currentStatus = 'COMPLETED';
@@ -1874,9 +1986,16 @@ class QuoteFlowStore {
             status: currentStatus,
             expired_at: expiredAt,
             is_paid: isPaid,
-            paid_at: paidAt,
-            payment_method: paymentMethod,
-            payment_notes: paymentNotes,
+            paid_at: payDetails.paid_at,
+            payment_method: payDetails.payment_method,
+            payment_notes: payDetails.payment_notes,
+            paid_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount,
+            balance_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount,
+            advance_percentage: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage,
+            payment_status: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 'UNPAID' : payDetails.payment_status,
+            payment_confirmed_by_company: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? false : payDetails.payment_confirmed_by_company,
+            payment_confirmed_at: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_at,
+            payment_confirmed_by: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_by,
             completed_at: latestCompletedEvent ? (latestCompletedEvent.metadata?.completed_at || latestCompletedEvent.created_at) : existing?.completed_at || null,
             completed_unpaid: Boolean(latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid),
             chat_count: chatState.chatCount,

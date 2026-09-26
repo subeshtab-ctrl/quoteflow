@@ -270,19 +270,24 @@ export function QuotationActionButtons({
         {/* COMPLETED Quotation View - Locked Lifecycle */}
         {currentStatus === 'COMPLETED' && currentQuotation && (
           <>
-            {currentQuotation.completed_unpaid || !currentQuotation.is_paid ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold shadow-xs select-none">
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                <span>Completed (Unpaid) • Locked</span>
-              </div>
-            ) : (
+            {currentQuotation.is_paid ? (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold shadow-xs select-none">
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                 <span>Completed • Locked</span>
               </div>
+            ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-50 border border-cyan-300 text-cyan-800 text-xs font-bold shadow-xs select-none">
+                <AlertTriangle className="h-3.5 w-3.5 text-cyan-600" />
+                <span>Completed (Partially Paid) • Locked</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold shadow-xs select-none">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                <span>Completed (Unpaid) • Locked</span>
+              </div>
             )}
 
-            {currentQuotation.is_paid && (
+            {currentQuotation.is_paid ? (
               <>
                 <Button
                   variant="outline"
@@ -306,7 +311,18 @@ export function QuotationActionButtons({
                   <span>Paid</span>
                 </Button>
               </>
-            )}
+            ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPaymentOpen(true)}
+                className="gap-1.5 text-xs font-semibold shadow-sm bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
+                title="Payment details - click to view or update"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>Partial ({currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%)</span>
+              </Button>
+            ) : null}
 
             <Link href="/invoices">
               <Button
@@ -375,6 +391,17 @@ export function QuotationActionButtons({
                   <span>Paid</span>
                 </Button>
               </>
+            ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPaymentOpen(true)}
+                className="gap-1.5 text-xs font-semibold shadow-sm bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
+                title={`Partial payment recorded (${currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%) - click to update`}
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>Partial ({currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%)</span>
+              </Button>
             ) : (
               <Button
                 variant="outline"

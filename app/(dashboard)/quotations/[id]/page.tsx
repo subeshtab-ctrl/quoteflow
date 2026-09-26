@@ -83,6 +83,8 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 status={quotation.status}
                 isPaid={quotation.is_paid}
                 completedUnpaid={quotation.completed_unpaid}
+                paymentStatus={quotation.payment_status}
+                paidAmount={quotation.paid_amount}
               />
             </div>
             <p className="text-xs text-slate-500">
@@ -138,6 +140,8 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 This quotation has been officially approved.{' '}
                 {quotation.is_paid
                   ? 'Commercial Tax Invoice is generated and available for viewing and printing.'
+                  : (quotation.payment_status === 'PARTIALLY_PAID' || (quotation.paid_amount && quotation.paid_amount > 0))
+                  ? 'Advance payment has been logged. Commercial Tax Invoice will be unlocked upon full payment settlement.'
                   : 'Commercial Tax Invoice will be generated once payment is marked as PAID.'}
               </p>
             )}
@@ -156,6 +160,21 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                       {quotation.payment_method ? ` via ${quotation.payment_method}` : ''}
                       {quotation.payment_notes ? ` (${quotation.payment_notes})` : ''}
                       {' — Tax invoice unlocked.'}
+                    </span>
+                  </>
+                ) : (quotation.payment_status === 'PARTIALLY_PAID' || (quotation.paid_amount && quotation.paid_amount > 0)) ? (
+                  <>
+                    <span className="px-2.5 py-0.5 rounded-full bg-cyan-100 text-cyan-900 border border-cyan-300 text-[10px] font-black tracking-wider uppercase shadow-xs">
+                      ⚡ PARTIALLY PAID ({quotation.advance_percentage || Math.round(((quotation.paid_amount || 0) / quotation.grand_total) * 100)}%)
+                    </span>
+                    <span className="text-xs font-semibold text-cyan-950">
+                      Paid: {formatCurrency(quotation.paid_amount || 0, quotation.currency)}
+                      {' • '}
+                      Remaining balance: <strong className="text-amber-800">{formatCurrency(quotation.balance_amount !== undefined ? quotation.balance_amount : (quotation.grand_total - (quotation.paid_amount || 0)), quotation.currency)}</strong>
+                      {quotation.paid_at ? ` on ${formatDate(quotation.paid_at)}` : ''}
+                      {quotation.payment_method ? ` via ${quotation.payment_method}` : ''}
+                      {quotation.payment_notes ? ` (${quotation.payment_notes})` : ''}
+                      {quotation.payment_confirmed_by_company ? ' — ✓ Confirmed' : ' — Awaiting Verification'}
                     </span>
                   </>
                 ) : (

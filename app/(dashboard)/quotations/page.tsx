@@ -138,6 +138,8 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
                               status={quote.status}
                               isPaid={quote.is_paid}
                               completedUnpaid={quote.completed_unpaid}
+                              paymentStatus={quote.payment_status}
+                              paidAmount={quote.paid_amount}
                             />
                             {quote.status === 'APPROVED' && (
                               <QuotationPaymentButton quotation={quote} variant="badge" />

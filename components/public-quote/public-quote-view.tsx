@@ -417,6 +417,8 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               status={quotation.status}
               isPaid={quotation.is_paid}
               completedUnpaid={quotation.completed_unpaid}
+              paymentStatus={quotation.payment_status}
+              paidAmount={quotation.paid_amount}
             />
           </div>
 
@@ -529,6 +531,8 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                       status={q.status}
                       isPaid={q.is_paid}
                       completedUnpaid={q.completed_unpaid}
+                      paymentStatus={q.payment_status}
+                      paidAmount={q.paid_amount}
                     />
                   </button>
                 );
@@ -547,6 +551,45 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               <h4 className="font-bold text-sm sm:text-base">Quotation Settled & Fully Paid</h4>
               <p className="text-xs sm:text-sm text-emerald-700">
                 Payment for this quotation has been successfully recorded and settled in full. Thank you for your business!
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isPaid && (quotation.payment_status === 'PARTIALLY_PAID' || (quotation.paid_amount && quotation.paid_amount > 0)) && (
+          <div className="flex items-center gap-3 rounded-2xl bg-cyan-50 border border-cyan-200 p-4 text-cyan-950 shadow-sm animate-in fade-in">
+            <div className="rounded-xl bg-cyan-100 p-2 text-cyan-700 shrink-0">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h4 className="font-bold text-sm sm:text-base text-cyan-950">
+                  Advance Payment Received ({quotation.advance_percentage ? `${quotation.advance_percentage}%` : 'Partial'})
+                </h4>
+                {isPaymentConfirmed && (
+                  <span className="text-[11px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300 px-2.5 py-0.5 rounded-full">
+                    ✓ Confirmed by Company
+                  </span>
+                )}
+              </div>
+              <p className="text-xs sm:text-sm text-cyan-800 mt-0.5">
+                We have received your advance payment of{' '}
+                <strong>
+                  {formatCurrency(
+                    quotation.paid_amount || 0,
+                    quotation.currency
+                  )}
+                </strong>
+                . Remaining balance due:{' '}
+                <strong>
+                  {formatCurrency(
+                    quotation.balance_amount !== undefined
+                      ? quotation.balance_amount
+                      : quotation.grand_total - (quotation.paid_amount || 0),
+                    quotation.currency
+                  )}
+                </strong>
+                .
               </p>
             </div>
           </div>

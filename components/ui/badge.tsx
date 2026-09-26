@@ -38,15 +38,36 @@ export function StatusBadge({
   className,
   isPaid,
   completedUnpaid,
+  paymentStatus,
+  paidAmount,
 }: {
   status: QuotationStatus | string;
   className?: string;
   isPaid?: boolean;
   completedUnpaid?: boolean;
+  paymentStatus?: string;
+  paidAmount?: number;
 }) {
+  const isPartiallyPaid =
+    !isPaid && (paymentStatus === 'PARTIALLY_PAID' || (paidAmount !== undefined && paidAmount > 0));
+
   switch (status) {
     case 'COMPLETED':
       if (isPaid === false || completedUnpaid === true) {
+        if (isPartiallyPaid) {
+          return (
+            <Badge
+              variant="cyan"
+              className={cn(
+                'bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-cyan-950/70 dark:text-cyan-200 dark:border-cyan-700 font-bold',
+                className
+              )}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-600 dark:bg-cyan-400" />
+              Completed (Partially Paid)
+            </Badge>
+          );
+        }
         return (
           <Badge
             variant="warning"
@@ -80,6 +101,22 @@ export function StatusBadge({
         </Badge>
       );
     case 'APPROVED':
+      if (isPaid) {
+        return (
+          <Badge variant="emerald" className={cn('bg-emerald-100 text-emerald-900 border-emerald-400 dark:bg-emerald-950/80 dark:text-emerald-200 dark:border-emerald-700 font-bold', className)}>
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400" />
+            Approved (Paid)
+          </Badge>
+        );
+      }
+      if (isPartiallyPaid) {
+        return (
+          <Badge variant="cyan" className={cn('bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-cyan-950/70 dark:text-cyan-200 dark:border-cyan-700 font-bold', className)}>
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-600 dark:bg-cyan-400" />
+            Approved (Partially Paid)
+          </Badge>
+        );
+      }
       return (
         <Badge variant="success" className={cn('bg-emerald-100/70 text-emerald-800 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800', className)}>
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />

@@ -169,6 +169,8 @@ export function DashboardTabs({
                           status={quote.status}
                           isPaid={quote.is_paid}
                           completedUnpaid={quote.completed_unpaid}
+                          paymentStatus={quote.payment_status}
+                          paidAmount={quote.paid_amount}
                         />
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-500">
