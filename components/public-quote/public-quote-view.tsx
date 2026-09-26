@@ -240,7 +240,11 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         <div className="sticky top-4 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/95 p-3.5 sm:p-4 shadow-lg backdrop-blur-md border border-slate-200/80">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status:</span>
-            <StatusBadge status={quotation.status} />
+            <StatusBadge
+              status={quotation.status}
+              isPaid={quotation.is_paid}
+              completedUnpaid={quotation.completed_unpaid}
+            />
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -313,7 +317,11 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                     <span className="text-slate-300 font-normal">|</span>
                     <span className="font-medium truncate max-w-[140px]">{q.title}</span>
                     <span className="font-bold text-slate-900">{formatCurrency(q.grand_total, q.currency)}</span>
-                    <StatusBadge status={q.status} />
+                    <StatusBadge
+                      status={q.status}
+                      isPaid={q.is_paid}
+                      completedUnpaid={q.completed_unpaid}
+                    />
                   </button>
                 );
               })}

@@ -165,7 +165,11 @@ export function DashboardTabs({
                         {formatCurrency(quote.grand_total, quote.currency)}
                       </td>
                       <td className="py-3.5 px-4">
-                        <StatusBadge status={quote.status} />
+                        <StatusBadge
+                          status={quote.status}
+                          isPaid={quote.is_paid}
+                          completedUnpaid={quote.completed_unpaid}
+                        />
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-500">
                         {formatDate(quote.valid_until)}

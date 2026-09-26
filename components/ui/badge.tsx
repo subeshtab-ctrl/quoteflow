@@ -33,11 +33,41 @@ export function Badge({ className, variant = 'default', children, ...props }: Ba
   );
 }
 
-export function StatusBadge({ status, className }: { status: QuotationStatus | string; className?: string }) {
+export function StatusBadge({
+  status,
+  className,
+  isPaid,
+  completedUnpaid,
+}: {
+  status: QuotationStatus | string;
+  className?: string;
+  isPaid?: boolean;
+  completedUnpaid?: boolean;
+}) {
   switch (status) {
     case 'COMPLETED':
+      if (isPaid === false || completedUnpaid === true) {
+        return (
+          <Badge
+            variant="warning"
+            className={cn(
+              'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-700 font-bold',
+              className
+            )}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-600 dark:bg-amber-400" />
+            Completed (Unpaid)
+          </Badge>
+        );
+      }
       return (
-        <Badge variant="success" className={cn('bg-indigo-100/80 text-indigo-900 border-indigo-300 dark:bg-indigo-950/70 dark:text-indigo-200 dark:border-indigo-700 font-bold', className)}>
+        <Badge
+          variant="success"
+          className={cn(
+            'bg-indigo-100/80 text-indigo-900 border-indigo-300 dark:bg-indigo-950/70 dark:text-indigo-200 dark:border-indigo-700 font-bold',
+            className
+          )}
+        >
           <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />
           Completed
         </Badge>

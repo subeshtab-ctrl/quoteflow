@@ -255,6 +255,10 @@ export interface Quotation {
   unread_chat_count?: number;
   chat_count?: number;
 
+  // Completion Tracking
+  completed_at?: string | null;
+  completed_unpaid?: boolean;
+
   // Joined fields
   customer?: Customer;
   organization?: Organization;

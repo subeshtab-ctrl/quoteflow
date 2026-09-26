@@ -103,6 +103,74 @@ class QuoteFlowStore {
     }
   }
 
+  private async persistInvoiceToSupabase(invoice: Invoice): Promise<void> {
+    try {
+      const supabase = createAdminClient();
+      if (!supabase) return;
+      const invName = `INVOICE:${invoice.id}`;
+      const payload = JSON.stringify(invoice);
+
+      const { data: existing } = await supabase
+        .from('templates')
+        .select('id')
+        .eq('name', invName)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from('templates')
+          .update({
+            layout_style: payload,
+          })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('templates')
+          .insert({
+            organization_id: invoice.organization_id || DEFAULT_ORG_ID,
+            name: invName,
+            layout_style: payload,
+            accent_color: 'INVOICE',
+            is_default: false,
+          });
+      }
+    } catch (e) {
+      console.warn('Failed to persist invoice to Supabase templates:', e);
+    }
+  }
+
+  private async loadInvoicesFromSupabase(orgId?: string): Promise<Invoice[]> {
+    try {
+      const supabase = createAdminClient();
+      if (!supabase) return [];
+      let query = supabase.from('templates').select('*').eq('accent_color', 'INVOICE');
+      if (orgId) {
+        query = query.eq('organization_id', orgId);
+      }
+      const { data, error } = await query;
+      if (error || !data) return [];
+
+      const list: Invoice[] = [];
+      for (const row of data) {
+        try {
+          if (row.layout_style) {
+            const parsed = JSON.parse(row.layout_style) as Invoice;
+            if (parsed && parsed.id) {
+              list.push(parsed);
+              this.invoices.set(parsed.id, parsed);
+              if (parsed.items) {
+                this.invoiceItems.set(parsed.id, parsed.items);
+              }
+            }
+          }
+        } catch {}
+      }
+      return list;
+    } catch {
+      return [];
+    }
+  }
+
   constructor() {
     // Load any file-persisted invoices
     const savedInvoices = this.loadInvoicesFromFile();
@@ -1230,13 +1298,14 @@ class QuoteFlowStore {
 
           // Fetch payment and chat events from Supabase to ensure accurate status across all clients
           const paymentMap: Record<string, { is_paid: boolean; paid_at?: string | null; payment_method?: string | null; payment_notes?: string | null }> = {};
+          const completedMap: Record<string, { completed_at: string; unpaid: boolean }> = {};
           const chatEventsByQuote: Record<string, { messages: Array<{ senderRole: string; createdAt: string }>; lastReadAt: string | null }> = {};
           try {
             const { data: orgEvents } = await supabase
               .from('quotation_events')
               .select('quotation_id, actor_type, event_type, metadata, created_at')
               .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ'])
+              .in('event_type', ['MARKED_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED'])
               .order('created_at', { ascending: true });
 
             if (orgEvents) {
@@ -1254,6 +1323,11 @@ class QuoteFlowStore {
                     paid_at: null,
                     payment_method: null,
                     payment_notes: null,
+                  };
+                } else if (pe.event_type === 'COMPLETED') {
+                  completedMap[pe.quotation_id] = {
+                    completed_at: pe.metadata?.completed_at || pe.created_at,
+                    unpaid: Boolean(pe.metadata?.unpaid),
                   };
                 } else if (pe.event_type === 'CHAT_MESSAGE') {
                   if (!chatEventsByQuote[pe.quotation_id]) {
@@ -1301,10 +1375,13 @@ class QuoteFlowStore {
               paymentNotes = filePay.payment_notes || null;
             }
 
-            // Auto-expire at the end of valid_until date (23:59:59.999)
+            // Auto-expire at the end of valid_until date (23:59:59.999) or check COMPLETED
             let currentStatus = q.status;
             let expiredAt = q.expired_at || existing?.expired_at || null;
-            if (
+            const completedInfo = completedMap[q.id];
+            if (completedInfo) {
+              currentStatus = 'COMPLETED';
+            } else if (
               ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
               this.isPastEndOfValidityDate(q.valid_until)
             ) {
@@ -1323,15 +1400,19 @@ class QuoteFlowStore {
                 ).length
               : 0;
 
+            const finalIsPaid = completedInfo && completedInfo.unpaid ? false : isPaid;
+
             const merged: Quotation = {
               ...(existing || {}),
               ...q,
               status: currentStatus,
               expired_at: expiredAt,
-              is_paid: isPaid,
+              is_paid: finalIsPaid,
               paid_at: paidAt,
               payment_method: paymentMethod,
               payment_notes: paymentNotes,
+              completed_at: completedInfo?.completed_at || existing?.completed_at || null,
+              completed_unpaid: Boolean(completedInfo?.unpaid || existing?.completed_unpaid),
               chat_count: chatCount,
               unread_chat_count: unreadChatCount,
               has_unread_chat: unreadChatCount > 0,
@@ -1480,10 +1561,20 @@ class QuoteFlowStore {
             paymentNotes = filePayment.payment_notes || null;
           }
 
-          // Auto-expire at end of valid_until date (23:59:59.999)
+          // Check for COMPLETED event or auto-expire at end of valid_until date
           let currentStatus = data.status;
           let expiredAt = data.expired_at || existing?.expired_at || null;
-          if (
+
+          const latestCompletedEvent = eventsData?.find(
+            (e: any) => e.event_type === 'COMPLETED'
+          );
+
+          if (latestCompletedEvent) {
+            currentStatus = 'COMPLETED';
+            if (latestCompletedEvent.metadata?.unpaid) {
+              isPaid = false;
+            }
+          } else if (
             ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
             this.isPastEndOfValidityDate(data.valid_until)
           ) {
@@ -1507,6 +1598,8 @@ class QuoteFlowStore {
             paid_at: paidAt,
             payment_method: paymentMethod,
             payment_notes: paymentNotes,
+            completed_at: latestCompletedEvent ? (latestCompletedEvent.metadata?.completed_at || latestCompletedEvent.created_at) : existing?.completed_at || null,
+            completed_unpaid: Boolean(latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid),
             chat_count: chatState.chatCount,
             unread_chat_count: chatState.unreadChatCount,
             has_unread_chat: chatState.unreadChatCount > 0,
@@ -1627,10 +1720,20 @@ class QuoteFlowStore {
             paymentNotes = filePayment.payment_notes || null;
           }
 
-          // Auto-expire at end of valid_until date (23:59:59.999)
+          // Check for COMPLETED event or auto-expire at end of valid_until date
           let currentStatus = data.status;
           let expiredAt = data.expired_at || existing?.expired_at || null;
-          if (
+
+          const latestCompletedEvent = eventsData?.find(
+            (e: any) => e.event_type === 'COMPLETED'
+          );
+
+          if (latestCompletedEvent) {
+            currentStatus = 'COMPLETED';
+            if (latestCompletedEvent.metadata?.unpaid) {
+              isPaid = false;
+            }
+          } else if (
             ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
             this.isPastEndOfValidityDate(data.valid_until)
           ) {
@@ -1654,6 +1757,8 @@ class QuoteFlowStore {
             paid_at: paidAt,
             payment_method: paymentMethod,
             payment_notes: paymentNotes,
+            completed_at: latestCompletedEvent ? (latestCompletedEvent.metadata?.completed_at || latestCompletedEvent.created_at) : existing?.completed_at || null,
+            completed_unpaid: Boolean(latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid),
             chat_count: chatState.chatCount,
             unread_chat_count: chatState.unreadChatCount,
             has_unread_chat: chatState.unreadChatCount > 0,
@@ -1932,6 +2037,10 @@ class QuoteFlowStore {
 
     if (orgId && existing.organization_id !== orgId) {
       throw new Error('Unauthorized to modify quotation from another organization');
+    }
+
+    if (existing.status === 'COMPLETED') {
+      throw new Error('Completed quotation is locked and cannot be edited.');
     }
 
     if (existing.status === 'APPROVED') {
@@ -2531,6 +2640,11 @@ class QuoteFlowStore {
       if (['APPROVED', 'SENT', 'VIEWED', 'PENDING', 'PENDING_APPROVAL'].includes(quote.status)) {
         quote.status = 'PAYMENT_COMPLETED';
       }
+      try {
+        await this.ensureInvoiceForQuotation(quote);
+      } catch (e) {
+        console.warn('Auto invoice generation on payment failed:', e);
+      }
     } else {
       if (quote.status === 'PAYMENT_COMPLETED') {
         quote.status = 'APPROVED';
@@ -2585,11 +2699,10 @@ class QuoteFlowStore {
             created_at: now,
           });
 
-        // Touch quotation updated_at and status in Supabase
+        // Touch quotation updated_at in Supabase (avoid enum error on custom status)
         await supabase
           .from('quotations')
           .update({
-            status: quote.status,
             updated_at: now,
           })
           .eq('id', id);
@@ -2612,7 +2725,8 @@ class QuoteFlowStore {
   public async markQuotationCompleted(
     id: string,
     orgId?: string,
-    user: string = 'Business User'
+    user: string = 'Business User',
+    options?: { unpaid?: boolean; reason?: string }
   ): Promise<Quotation> {
     let quote = this.quotations.get(id);
     if (!quote) {
@@ -2625,7 +2739,25 @@ class QuoteFlowStore {
     }
 
     const now = new Date().toISOString();
+    const isUnpaid = options?.unpaid !== undefined ? Boolean(options.unpaid) : !Boolean(quote.is_paid);
+
     quote.status = 'COMPLETED';
+    quote.completed_at = now;
+    quote.completed_unpaid = isUnpaid;
+    if (isUnpaid) {
+      quote.is_paid = false;
+      quote.paid_at = null;
+    } else {
+      quote.is_paid = true;
+      if (!quote.paid_at) {
+        quote.paid_at = now;
+      }
+      try {
+        await this.ensureInvoiceForQuotation(quote);
+      } catch (e) {
+        console.warn('Auto invoice on completion failed:', e);
+      }
+    }
     quote.updated_at = now;
 
     this.quotations.set(id, quote);
@@ -2634,19 +2766,14 @@ class QuoteFlowStore {
     this.logEvent(quote.organization_id, id, 'USER', 'COMPLETED', {
       completed_by: user,
       completed_at: now,
+      unpaid: isUnpaid,
+      reason: options?.reason || null,
     });
 
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        await supabase
-          .from('quotations')
-          .update({
-            status: 'COMPLETED',
-            updated_at: now,
-          })
-          .eq('id', id);
-
+        // Record COMPLETED event in quotation_events table in Supabase
         await supabase
           .from('quotation_events')
           .insert({
@@ -2655,9 +2782,22 @@ class QuoteFlowStore {
             actor_type: 'USER',
             actor_name: user,
             event_type: 'COMPLETED',
-            metadata: { completed_at: now },
+            metadata: {
+              completed_at: now,
+              is_paid: !isUnpaid,
+              unpaid: isUnpaid,
+              reason: options?.reason || null,
+            },
             created_at: now,
           });
+
+        // Touch quotation updated_at without Postgres enum conflict
+        await supabase
+          .from('quotations')
+          .update({
+            updated_at: now,
+          })
+          .eq('id', id);
       }
     } catch (err) {
       console.warn('Failed to sync quotation completed status to Supabase:', err);
@@ -2708,9 +2848,18 @@ class QuoteFlowStore {
     orgId: string = DEFAULT_ORG_ID,
     filters?: { status?: string; search?: string; customerId?: string }
   ): Promise<Invoice[]> {
-    if (this.invoices.size === 0) {
-      const saved = this.loadInvoicesFromFile();
-      for (const inv of saved) {
+    // 0. Ensure quotations are loaded so auto-sync sees approved/completed paid quotes
+    if (this.quotations.size === 0) {
+      await this.getQuotations(orgId);
+    }
+
+    // 1. Load from Supabase templates
+    await this.loadInvoicesFromSupabase(orgId);
+
+    // 2. Also check file invoices fallback
+    const saved = this.loadInvoicesFromFile();
+    for (const inv of saved) {
+      if (!this.invoices.has(inv.id)) {
         this.invoices.set(inv.id, inv);
         if (inv.items) {
           this.invoiceItems.set(inv.id, inv.items);
@@ -2718,25 +2867,21 @@ class QuoteFlowStore {
       }
     }
 
-    try {
-      const supabase = createAdminClient();
-      if (supabase) {
-        const { data, error } = await supabase
-          .from('invoices')
-          .select('*, customer:customers(*), items:invoice_items(*)')
-          .eq('organization_id', orgId)
-          .order('created_at', { ascending: false });
-
-        if (!error && data && data.length > 0) {
-          for (const inv of data) {
-            this.invoices.set(inv.id, inv as Invoice);
-            if (inv.items) {
-              this.invoiceItems.set(inv.id, inv.items as InvoiceItem[]);
-            }
-          }
-        }
+    // 3. Auto-sync approved & paid quotes for this org into invoices
+    const quotes = Array.from(this.quotations.values()).filter(
+      (q) =>
+        q.organization_id === orgId &&
+        (q.status === 'APPROVED' || q.status === 'PAYMENT_COMPLETED' || q.status === 'COMPLETED') &&
+        Boolean(q.is_paid)
+    );
+    for (const q of quotes) {
+      const hasInv = Array.from(this.invoices.values()).some((inv) => inv.quotation_id === q.id);
+      if (!hasInv) {
+        try {
+          await this.ensureInvoiceForQuotation(q);
+        } catch {}
       }
-    } catch {}
+    }
 
     let list = Array.from(this.invoices.values()).filter((inv) => inv.organization_id === orgId);
 
@@ -2771,49 +2916,101 @@ class QuoteFlowStore {
   }
 
   public async getInvoiceById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Invoice | null> {
-    if (this.invoices.size === 0) {
-      const saved = this.loadInvoicesFromFile();
-      for (const inv of saved) {
-        this.invoices.set(inv.id, inv);
-        if (inv.items) {
-          this.invoiceItems.set(inv.id, inv.items);
-        }
-      }
+    let inv = this.invoices.get(id);
+
+    if (!inv) {
+      await this.loadInvoicesFromSupabase(orgId);
+      inv = this.invoices.get(id);
     }
 
-    try {
-      const supabase = createAdminClient();
-      if (supabase) {
-        const { data, error } = await supabase
-          .from('invoices')
-          .select('*, customer:customers(*), items:invoice_items(*)')
-          .eq('id', id)
-          .maybeSingle();
-
-        if (!error && data) {
-          this.invoices.set(data.id, data as Invoice);
-          if (data.items) {
-            this.invoiceItems.set(data.id, data.items as InvoiceItem[]);
-          }
-          return {
-            ...(data as Invoice),
-            customer: data.customer || this.customers.get(data.customer_id),
-            organization: (await this.getOrganization(data.organization_id)) || this.organizations.get(data.organization_id),
-            items: data.items || this.invoiceItems.get(data.id) || [],
-          };
-        }
+    if (!inv) {
+      const saved = this.loadInvoicesFromFile();
+      for (const s of saved) {
+        this.invoices.set(s.id, s);
+        if (s.items) this.invoiceItems.set(s.id, s.items);
       }
-    } catch {}
+      inv = this.invoices.get(id);
+    }
 
-    const inv = this.invoices.get(id);
     if (!inv) return null;
 
     return {
       ...inv,
       customer: inv.customer || this.customers.get(inv.customer_id),
-      organization: inv.organization || this.organizations.get(inv.organization_id),
+      organization: inv.organization || (await this.getOrganization(inv.organization_id)) || this.organizations.get(inv.organization_id),
       items: inv.items || this.invoiceItems.get(inv.id) || [],
     };
+  }
+
+  public async ensureInvoiceForQuotation(
+    quotation: Quotation,
+    customInvoiceNumber?: string
+  ): Promise<Invoice> {
+    // 1. Check in-memory map
+    const existing = Array.from(this.invoices.values()).find(
+      (inv) => inv.quotation_id === quotation.id
+    );
+    if (existing) {
+      return existing;
+    }
+
+    // 2. Check Supabase templates
+    const loaded = await this.loadInvoicesFromSupabase(quotation.organization_id);
+    const existingInDb = loaded.find((inv) => inv.quotation_id === quotation.id);
+    if (existingInDb) {
+      return existingInDb;
+    }
+
+    // 3. Create fresh invoice from quote
+    const invoiceNumber =
+      customInvoiceNumber || `INV-${quotation.quotation_number.replace(/^Q-/, '')}`;
+    const invoiceItems = (quotation.items || []).map((item, idx) => ({
+      product_id: item.product_id || null,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit || 'unit',
+      unit_price: item.unit_price,
+      discount_type: item.discount_type || 'PERCENTAGE',
+      discount_value: item.discount_value || 0,
+      discount_amount: item.discount_amount || 0,
+      tax_rate: item.tax_rate || 0,
+      tax_amount: item.tax_amount || 0,
+      line_total: item.line_total || 0,
+      sort_order: idx + 1,
+      item_type: item.item_type || 'GOODS',
+      classification_type: item.classification_type || null,
+      classification_code: item.classification_code || null,
+      cgst_rate: item.cgst_rate,
+      cgst_amount: item.cgst_amount,
+      sgst_rate: item.sgst_rate,
+      sgst_amount: item.sgst_amount,
+      igst_rate: item.igst_rate,
+      igst_amount: item.igst_amount,
+      tax_category: item.tax_category || null,
+    }));
+
+    const status: InvoiceStatus = quotation.is_paid ? 'PAID' : 'ISSUED';
+
+    const invoice = await this.createInvoice({
+      organization_id: quotation.organization_id,
+      customer_id: quotation.customer_id,
+      quotation_id: quotation.id,
+      invoice_number: invoiceNumber,
+      status,
+      issue_date: quotation.issue_date || new Date().toISOString().split('T')[0],
+      due_date: quotation.valid_until || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      currency: quotation.currency,
+      discount_type: quotation.discount_type,
+      discount_value: quotation.discount_value,
+      tax_rate: quotation.tax_rate,
+      notes: quotation.notes || '',
+      terms_conditions: quotation.terms_conditions || '',
+      payment_terms: 'Net 30 Days',
+      items: invoiceItems,
+      attachments: (quotation.attachments || []) as any,
+    });
+
+    return invoice;
   }
 
   public async createInvoice(data: {
@@ -2844,6 +3041,24 @@ class QuoteFlowStore {
     if (!invoiceNumber) {
       const count = this.invoices.size + 1;
       invoiceNumber = `INV-${String(count).padStart(6, '0')}`;
+    }
+
+    // If quotation_id is provided, check if an invoice already exists and update it to keep everything in sync
+    if (data.quotation_id) {
+      await this.loadInvoicesFromSupabase(orgId);
+      const existing = Array.from(this.invoices.values()).find(
+        (inv) => inv.quotation_id === data.quotation_id
+      );
+      if (existing) {
+        return await this.updateInvoice(
+          existing.id,
+          {
+            ...data,
+            invoice_number: invoiceNumber || existing.invoice_number,
+          },
+          orgId
+        );
+      }
     }
 
     const calculated = calculateQuotationTotals({
@@ -2920,38 +3135,7 @@ class QuoteFlowStore {
     this.invoices.set(invId, newInvoice);
     this.invoiceItems.set(invId, invoiceItems);
     this.saveInvoicesToFile();
-
-    try {
-      const supabase = createAdminClient();
-      if (supabase) {
-        await supabase.from('invoices').insert({
-          id: newInvoice.id,
-          organization_id: newInvoice.organization_id,
-          customer_id: newInvoice.customer_id,
-          quotation_id: newInvoice.quotation_id,
-          invoice_number: newInvoice.invoice_number,
-          po_number: newInvoice.po_number,
-          status: newInvoice.status,
-          issue_date: newInvoice.issue_date,
-          due_date: newInvoice.due_date,
-          currency: newInvoice.currency,
-          subtotal: newInvoice.subtotal,
-          discount_type: newInvoice.discount_type,
-          discount_value: newInvoice.discount_value,
-          discount_amount: newInvoice.discount_amount,
-          tax_rate: newInvoice.tax_rate,
-          tax_amount: newInvoice.tax_amount,
-          grand_total: newInvoice.grand_total,
-          notes: newInvoice.notes,
-          terms_conditions: newInvoice.terms_conditions,
-          payment_terms: newInvoice.payment_terms,
-          is_paid: newInvoice.is_paid,
-          paid_at: newInvoice.paid_at,
-          created_at: newInvoice.created_at,
-          updated_at: newInvoice.updated_at,
-        });
-      }
-    } catch {}
+    await this.persistInvoiceToSupabase(newInvoice);
 
     const org = await this.getOrganization(orgId);
     const customer = this.customers.get(data.customer_id);
@@ -2961,6 +3145,33 @@ class QuoteFlowStore {
       organization: org || undefined,
       customer: customer || undefined,
     };
+  }
+
+  public async updateInvoice(
+    id: string,
+    data: Partial<Invoice>,
+    orgId: string = DEFAULT_ORG_ID
+  ): Promise<Invoice> {
+    const inv = await this.getInvoiceById(id, orgId);
+    if (!inv) throw new Error('Invoice not found');
+
+    const updated: Invoice = {
+      ...inv,
+      ...data,
+      id,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.items) {
+      updated.items = data.items;
+      this.invoiceItems.set(id, data.items);
+    }
+
+    this.invoices.set(id, updated);
+    this.saveInvoicesToFile();
+    await this.persistInvoiceToSupabase(updated);
+
+    return updated;
   }
 
   public async updateInvoiceStatus(
@@ -2988,21 +3199,7 @@ class QuoteFlowStore {
 
     this.invoices.set(id, inv);
     this.saveInvoicesToFile();
-
-    try {
-      const supabase = createAdminClient();
-      if (supabase) {
-        await supabase
-          .from('invoices')
-          .update({
-            status: inv.status,
-            is_paid: inv.is_paid,
-            paid_at: inv.paid_at,
-            updated_at: now,
-          })
-          .eq('id', id);
-      }
-    } catch {}
+    await this.persistInvoiceToSupabase(inv);
 
     return inv;
   }
@@ -3015,7 +3212,7 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        await supabase.from('invoices').delete().eq('id', id).eq('organization_id', orgId);
+        await supabase.from('templates').delete().eq('name', `INVOICE:${id}`);
       }
     } catch {}
 

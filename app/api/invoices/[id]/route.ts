@@ -27,6 +27,32 @@ export async function GET(
   }
 }
 
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    const { id } = await params;
+    const body = await request.json();
+
+    const updated = await store.updateInvoice(id, body, orgId);
+
+    return NextResponse.json({
+      success: true,
+      invoice: updated,
+      message: 'Invoice updated successfully',
+    });
+  } catch (err: any) {
+    console.error('Error updating invoice:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to update invoice' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -21,8 +21,8 @@ export default async function EditQuotationPage({ params }: EditQuotationPagePro
 
   if (!quote) notFound();
 
-  // If already approved, editing directly is locked (must create revision)
-  if (quote.status === 'APPROVED') {
+  // If already approved or completed, direct editing is locked
+  if (quote.status === 'APPROVED' || quote.status === 'PAYMENT_COMPLETED' || quote.status === 'COMPLETED') {
     redirect(`/quotations/${id}`);
   }
 

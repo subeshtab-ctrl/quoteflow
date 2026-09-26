@@ -79,7 +79,11 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   Revision v{quotation.revision_number}
                 </span>
               )}
-              <StatusBadge status={quotation.status} />
+              <StatusBadge
+                status={quotation.status}
+                isPaid={quotation.is_paid}
+                completedUnpaid={quotation.completed_unpaid}
+              />
             </div>
             <p className="text-xs text-slate-500">
               Created on {formatDate(quotation.created_at)} • Valid until {formatDate(quotation.valid_until)}

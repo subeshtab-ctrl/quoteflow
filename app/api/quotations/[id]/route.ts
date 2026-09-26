@@ -49,6 +49,15 @@ export async function PATCH(req: NextRequest, { params }: RouteProps) {
       const updated = await store.markQuotationApproved(id, body.signer_name || auth?.fullName || 'Admin');
       return NextResponse.json({ success: true, quotation: updated });
     }
+    if (body.status === 'COMPLETED') {
+      const updated = await store.markQuotationCompleted(
+        id,
+        orgId,
+        body.signer_name || auth?.fullName || 'Business User',
+        { unpaid: body.unpaid, reason: body.unpaidReason || body.reason }
+      );
+      return NextResponse.json({ success: true, quotation: updated });
+    }
     const updated = await store.updateQuotation(id, body, orgId);
     return NextResponse.json({ success: true, quotation: updated });
   } catch (err: any) {

@@ -17,10 +17,13 @@ import {
   Trash2,
   Receipt,
   CreditCard,
+  AlertTriangle,
+  Lock,
 } from 'lucide-react';
 import { Quotation, Organization, Customer, QuotationStatus } from '@/types/database';
 import { InvoiceModal } from '@/components/quotations/invoice-modal';
 import { PaymentModal } from '@/components/quotations/payment-modal';
+import { Modal } from '@/components/ui/modal';
 
 interface QuotationActionButtonsProps {
   quotationId: string;
@@ -57,6 +60,7 @@ export function QuotationActionButtons({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [isUnpaidWarningOpen, setIsUnpaidWarningOpen] = useState(false);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
@@ -131,21 +135,16 @@ export function QuotationActionButtons({
     }
   };
 
-  const handleMarkCompleted = async () => {
-    if (
-      !confirm(
-        `Mark quotation ${quotationNumber} as COMPLETED? This marks the project lifecycle as fully completed.`
-      )
-    ) {
-      return;
-    }
-
+  const executeMarkCompleted = async (options: { unpaid: boolean }) => {
     try {
       setIsCompleting(true);
       const res = await fetch(`/api/quotations/${quotationId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'COMPLETED' }),
+        body: JSON.stringify({
+          status: 'COMPLETED',
+          unpaid: options.unpaid,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to mark quotation as completed');
@@ -155,11 +154,27 @@ export function QuotationActionButtons({
         setCurrentStatus('COMPLETED');
       }
 
+      setIsUnpaidWarningOpen(false);
       router.refresh();
     } catch (err: any) {
       alert(err.message || 'Error completing quotation');
     } finally {
       setIsCompleting(false);
+    }
+  };
+
+  const handleMarkCompletedClick = () => {
+    if (!currentQuotation?.is_paid) {
+      setIsUnpaidWarningOpen(true);
+    } else {
+      if (
+        !confirm(
+          `Mark quotation ${quotationNumber} as COMPLETED? This quotation is fully paid. Once marked as completed, it will be permanently saved and locked.`
+        )
+      ) {
+        return;
+      }
+      executeMarkCompleted({ unpaid: false });
     }
   };
 
@@ -252,25 +267,93 @@ export function QuotationActionButtons({
   return (
     <>
       <div className="flex items-center gap-2 flex-wrap">
+        {/* COMPLETED Quotation View - Locked Lifecycle */}
+        {currentStatus === 'COMPLETED' && currentQuotation && (
+          <>
+            {currentQuotation.completed_unpaid || !currentQuotation.is_paid ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold shadow-xs select-none">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                <span>Completed (Unpaid) • Locked</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold shadow-xs select-none">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Completed • Locked</span>
+              </div>
+            )}
+
+            {currentQuotation.is_paid && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsInvoiceOpen(true)}
+                  className="gap-1.5 text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-semibold shadow-xs"
+                  title="View / Print Commercial Tax Invoice"
+                >
+                  <Receipt className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>View Invoice</span>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsPaymentOpen(true)}
+                  className="gap-1.5 text-xs font-semibold shadow-sm bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                  title="Payment received - click to view details"
+                >
+                  <CreditCard className="h-3.5 w-3.5" />
+                  <span>Paid</span>
+                </Button>
+              </>
+            )}
+
+            <Link href="/invoices">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-xs"
+                title="Go to Invoices Dashboard"
+              >
+                <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
+                <span>Invoices Tab</span>
+              </Button>
+            </Link>
+          </>
+        )}
+
         {/* Approved Quotation Actions: Create Invoice and Mark as Completed */}
         {(currentStatus === 'APPROVED' || currentStatus === 'PAYMENT_COMPLETED') && currentQuotation && (
           <>
-            <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
+            {currentQuotation.is_paid ? (
               <Button
                 variant="primary"
                 size="sm"
+                onClick={() => setIsInvoiceOpen(true)}
                 className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm font-semibold"
-                title="Create an Invoice from this approved quotation"
+                title="View / Edit Commercial Tax Invoice"
               >
                 <Receipt className="h-3.5 w-3.5" />
-                <span>Create Invoice</span>
+                <span>Invoice</span>
               </Button>
-            </Link>
+            ) : (
+              <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm font-semibold"
+                  title="Create an Invoice from this approved quotation"
+                >
+                  <Receipt className="h-3.5 w-3.5" />
+                  <span>Create Invoice</span>
+                </Button>
+              </Link>
+            )}
 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleMarkCompleted}
+              onClick={handleMarkCompletedClick}
               isLoading={isCompleting}
               className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-xs"
               title="Mark this quotation lifecycle as Completed"
@@ -336,13 +419,15 @@ export function QuotationActionButtons({
           </Button>
         )}
 
-        {/* Change Rates / Edit */}
-        <Link href={`/quotations/${quotationId}/edit`}>
-          <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
-            <Edit className="h-3.5 w-3.5" />
-            <span>Change Rates</span>
-          </Button>
-        </Link>
+        {/* Change Rates / Edit (Hidden for APPROVED, PAYMENT_COMPLETED, and COMPLETED locked quotes) */}
+        {!['APPROVED', 'PAYMENT_COMPLETED', 'COMPLETED', 'EXPIRED', 'REJECTED'].includes(currentStatus) && (
+          <Link href={`/quotations/${quotationId}/edit`}>
+            <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
+              <Edit className="h-3.5 w-3.5" />
+              <span>Change Rates</span>
+            </Button>
+          </Link>
+        )}
 
         {/* Customer Approval Links: ONLY generated & accessible after quotation is finalized/saved (status !== 'DRAFT') */}
         {currentStatus !== 'DRAFT' && (
@@ -457,6 +542,52 @@ export function QuotationActionButtons({
           onPaymentUpdated={handlePaymentUpdated}
         />
       )}
+
+      {/* Unpaid Warning Modal for Mark as Completed */}
+      <Modal
+        isOpen={isUnpaidWarningOpen}
+        onClose={() => !isCompleting && setIsUnpaidWarningOpen(false)}
+        title="Warning: Quotation Not Paid"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-amber-900">Quotation Payment Has Not Been Received!</h4>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                Quotation <strong>{quotationNumber}</strong> has <strong>not been marked as paid</strong>.
+              </p>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Are you sure you want to mark it as completed? Once confirmed, this quotation will be permanently saved and locked as <strong>Completed (Unpaid)</strong>. You will not be able to make any changes, rate edits, or revisions.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsUnpaidWarningOpen(false)}
+              disabled={isCompleting}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => executeMarkCompleted({ unpaid: true })}
+              isLoading={isCompleting}
+              className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold shadow-sm"
+            >
+              <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+              <span>Confirm Mark as Completed (Unpaid)</span>
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

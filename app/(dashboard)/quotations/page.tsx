@@ -134,7 +134,11 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
                         </td>
                         <td className="py-4 px-4">
                           <div className="flex flex-col gap-1 items-start">
-                            <StatusBadge status={quote.status} />
+                            <StatusBadge
+                              status={quote.status}
+                              isPaid={quote.is_paid}
+                              completedUnpaid={quote.completed_unpaid}
+                            />
                             {quote.status === 'APPROVED' && (
                               <QuotationPaymentButton quotation={quote} variant="badge" />
                             )}

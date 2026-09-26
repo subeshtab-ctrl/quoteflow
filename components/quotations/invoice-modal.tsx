@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 import {
   Printer,
   Download,
@@ -23,6 +24,8 @@ import {
   Building2,
   FileText,
   AlertCircle,
+  ExternalLink,
+  Check,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -80,12 +83,52 @@ export function InvoiceModal({
   const [paymentMethodState, setPaymentMethodState] = useState(quotation.payment_method || null);
   const [paymentNotesState, setPaymentNotesState] = useState(quotation.payment_notes || null);
 
+  // Persistence State
+  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
   useEffect(() => {
     setIsPaidState(Boolean(quotation.is_paid));
     setPaidAtState(quotation.paid_at || null);
     setPaymentMethodState(quotation.payment_method || null);
     setPaymentNotesState(quotation.payment_notes || null);
   }, [quotation]);
+
+  // Fetch existing persisted invoice if available
+  useEffect(() => {
+    if (isOpen) {
+      fetch(`/api/invoices?search=${encodeURIComponent(quotation.quotation_number)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.invoices && Array.isArray(data.invoices)) {
+            const match = data.invoices.find((inv: any) => inv.quotation_id === quotation.id);
+            if (match) {
+              setInvoiceId(match.id);
+              if (match.invoice_number) setInvoiceNumber(match.invoice_number);
+              if (match.issue_date) setInvoiceDate(match.issue_date.split('T')[0]);
+              if (match.due_date) setDueDate(match.due_date.split('T')[0]);
+              if (match.po_number) setPoNumber(match.po_number);
+              if (match.payment_terms) setPaymentTerms(match.payment_terms);
+              if (match.notes) setFooterNotes(match.notes);
+              if (match.items && match.items.length > 0) {
+                setItems(
+                  match.items.map((it: any, idx: number) => ({
+                    id: it.id || `item_${idx}_${Date.now()}`,
+                    description: it.description,
+                    quantity: Number(it.quantity) || 1,
+                    unit: it.unit || 'unit',
+                    unit_price: Number(it.unit_price) || 0,
+                    tax_rate: Number(it.tax_rate) || 0,
+                  }))
+                );
+              }
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, quotation.id, quotation.quotation_number]);
 
   // Customer override details
   const [clientName, setClientName] = useState(
@@ -260,8 +303,69 @@ export function InvoiceModal({
     window.open(`/api/public/pdf?id=${quotation.id}`, '_blank');
   };
 
-  // Business rule: Tax invoice is ONLY available when the quotation is APPROVED and marked as PAID
-  if (!isOpen || quotation.status !== 'APPROVED' || !quotation.is_paid) {
+  const handleSaveInvoiceChanges = async () => {
+    try {
+      setIsSaving(true);
+      const payload = {
+        organization_id: quotation.organization_id,
+        customer_id: quotation.customer_id,
+        quotation_id: quotation.id,
+        invoice_number: invoiceNumber,
+        po_number: poNumber || null,
+        status: isPaidState ? 'PAID' : 'ISSUED',
+        issue_date: invoiceDate,
+        due_date: dueDate,
+        currency: currency,
+        payment_terms: paymentTerms,
+        notes: footerNotes,
+        discount_type: discountType,
+        discount_value: discountValue,
+        items: items.map((it, idx) => ({
+          id: it.id,
+          description: it.description,
+          quantity: it.quantity,
+          unit: it.unit,
+          unit_price: it.unit_price,
+          tax_rate: it.tax_rate,
+          tax_amount: (it.quantity * it.unit_price * it.tax_rate) / 100,
+          line_total: (it.quantity * it.unit_price) * (1 + it.tax_rate / 100),
+          sort_order: idx + 1,
+        })),
+      };
+
+      let res;
+      if (invoiceId) {
+        res = await fetch(`/api/invoices/${invoiceId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch('/api/invoices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save invoice changes');
+
+      if (data.invoice?.id) {
+        setInvoiceId(data.invoice.id);
+      }
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3500);
+      setActiveTab('preview');
+    } catch (err: any) {
+      alert(err.message || 'Error saving invoice changes');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Business rule: Tax invoice is ONLY available when the quotation is APPROVED or COMPLETED and marked as PAID
+  if (!isOpen || (!['APPROVED', 'PAYMENT_COMPLETED', 'COMPLETED'].includes(quotation.status)) || !quotation.is_paid) {
     return null;
   }
 
@@ -307,6 +411,13 @@ export function InvoiceModal({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {saveSuccess && (
+              <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg animate-in fade-in">
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Changes Saved to Invoices</span>
+              </span>
+            )}
+
             {activeTab === 'preview' ? (
               <>
                 <Button
@@ -333,6 +444,23 @@ export function InvoiceModal({
                   <Pencil className="h-3.5 w-3.5" />
                   <span>Edit Details</span>
                 </Button>
+
+                {invoiceId ? (
+                  <Link href={`/invoices/${invoiceId}`} target="_blank">
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 shadow-xs">
+                      <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
+                      <span>Full Invoice</span>
+                    </Button>
+                  </Link>
+                ) : (
+                  <Link href="/invoices" target="_blank">
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 shadow-xs">
+                      <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
+                      <span>Invoices Tab</span>
+                    </Button>
+                  </Link>
+                )}
+
                 <Button variant="outline" size="sm" onClick={handlePrint} className="gap-1.5 text-xs shadow-sm">
                   <Printer className="h-3.5 w-3.5" />
                   <span>Print Invoice</span>
@@ -359,13 +487,23 @@ export function InvoiceModal({
                   <span>Reset Defaults</span>
                 </Button>
                 <Button
-                  variant="primary"
+                  variant="outline"
                   size="sm"
                   onClick={() => setActiveTab('preview')}
                   className="gap-1.5 text-xs shadow-sm"
                 >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>Preview</span>
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSaveInvoiceChanges}
+                  isLoading={isSaving}
+                  className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm font-semibold"
+                >
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  <span>Preview Invoice</span>
+                  <span>Save Changes</span>
                 </Button>
               </>
             )}
