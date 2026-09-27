@@ -415,9 +415,28 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   const upiInfo = quotation.upi_details || org?.default_upi_details;
                   const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
 
-                  const showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
-                  const showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
-                  const showCrypto = quotation.show_crypto_details ?? org?.default_show_crypto_details ?? false;
+                  const mode = quotation.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
+                  let showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
+                  let showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
+                  let showCrypto = quotation.show_crypto_details ?? org?.default_show_crypto_details ?? false;
+
+                  if (mode === 'CRYPTO_ONLY') {
+                    showBank = false;
+                    showUpi = false;
+                    showCrypto = true;
+                  } else if (mode === 'BANK_ONLY') {
+                    showBank = true;
+                    showUpi = false;
+                    showCrypto = false;
+                  } else if (mode === 'UPI_ONLY') {
+                    showBank = false;
+                    showUpi = true;
+                    showCrypto = false;
+                  } else if (mode === 'ALL') {
+                    showBank = true;
+                    showUpi = true;
+                    showCrypto = true;
+                  }
 
                   const hasPaymentInfo =
                     Boolean(quotation.payment_terms_instructions) ||

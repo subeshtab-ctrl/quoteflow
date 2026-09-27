@@ -252,7 +252,7 @@ class QuoteFlowStore {
   } {
     const filePayment = filePayments[quotationId];
 
-    // 1. Look for latest payment event in eventsData
+    // 1. Look for latest payment event and payment config event in eventsData
     const latestPaymentEvent = eventsData?.find(
       (e: any) =>
         e.event_type === 'MARKED_PAID' ||
@@ -260,16 +260,68 @@ class QuoteFlowStore {
         e.event_type === 'MARKED_UNPAID'
     );
 
+    const latestConfigEvent = eventsData?.find(
+      (e: any) => e.event_type === 'PAYMENT_CONFIG'
+    );
+    const configMeta = latestConfigEvent?.metadata || {};
+
+    const paymentDisplayMode: PaymentDisplayMode =
+      configMeta.payment_display_mode ||
+      filePayment?.payment_display_mode ||
+      existingQuote?.payment_display_mode ||
+      'BOTH';
+
+    let showBank =
+      configMeta.show_bank_details !== undefined
+        ? Boolean(configMeta.show_bank_details)
+        : (filePayment?.show_bank_details ?? existingQuote?.show_bank_details);
+
+    let showUpi =
+      configMeta.show_upi_details !== undefined
+        ? Boolean(configMeta.show_upi_details)
+        : (filePayment?.show_upi_details ?? existingQuote?.show_upi_details);
+
+    let showCrypto =
+      configMeta.show_crypto_details !== undefined
+        ? Boolean(configMeta.show_crypto_details)
+        : (filePayment?.show_crypto_details ?? existingQuote?.show_crypto_details);
+
+    if (paymentDisplayMode === 'CRYPTO_ONLY') {
+      showBank = false;
+      showUpi = false;
+      showCrypto = true;
+    } else if (paymentDisplayMode === 'BANK_ONLY') {
+      showBank = true;
+      showUpi = false;
+      showCrypto = false;
+    } else if (paymentDisplayMode === 'UPI_ONLY') {
+      showBank = false;
+      showUpi = true;
+      showCrypto = false;
+    } else if (paymentDisplayMode === 'BOTH') {
+      if (showBank === undefined) showBank = true;
+      if (showUpi === undefined) showUpi = true;
+      if (showCrypto === undefined) showCrypto = false;
+    } else if (paymentDisplayMode === 'ALL') {
+      if (showBank === undefined) showBank = true;
+      if (showUpi === undefined) showUpi = true;
+      if (showCrypto === undefined) showCrypto = true;
+    } else {
+      if (showBank === undefined) showBank = true;
+      if (showUpi === undefined) showUpi = true;
+      if (showCrypto === undefined) showCrypto = false;
+    }
+
     const baseConfig = {
-      payment_display_mode: filePayment?.payment_display_mode || existingQuote?.payment_display_mode || 'BOTH',
-      show_bank_details: filePayment?.show_bank_details ?? existingQuote?.show_bank_details ?? true,
-      show_upi_details: filePayment?.show_upi_details ?? existingQuote?.show_upi_details ?? true,
-      show_crypto_details: filePayment?.show_crypto_details ?? existingQuote?.show_crypto_details ?? false,
-      bank_details: filePayment?.bank_details ?? existingQuote?.bank_details ?? null,
-      upi_details: filePayment?.upi_details ?? existingQuote?.upi_details ?? null,
-      crypto_details: filePayment?.crypto_details ?? existingQuote?.crypto_details ?? null,
-      payment_terms_instructions: filePayment?.payment_terms_instructions ?? existingQuote?.payment_terms_instructions ?? null,
-      accepted_payment_methods: filePayment?.accepted_payment_methods ?? existingQuote?.accepted_payment_methods ?? null,
+      payment_display_mode: paymentDisplayMode,
+      show_bank_details: showBank,
+      show_upi_details: showUpi,
+      show_crypto_details: showCrypto,
+      bank_details: configMeta.bank_details !== undefined ? configMeta.bank_details : (filePayment?.bank_details ?? existingQuote?.bank_details ?? null),
+      upi_details: configMeta.upi_details !== undefined ? configMeta.upi_details : (filePayment?.upi_details ?? existingQuote?.upi_details ?? null),
+      crypto_details: configMeta.crypto_details !== undefined ? configMeta.crypto_details : (filePayment?.crypto_details ?? existingQuote?.crypto_details ?? null),
+      payment_terms_instructions: configMeta.payment_terms_instructions !== undefined ? configMeta.payment_terms_instructions : (filePayment?.payment_terms_instructions ?? existingQuote?.payment_terms_instructions ?? null),
+      accepted_payment_methods: configMeta.accepted_payment_methods !== undefined ? configMeta.accepted_payment_methods : (filePayment?.accepted_payment_methods ?? existingQuote?.accepted_payment_methods ?? null),
     };
 
     if (latestPaymentEvent) {
@@ -1114,19 +1166,34 @@ class QuoteFlowStore {
           }
           const localSettings = this.loadOrgSettingsFromFile()[data.id] || {};
           const localPayment = this.loadPaymentSettingsFromFile()[data.id] || {};
+          let remotePayment: any = {};
+          try {
+            const { data: paySettingTmpl } = await supabase
+              .from('templates')
+              .select('layout_style')
+              .eq('organization_id', data.id)
+              .eq('name', 'SETTINGS:PAYMENT')
+              .maybeSingle();
+
+            if (paySettingTmpl?.layout_style) {
+              remotePayment = JSON.parse(paySettingTmpl.layout_style);
+            }
+          } catch {}
+
+          const effectivePayment = { ...localPayment, ...remotePayment };
           const fullOrg = {
             ...data,
             require_full_payment_for_invoice:
               localSettings.require_full_payment_for_invoice !== undefined
                 ? localSettings.require_full_payment_for_invoice
                 : ((data as any).require_full_payment_for_invoice ?? true),
-            default_bank_details: localPayment.default_bank_details ?? (data as any).default_bank_details ?? null,
-            default_upi_details: localPayment.default_upi_details ?? (data as any).default_upi_details ?? null,
-            default_crypto_details: localPayment.default_crypto_details ?? (data as any).default_crypto_details ?? null,
-            default_payment_display_mode: localPayment.default_payment_display_mode ?? (data as any).default_payment_display_mode ?? 'BOTH',
-            default_show_bank_details: localPayment.default_show_bank_details ?? (data as any).default_show_bank_details ?? true,
-            default_show_upi_details: localPayment.default_show_upi_details ?? (data as any).default_show_upi_details ?? true,
-            default_show_crypto_details: localPayment.default_show_crypto_details ?? (data as any).default_show_crypto_details ?? false,
+            default_bank_details: effectivePayment.default_bank_details ?? (data as any).default_bank_details ?? null,
+            default_upi_details: effectivePayment.default_upi_details ?? (data as any).default_upi_details ?? null,
+            default_crypto_details: effectivePayment.default_crypto_details ?? (data as any).default_crypto_details ?? null,
+            default_payment_display_mode: effectivePayment.default_payment_display_mode ?? (data as any).default_payment_display_mode ?? 'BOTH',
+            default_show_bank_details: effectivePayment.default_show_bank_details ?? (data as any).default_show_bank_details ?? true,
+            default_show_upi_details: effectivePayment.default_show_upi_details ?? (data as any).default_show_upi_details ?? true,
+            default_show_crypto_details: effectivePayment.default_show_crypto_details ?? (data as any).default_show_crypto_details ?? false,
           } as Organization;
           this.organizations.set(data.id, fullOrg);
           return fullOrg;
@@ -1236,6 +1303,46 @@ class QuoteFlowStore {
           error = insertRes.error;
         }
 
+        // Sync payment settings to Supabase templates table
+        const paymentPayload = {
+          default_bank_details: updated.default_bank_details,
+          default_upi_details: updated.default_upi_details,
+          default_crypto_details: updated.default_crypto_details,
+          default_payment_display_mode: updated.default_payment_display_mode,
+          default_show_bank_details: updated.default_show_bank_details,
+          default_show_upi_details: updated.default_show_upi_details,
+          default_show_crypto_details: updated.default_show_crypto_details,
+        };
+
+        try {
+          const { data: existingTmpl } = await supabase
+            .from('templates')
+            .select('id')
+            .eq('organization_id', orgId)
+            .eq('name', 'SETTINGS:PAYMENT')
+            .maybeSingle();
+
+          if (existingTmpl) {
+            await supabase
+              .from('templates')
+              .update({
+                layout_style: JSON.stringify(paymentPayload),
+                accent_color: 'SETTINGS',
+              })
+              .eq('id', existingTmpl.id);
+          } else {
+            await supabase.from('templates').insert({
+              organization_id: orgId,
+              name: 'SETTINGS:PAYMENT',
+              layout_style: JSON.stringify(paymentPayload),
+              accent_color: 'SETTINGS',
+              is_default: false,
+            });
+          }
+        } catch (tmplErr) {
+          console.warn('Failed to sync payment settings to templates in Supabase:', tmplErr);
+        }
+
         if (error) {
           console.error('Supabase organization update error:', error);
         } else if (saved) {
@@ -1247,13 +1354,13 @@ class QuoteFlowStore {
               localSettings.require_full_payment_for_invoice !== undefined
                 ? localSettings.require_full_payment_for_invoice
                 : ((saved as any).require_full_payment_for_invoice ?? true),
-            default_bank_details: localPayment.default_bank_details ?? (saved as any).default_bank_details ?? updated.default_bank_details ?? null,
-            default_upi_details: localPayment.default_upi_details ?? (saved as any).default_upi_details ?? updated.default_upi_details ?? null,
-            default_crypto_details: localPayment.default_crypto_details ?? (saved as any).default_crypto_details ?? updated.default_crypto_details ?? null,
-            default_payment_display_mode: localPayment.default_payment_display_mode ?? (saved as any).default_payment_display_mode ?? updated.default_payment_display_mode ?? 'BOTH',
-            default_show_bank_details: localPayment.default_show_bank_details ?? (saved as any).default_show_bank_details ?? updated.default_show_bank_details ?? true,
-            default_show_upi_details: localPayment.default_show_upi_details ?? (saved as any).default_show_upi_details ?? updated.default_show_upi_details ?? true,
-            default_show_crypto_details: localPayment.default_show_crypto_details ?? (saved as any).default_show_crypto_details ?? updated.default_show_crypto_details ?? false,
+            default_bank_details: updated.default_bank_details ?? localPayment.default_bank_details ?? (saved as any).default_bank_details ?? null,
+            default_upi_details: updated.default_upi_details ?? localPayment.default_upi_details ?? (saved as any).default_upi_details ?? null,
+            default_crypto_details: updated.default_crypto_details ?? localPayment.default_crypto_details ?? (saved as any).default_crypto_details ?? null,
+            default_payment_display_mode: updated.default_payment_display_mode ?? localPayment.default_payment_display_mode ?? (saved as any).default_payment_display_mode ?? 'BOTH',
+            default_show_bank_details: updated.default_show_bank_details ?? localPayment.default_show_bank_details ?? (saved as any).default_show_bank_details ?? true,
+            default_show_upi_details: updated.default_show_upi_details ?? localPayment.default_show_upi_details ?? (saved as any).default_show_upi_details ?? true,
+            default_show_crypto_details: updated.default_show_crypto_details ?? localPayment.default_show_crypto_details ?? (saved as any).default_show_crypto_details ?? false,
           } as Organization;
           this.organizations.set(orgId, fullSaved);
           return fullSaved;
@@ -1697,7 +1804,7 @@ class QuoteFlowStore {
               .from('quotation_events')
               .select('quotation_id, actor_type, event_type, metadata, created_at')
               .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED'])
+              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG'])
               .order('created_at', { ascending: true });
 
             if (orgEvents) {
@@ -2402,6 +2509,27 @@ class QuoteFlowStore {
             }))
           );
         }
+
+        // Persist payment settings & display modes to Supabase
+        await supabase.from('quotation_events').insert({
+          organization_id: orgId,
+          quotation_id: id,
+          actor_type: 'USER',
+          actor_name: 'Business User',
+          event_type: 'PAYMENT_CONFIG',
+          metadata: {
+            payment_display_mode: newQuotation.payment_display_mode,
+            show_bank_details: newQuotation.show_bank_details,
+            show_upi_details: newQuotation.show_upi_details,
+            show_crypto_details: newQuotation.show_crypto_details,
+            bank_details: newQuotation.bank_details,
+            upi_details: newQuotation.upi_details,
+            crypto_details: newQuotation.crypto_details,
+            payment_terms_instructions: newQuotation.payment_terms_instructions,
+            accepted_payment_methods: newQuotation.accepted_payment_methods,
+            advance_percentage: newQuotation.advance_percentage,
+          },
+        });
       }
     } catch (err) {
       console.error('Failed to sync quotation to Supabase:', err);
@@ -2643,6 +2771,27 @@ class QuoteFlowStore {
             );
           }
         }
+
+        // Persist updated payment settings & display modes to Supabase
+        await supabase.from('quotation_events').insert({
+          organization_id: existing.organization_id,
+          quotation_id: id,
+          actor_type: 'USER',
+          actor_name: 'Business User',
+          event_type: 'PAYMENT_CONFIG',
+          metadata: {
+            payment_display_mode: updated.payment_display_mode,
+            show_bank_details: updated.show_bank_details,
+            show_upi_details: updated.show_upi_details,
+            show_crypto_details: updated.show_crypto_details,
+            bank_details: updated.bank_details,
+            upi_details: updated.upi_details,
+            crypto_details: updated.crypto_details,
+            payment_terms_instructions: updated.payment_terms_instructions,
+            accepted_payment_methods: updated.accepted_payment_methods,
+            advance_percentage: updated.advance_percentage,
+          },
+        });
       }
     } catch (err) {
       console.error('Failed to sync updated quotation to Supabase:', err);
