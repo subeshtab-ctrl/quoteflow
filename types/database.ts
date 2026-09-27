@@ -134,6 +134,8 @@ export interface OrganizationMember {
   updated_at: string;
 }
 
+export type CustomerAuthMethod = 'MOBILE' | 'EMAIL';
+
 export interface Customer {
   id: string;
   organization_id: string;
@@ -141,6 +143,8 @@ export interface Customer {
   company_name?: string;
   email?: string;
   phone?: string;
+  phone_country_code?: string;
+  auth_method?: CustomerAuthMethod;
   alternate_phone?: string;
   billing_address?: string;
   shipping_address?: string;
@@ -200,7 +204,9 @@ export interface QuotationSignature {
   id: string;
   quotation_id: string;
   signer_name: string;
-  signer_email: string;
+  signer_email?: string;
+  signer_phone?: string;
+  phone_country_code?: string;
   signer_company?: string;
   signature_data_url: string;
   signature_type: SignatureType;
@@ -423,7 +429,10 @@ export interface PortalPinRegistration {
   id: string;
   quotation_id: string;
   customer_id?: string;
-  customer_email: string;
+  customer_email?: string;
+  customer_phone?: string;
+  phone_country_code?: string;
+  auth_method?: CustomerAuthMethod;
   pin_hash: string;
   registered_at: string;
   updated_at?: string;

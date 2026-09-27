@@ -54,22 +54,45 @@ export const QuotationFormSchema = z.object({
     .default('DRAFT'),
 }).passthrough();
 
-export const CustomerFormSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().min(2, 'Contact name is required'),
-  company_name: z.string().optional(),
-  email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
-  phone: z.string().optional(),
-  alternate_phone: z.string().optional(),
-  billing_address: z.string().optional(),
-  shipping_address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  country: z.string().default('India'),
-  postal_code: z.string().optional(),
-  tax_number: z.string().optional(),
-  notes: z.string().optional(),
-});
+export const CustomerFormSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().min(2, 'Contact person name is required'),
+    company_name: z.string().optional(),
+    auth_method: z.enum(['MOBILE', 'EMAIL']).default('MOBILE'),
+    phone_country_code: z.string().optional().default('+91'),
+    email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
+    phone: z.string().optional().or(z.literal('')),
+    alternate_phone: z.string().optional(),
+    billing_address: z.string().optional(),
+    shipping_address: z.string().optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    country: z.string().default('India'),
+    postal_code: z.string().optional(),
+    tax_number: z.string().optional(),
+    notes: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.auth_method === 'MOBILE') {
+      const cleanPhone = (data.phone || '').replace(/[\s\-\(\)]/g, '');
+      if (!cleanPhone || cleanPhone.length < 5) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Mobile number is required for mobile authentication (enter without country code)',
+          path: ['phone'],
+        });
+      }
+    } else if (data.auth_method === 'EMAIL') {
+      if (!data.email || !data.email.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Email address is required for email authentication',
+          path: ['email'],
+        });
+      }
+    }
+  });
 
 export const ProductFormSchema = z.object({
   id: z.string().optional(),
@@ -82,17 +105,31 @@ export const ProductFormSchema = z.object({
   is_active: z.boolean().default(true),
 });
 
-export const ApprovalSchema = z.object({
-  token: z.string().min(10, 'Invalid approval token'),
-  signer_name: z.string().min(2, 'Please enter your full name'),
-  signer_email: z.string().email('Please enter a valid email address'),
-  signer_company: z.string().optional(),
-  signature_data_url: z.string().min(20, 'Signature is required'),
-  signature_type: z.enum(['DRAWN', 'TYPED']),
-  agree_terms: z.literal(true, {
-    errorMap: () => ({ message: 'You must agree to the quotation terms and conditions' }),
-  }),
-});
+export const ApprovalSchema = z
+  .object({
+    token: z.string().min(10, 'Invalid approval token'),
+    signer_name: z.string().min(2, 'Please enter your full name'),
+    signer_email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
+    signer_phone: z.string().optional().or(z.literal('')),
+    phone_country_code: z.string().optional(),
+    signer_company: z.string().optional(),
+    signature_data_url: z.string().min(20, 'Signature is required'),
+    signature_type: z.enum(['DRAWN', 'TYPED']),
+    agree_terms: z.literal(true, {
+      errorMap: () => ({ message: 'You must agree to the quotation terms and conditions' }),
+    }),
+  })
+  .superRefine((data, ctx) => {
+    const hasEmail = Boolean(data.signer_email && data.signer_email.trim());
+    const hasPhone = Boolean(data.signer_phone && data.signer_phone.trim());
+    if (!hasEmail && !hasPhone) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Signer contact (Email or Mobile number) is required for verification',
+        path: ['signer_email'],
+      });
+    }
+  });
 
 export const RejectionSchema = z.object({
   token: z.string().min(10, 'Invalid token'),

@@ -24,9 +24,12 @@ import {
   Package,
   Briefcase,
   Copy,
+  Smartphone,
+  Mail,
 } from 'lucide-react';
 import { getCountryProfile, COUNTRIES, calculateItemTaxBreakdown } from '@/lib/tax/country-config';
 import { FileAttachmentsUploader } from '@/components/common/file-attachments-uploader';
+import { COUNTRY_CODES, getDefaultCountryCode, cleanPhoneNumber } from '@/lib/country-codes';
 
 interface InvoiceBuilderProps {
   customers: Customer[];
@@ -67,6 +70,9 @@ export function InvoiceBuilder({
 
   // Customer state & Quick Add
   const [customerList, setCustomerList] = useState<Customer[]>(customers);
+  const defaultCountryCode = getDefaultCountryCode(organization?.country);
+  const [quickAuthMethod, setQuickAuthMethod] = useState<'MOBILE' | 'EMAIL'>('MOBILE');
+  const [quickPhoneCountryCode, setQuickPhoneCountryCode] = useState(defaultCountryCode);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickName, setQuickName] = useState('');
   const [quickCompany, setQuickCompany] = useState('');
@@ -222,6 +228,23 @@ export function InvoiceBuilder({
       return;
     }
 
+    let cleanPhone = '';
+    if (quickAuthMethod === 'MOBILE') {
+      cleanPhone = cleanPhoneNumber(quickPhone, quickPhoneCountryCode);
+      if (!cleanPhone || cleanPhone.length < 5) {
+        setQuickCustomerError('Mobile number is required for mobile authentication (without country code)');
+        return;
+      }
+    } else {
+      if (!quickEmail.trim() || !quickEmail.includes('@')) {
+        setQuickCustomerError('A valid email address is required for email authentication');
+        return;
+      }
+      if (quickPhone.trim()) {
+        cleanPhone = cleanPhoneNumber(quickPhone, quickPhoneCountryCode);
+      }
+    }
+
     try {
       setIsSavingQuickCustomer(true);
       setQuickCustomerError(null);
@@ -232,8 +255,10 @@ export function InvoiceBuilder({
         body: JSON.stringify({
           name: quickName.trim(),
           company_name: quickCompany.trim() || undefined,
+          auth_method: quickAuthMethod,
+          phone_country_code: quickPhoneCountryCode,
+          phone: cleanPhone || undefined,
           email: quickEmail.trim() || undefined,
-          phone: quickPhone.trim() || undefined,
         }),
       });
 
@@ -246,6 +271,8 @@ export function InvoiceBuilder({
       setIsQuickAddOpen(false);
       setQuickName('');
       setQuickCompany('');
+      setQuickAuthMethod('MOBILE');
+      setQuickPhoneCountryCode(defaultCountryCode);
       setQuickEmail('');
       setQuickPhone('');
     } catch (err: any) {
@@ -599,7 +626,39 @@ export function InvoiceBuilder({
           {isQuickAddOpen && (
             <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 space-y-3">
               <h4 className="text-xs font-bold text-indigo-900 dark:text-indigo-200">New Customer Quick Entry</h4>
-              {quickCustomerError && <p className="text-xs text-rose-600">{quickCustomerError}</p>}
+              {/* Authentication Method Selector */}
+              <div>
+                <label className="block text-[11px] font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider mb-1.5">
+                  Client Authentication Method *
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setQuickAuthMethod('MOBILE')}
+                    className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${
+                      quickAuthMethod === 'MOBILE'
+                        ? 'border-indigo-600 bg-white dark:bg-slate-800 shadow-sm ring-1 ring-indigo-500 text-indigo-950 dark:text-indigo-200 font-bold'
+                        : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 hover:bg-white'
+                    }`}
+                  >
+                    <Smartphone className={`h-3.5 w-3.5 ${quickAuthMethod === 'MOBILE' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                    <span>Mobile Number</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickAuthMethod('EMAIL')}
+                    className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${
+                      quickAuthMethod === 'EMAIL'
+                        ? 'border-indigo-600 bg-white dark:bg-slate-800 shadow-sm ring-1 ring-indigo-500 text-indigo-950 dark:text-indigo-200 font-bold'
+                        : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 hover:bg-white'
+                    }`}
+                  >
+                    <Mail className={`h-3.5 w-3.5 ${quickAuthMethod === 'EMAIL' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                    <span>Email Address</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
                   type="text"
@@ -615,20 +674,70 @@ export function InvoiceBuilder({
                   onChange={(e) => setQuickCompany(e.target.value)}
                   className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
                 />
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={quickEmail}
-                  onChange={(e) => setQuickEmail(e.target.value)}
-                  className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
-                />
-                <input
-                  type="tel"
-                  placeholder="Phone"
-                  value={quickPhone}
-                  onChange={(e) => setQuickPhone(e.target.value)}
-                  className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
-                />
+
+                {quickAuthMethod === 'MOBILE' ? (
+                  <>
+                    <div className="flex gap-1.5">
+                      <select
+                        value={quickPhoneCountryCode}
+                        onChange={(e) => setQuickPhoneCountryCode(e.target.value)}
+                        title="Country code"
+                        className="h-8 w-28 rounded-lg border border-slate-200 bg-white dark:bg-slate-800 px-2 text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0"
+                      >
+                        {COUNTRY_CODES.map((c) => (
+                          <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
+                            {c.flag} {c.dialCode} ({c.name})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        placeholder="Mobile Number *"
+                        value={quickPhone}
+                        onChange={(e) => setQuickPhone(e.target.value.replace(/[^\d\s]/g, ''))}
+                        className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
+                      />
+                    </div>
+                    <input
+                      type="email"
+                      placeholder="Email (Optional)"
+                      value={quickEmail}
+                      onChange={(e) => setQuickEmail(e.target.value)}
+                      className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="email"
+                      placeholder="Email Address *"
+                      value={quickEmail}
+                      onChange={(e) => setQuickEmail(e.target.value)}
+                      className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
+                    />
+                    <div className="flex gap-1.5">
+                      <select
+                        value={quickPhoneCountryCode}
+                        onChange={(e) => setQuickPhoneCountryCode(e.target.value)}
+                        title="Country code"
+                        className="h-8 w-28 rounded-lg border border-slate-200 bg-white dark:bg-slate-800 px-2 text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0"
+                      >
+                        {COUNTRY_CODES.map((c) => (
+                          <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
+                            {c.flag} {c.dialCode} ({c.name})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        placeholder="Phone (Optional)"
+                        value={quickPhone}
+                        onChange={(e) => setQuickPhone(e.target.value.replace(/[^\d\s]/g, ''))}
+                        className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs bg-white dark:bg-slate-800"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" size="sm" variant="outline" onClick={() => setIsQuickAddOpen(false)}>

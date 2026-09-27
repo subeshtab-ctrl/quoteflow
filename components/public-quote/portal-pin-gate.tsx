@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   Lock,
   Mail,
+  Smartphone,
   KeyRound,
   ArrowRight,
   RotateCcw,
@@ -18,6 +19,9 @@ interface PortalPinGateProps {
   quotationNumber: string;
   companyName: string;
   hasPin: boolean;
+  authMethod?: 'MOBILE' | 'EMAIL';
+  phoneCountryCode?: string;
+  customerPhoneMasked?: string;
   customerEmailMasked?: string;
   onAuthenticated: () => void;
 }
@@ -27,26 +31,35 @@ export function PortalPinGate({
   quotationNumber,
   companyName,
   hasPin: initialHasPin,
+  authMethod = 'EMAIL',
+  phoneCountryCode = '+91',
+  customerPhoneMasked,
   customerEmailMasked,
   onAuthenticated,
 }: PortalPinGateProps) {
-  const [mode, setMode] = useState<'VERIFY' | 'REGISTER_EMAIL' | 'REGISTER_PIN' | 'RESET'>(
-    initialHasPin ? 'VERIFY' : 'REGISTER_EMAIL'
+  const isMobile = authMethod === 'MOBILE';
+  const [mode, setMode] = useState<'VERIFY' | 'REGISTER_CREDENTIAL' | 'REGISTER_PIN' | 'RESET'>(
+    initialHasPin ? 'VERIFY' : 'REGISTER_CREDENTIAL'
   );
 
-  const [email, setEmail] = useState('');
+  const [credential, setCredential] = useState('');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Step 1: Verify Email for First-Time Registration
-  const handleCheckEmail = async (e: React.FormEvent) => {
+  // Step 1: Verify Credential (Mobile or Email) for First-Time Registration
+  const handleCheckCredential = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!email.trim()) {
-      setError('Please enter your email address.');
+    const cleanCred = credential.trim();
+    if (!cleanCred) {
+      setError(
+        isMobile
+          ? 'Please enter your registered mobile number (without country code).'
+          : 'Please enter your registered email address.'
+      );
       return;
     }
 
@@ -57,14 +70,20 @@ export function PortalPinGate({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
-          action: 'check_email',
-          email: email.trim(),
+          action: 'check_credential',
+          authMethod,
+          credential: cleanCred,
+          phone: isMobile ? cleanCred : undefined,
+          email: !isMobile ? cleanCred : undefined,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Email does not match quotation records');
+        throw new Error(
+          data.error ||
+            `${isMobile ? 'Mobile number' : 'Email'} does not match quotation records`
+        );
       }
 
       setMode('REGISTER_PIN');
@@ -99,7 +118,10 @@ export function PortalPinGate({
         body: JSON.stringify({
           token,
           action: 'register',
-          email: email.trim(),
+          authMethod,
+          credential: credential.trim(),
+          phone: isMobile ? credential.trim() : undefined,
+          email: !isMobile ? credential.trim() : undefined,
           pin: cleanPin,
         }),
       });
@@ -159,13 +181,17 @@ export function PortalPinGate({
     }
   };
 
-  // Reset PIN with Registered Email
+  // Reset PIN with Registered Credential
   const handleResetPin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (!email.trim()) {
-      setError('Please enter your registered email.');
+    if (!credential.trim()) {
+      setError(
+        isMobile
+          ? 'Please enter your registered mobile number.'
+          : 'Please enter your registered email.'
+      );
       return;
     }
 
@@ -188,7 +214,10 @@ export function PortalPinGate({
         body: JSON.stringify({
           token,
           action: 'reset',
-          email: email.trim(),
+          authMethod,
+          credential: credential.trim(),
+          phone: isMobile ? credential.trim() : undefined,
+          email: !isMobile ? credential.trim() : undefined,
           pin: cleanPin,
         }),
       });
@@ -208,6 +237,8 @@ export function PortalPinGate({
       setLoading(false);
     }
   };
+
+  const maskedAccountDisplay = isMobile ? customerPhoneMasked : customerEmailMasked;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4 sm:p-6">
@@ -247,9 +278,12 @@ export function PortalPinGate({
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                 Enter 6-Digit Access PIN
               </label>
-              {customerEmailMasked && (
+              {maskedAccountDisplay && (
                 <p className="text-[11px] text-slate-400">
-                  Registered for account: <span className="font-mono text-slate-600 dark:text-slate-300">{customerEmailMasked}</span>
+                  Registered {isMobile ? 'Mobile' : 'Account'}:{' '}
+                  <span className="font-mono text-slate-600 dark:text-slate-300 font-semibold">
+                    {maskedAccountDisplay}
+                  </span>
                 </p>
               )}
               <div className="relative">
@@ -286,56 +320,83 @@ export function PortalPinGate({
                   setError(null);
                   setPin('');
                   setConfirmPin('');
+                  setCredential('');
                   setMode('RESET');
                 }}
                 className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
               >
-                Forgot your PIN? Reset with registered email
+                Forgot your PIN? Reset with registered {isMobile ? 'mobile number' : 'email'}
               </button>
             </div>
           </form>
         )}
 
-        {/* MODE 2: First-Time Setup - Step 1 Email Match Verification */}
-        {mode === 'REGISTER_EMAIL' && (
-          <form onSubmit={handleCheckEmail} className="space-y-4">
+        {/* MODE 2: First-Time Setup - Step 1 Verification */}
+        {mode === 'REGISTER_CREDENTIAL' && (
+          <form onSubmit={handleCheckCredential} className="space-y-4">
             <div className="space-y-2">
               <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-900 dark:text-indigo-200">
                 <p className="font-semibold mb-1 flex items-center gap-1.5">
                   <Lock className="h-3.5 w-3.5 text-indigo-600" />
-                  First Time Setup
+                  First Time Setup ({isMobile ? 'Mobile Authentication' : 'Email Authentication'})
                 </p>
                 <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                  Please enter the email address where this quotation was received to establish your secure 6-digit access PIN.
+                  {isMobile
+                    ? `Please enter your registered mobile number (without country code) to establish your secure 6-digit access PIN.`
+                    : `Please enter the email address where this quotation was received to establish your secure 6-digit access PIN.`}
                 </p>
               </div>
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Registered Email Address
+                  {isMobile ? 'Registered Mobile Number' : 'Registered Email Address'}
                 </label>
-                <div className="relative">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="client@company.com"
-                    autoFocus
-                    required
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                </div>
+
+                {isMobile ? (
+                  <div className="flex rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
+                    <span className="flex items-center gap-1 px-3 bg-slate-100 dark:bg-slate-700/60 border-r border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                      <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>{phoneCountryCode}</span>
+                    </span>
+                    <input
+                      type="tel"
+                      value={credential}
+                      onChange={(e) => setCredential(e.target.value.replace(/[^\d\s]/g, ''))}
+                      placeholder="e.g. 98765 43210 (without country code)"
+                      autoFocus
+                      required
+                      className="w-full px-3 py-2.5 bg-transparent text-slate-900 dark:text-white text-sm focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={credential}
+                      onChange={(e) => setCredential(e.target.value)}
+                      placeholder="client@company.com"
+                      autoFocus
+                      required
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                  </div>
+                )}
+                {isMobile && (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Enter the phone digits only. Country code ({phoneCountryCode}) is pre-applied.
+                  </p>
+                )}
               </div>
             </div>
 
             <Button
               type="submit"
-              disabled={loading || !email.trim()}
+              disabled={loading || !credential.trim()}
               isLoading={loading}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md"
             >
-              <span>Verify Email</span>
+              <span>Verify {isMobile ? 'Mobile Number' : 'Email'}</span>
               <ArrowRight className="h-4 w-4 ml-1.5" />
             </Button>
           </form>
@@ -348,7 +409,7 @@ export function PortalPinGate({
               <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-xs text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
                 <p className="text-[11px]">
-                  Email verified! Now create your 6-digit access PIN for future visits.
+                  {isMobile ? 'Mobile number' : 'Email'} verified! Now create your 6-digit access PIN for future visits.
                 </p>
               </div>
 
@@ -404,11 +465,11 @@ export function PortalPinGate({
                 setError(null);
                 setPin('');
                 setConfirmPin('');
-                setMode('REGISTER_EMAIL');
+                setMode('REGISTER_CREDENTIAL');
               }}
               className="w-full text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-center"
             >
-              Change Email
+              Change {isMobile ? 'Mobile Number' : 'Email'}
             </button>
           </form>
         )}
@@ -420,23 +481,41 @@ export function PortalPinGate({
               <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-900 dark:text-indigo-200">
                 <p className="font-semibold mb-1">Reset Your Security PIN</p>
                 <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                  Enter your registered client email to reset your 6-digit access PIN.
+                  Enter your registered client {isMobile ? 'mobile number' : 'email'} to reset your 6-digit access PIN.
                 </p>
               </div>
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Registered Email
+                  Registered {isMobile ? 'Mobile Number' : 'Email'}
                 </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="client@company.com"
-                  autoFocus
-                  required
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                {isMobile ? (
+                  <div className="flex rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
+                    <span className="flex items-center gap-1 px-3 bg-slate-100 dark:bg-slate-700/60 border-r border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                      <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>{phoneCountryCode}</span>
+                    </span>
+                    <input
+                      type="tel"
+                      value={credential}
+                      onChange={(e) => setCredential(e.target.value.replace(/[^\d\s]/g, ''))}
+                      placeholder="e.g. 98765 43210"
+                      autoFocus
+                      required
+                      className="w-full px-3 py-2.5 bg-transparent text-slate-900 dark:text-white text-sm focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="email"
+                    value={credential}
+                    onChange={(e) => setCredential(e.target.value)}
+                    placeholder="client@company.com"
+                    autoFocus
+                    required
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                )}
               </div>
 
               <div>
@@ -476,7 +555,7 @@ export function PortalPinGate({
 
             <Button
               type="submit"
-              disabled={loading || pin.length !== 6 || confirmPin.length !== 6 || !email.trim()}
+              disabled={loading || pin.length !== 6 || confirmPin.length !== 6 || !credential.trim()}
               isLoading={loading}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md"
             >

@@ -27,6 +27,7 @@ import { createAdminClient } from '@/lib/supabase/service-role';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { cleanPhoneNumber, getDefaultCountryCode } from '@/lib/country-codes';
 
 // Default Demo Organization
 export const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -658,7 +659,9 @@ class QuoteFlowStore {
       name: 'Rajesh Sharma',
       company_name: 'ABC Private Limited',
       email: 'rajesh@abc.example.com',
-      phone: '+91 98111 22233',
+      auth_method: 'EMAIL',
+      phone_country_code: '+91',
+      phone: '9811122233',
       billing_address: '102 Nariman Point',
       city: 'Mumbai',
       state: 'Maharashtra',
@@ -675,7 +678,9 @@ class QuoteFlowStore {
       name: 'John Mathew',
       company_name: 'JM Architect Studio',
       email: 'john@mathew.example.com',
-      phone: '+91 98222 33344',
+      auth_method: 'EMAIL',
+      phone_country_code: '+91',
+      phone: '9822233344',
       billing_address: 'Marine Drive West',
       city: 'Kochi',
       state: 'Kerala',
@@ -691,7 +696,9 @@ class QuoteFlowStore {
       name: 'Priya Sen',
       company_name: 'XYZ Technologies',
       email: 'priya@xyztech.example.com',
-      phone: '+91 98333 44455',
+      auth_method: 'MOBILE',
+      phone_country_code: '+91',
+      phone: '9833344455',
       billing_address: 'Kalyani Nagar IT Zone',
       city: 'Pune',
       state: 'Maharashtra',
@@ -1609,12 +1616,19 @@ class QuoteFlowStore {
   public async createCustomer(data: Omit<Customer, 'id' | 'created_at' | 'updated_at'>): Promise<Customer> {
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
     const now = new Date().toISOString();
+    const org = await this.getOrganization(data.organization_id || DEFAULT_ORG_ID);
+    const authMethod = data.auth_method || (data.phone && !data.email ? 'MOBILE' : 'EMAIL');
+    const phoneCountryCode = data.phone_country_code || getDefaultCountryCode(data.country || org?.country);
+    const cleanPhone = data.phone ? cleanPhoneNumber(data.phone, phoneCountryCode) : undefined;
     const customerEmail = data.email && data.email.trim()
       ? data.email.trim()
-      : `${(data.name || 'client').toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@customer.local`;
+      : (authMethod === 'MOBILE' ? undefined : `${(data.name || 'client').toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@customer.local`);
 
     const newCustomer: Customer = {
       ...data,
+      auth_method: authMethod,
+      phone_country_code: phoneCountryCode,
+      phone: cleanPhone,
       email: customerEmail,
       id,
       created_at: now,
@@ -1632,8 +1646,10 @@ class QuoteFlowStore {
             organization_id: data.organization_id || DEFAULT_ORG_ID,
             name: data.name,
             company_name: data.company_name || null,
-            email: customerEmail,
-            phone: data.phone || null,
+            auth_method: authMethod,
+            phone_country_code: phoneCountryCode,
+            phone: cleanPhone || null,
+            email: customerEmail || `${(data.name || 'client').toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@customer.local`,
             alternate_phone: data.alternate_phone || null,
             billing_address: data.billing_address || null,
             shipping_address: data.shipping_address || null,
@@ -1665,7 +1681,17 @@ class QuoteFlowStore {
 
   public async updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
     const existing = this.customers.get(id);
-    const updated = { ...(existing || {}), ...data, updated_at: new Date().toISOString() } as Customer;
+    const countryCode = data.phone_country_code || existing?.phone_country_code || '+91';
+    const cleanPhone = data.phone !== undefined
+      ? (data.phone ? cleanPhoneNumber(data.phone, countryCode) : undefined)
+      : existing?.phone;
+
+    const updated = {
+      ...(existing || {}),
+      ...data,
+      ...(cleanPhone !== undefined ? { phone: cleanPhone } : {}),
+      updated_at: new Date().toISOString()
+    } as Customer;
     this.customers.set(id, updated);
 
     try {
@@ -1675,6 +1701,7 @@ class QuoteFlowStore {
           .from('customers')
           .update({
             ...data,
+            ...(cleanPhone !== undefined ? { phone: cleanPhone } : {}),
             updated_at: new Date().toISOString(),
           })
           .eq('id', id)
@@ -3135,12 +3162,16 @@ class QuoteFlowStore {
 
     const quote = await this.getQuotationById(quotationId);
     const customerEmail = quote?.customer?.email?.toLowerCase().trim();
+    const customerPhone = quote?.customer?.phone
+      ? cleanPhoneNumber(quote.customer.phone, quote.customer.phone_country_code)
+      : undefined;
 
     // Check if another quotation for this same customer already has a PIN
     for (const reg of this.portalPins.values()) {
       if (
-        (customerEmail && reg.customer_email.toLowerCase().trim() === customerEmail) ||
-        (quote?.customer_id && reg.customer_id === quote.customer_id)
+        (quote?.customer_id && reg.customer_id === quote.customer_id) ||
+        (customerEmail && reg.customer_email && reg.customer_email.toLowerCase().trim() === customerEmail) ||
+        (customerPhone && reg.customer_phone && reg.customer_phone === customerPhone)
       ) {
         this.portalPins.set(quotationId, reg);
         return reg;
@@ -3157,7 +3188,9 @@ class QuoteFlowStore {
           .order('created_at', { ascending: false })
           .limit(1);
 
-        if (customerEmail) {
+        if (customerPhone) {
+          query = query.or(`quotation_id.eq.${quotationId},metadata->>customer_phone.eq.${customerPhone}`);
+        } else if (customerEmail) {
           query = query.or(`quotation_id.eq.${quotationId},metadata->>customer_email.eq.${customerEmail}`);
         } else {
           query = query.eq('quotation_id', quotationId);
@@ -3171,7 +3204,10 @@ class QuoteFlowStore {
             id: evt.id,
             quotation_id: quotationId,
             customer_id: quote?.customer_id,
-            customer_email: evt.metadata?.customer_email || customerEmail || '',
+            customer_email: evt.metadata?.customer_email || customerEmail,
+            customer_phone: evt.metadata?.customer_phone || customerPhone,
+            phone_country_code: evt.metadata?.phone_country_code || quote?.customer?.phone_country_code,
+            auth_method: evt.metadata?.auth_method || quote?.customer?.auth_method,
             pin_hash: evt.metadata?.pin_hash,
             registered_at: evt.metadata?.registered_at || evt.created_at,
           };
@@ -3188,26 +3224,51 @@ class QuoteFlowStore {
 
   public async registerPortalPin(
     quotationId: string,
-    email: string,
-    pin: string
+    credential: string,
+    pin: string,
+    authMethodOverride?: 'MOBILE' | 'EMAIL'
   ): Promise<{ success: boolean; message?: string }> {
     const quote = await this.getQuotationById(quotationId);
     if (!quote) throw new Error('Quotation not found');
 
-    const cleanInputEmail = email.toLowerCase().trim();
-    const customerEmail = (quote.customer?.email || '').toLowerCase().trim();
-
-    if (!customerEmail) {
-      throw new Error('This quotation does not have a registered customer email. Please contact the company.');
-    }
-
-    if (cleanInputEmail !== customerEmail) {
-      throw new Error(`Email address does not match the registered client email on quotation ${quote.quotation_number}.`);
-    }
-
+    const authMethod = authMethodOverride || quote.customer?.auth_method || (quote.customer?.phone && !quote.customer?.email ? 'MOBILE' : 'EMAIL');
     const cleanPin = pin.trim();
     if (!/^\d{6}$/.test(cleanPin)) {
       throw new Error('Security PIN must be exactly 6 digits (numbers only).');
+    }
+
+    let customerEmail: string | undefined = undefined;
+    let customerPhone: string | undefined = undefined;
+    const phoneCountryCode: string = quote.customer?.phone_country_code || '+91';
+
+    if (authMethod === 'MOBILE') {
+      const cleanInputPhone = cleanPhoneNumber(credential, phoneCountryCode);
+      const registeredPhone = cleanPhoneNumber(quote.customer?.phone || '', phoneCountryCode);
+
+      if (!registeredPhone) {
+        throw new Error('This quotation does not have a registered customer mobile number. Please contact the company.');
+      }
+
+      if (cleanInputPhone !== registeredPhone) {
+        throw new Error(`Mobile number does not match the registered client mobile on quotation ${quote.quotation_number}.`);
+      }
+
+      customerPhone = registeredPhone;
+      customerEmail = quote.customer?.email?.toLowerCase().trim();
+    } else {
+      const cleanInputEmail = credential.toLowerCase().trim();
+      const registeredEmail = (quote.customer?.email || '').toLowerCase().trim();
+
+      if (!registeredEmail) {
+        throw new Error('This quotation does not have a registered customer email. Please contact the company.');
+      }
+
+      if (cleanInputEmail !== registeredEmail) {
+        throw new Error(`Email address does not match the registered client email on quotation ${quote.quotation_number}.`);
+      }
+
+      customerEmail = cleanInputEmail;
+      customerPhone = quote.customer?.phone ? cleanPhoneNumber(quote.customer.phone, phoneCountryCode) : undefined;
     }
 
     const pinHash = this.hashPin(cleanPin);
@@ -3217,7 +3278,10 @@ class QuoteFlowStore {
       id: `pin_${Date.now()}`,
       quotation_id: quotationId,
       customer_id: quote.customer_id,
-      customer_email: cleanInputEmail,
+      customer_email: customerEmail,
+      customer_phone: customerPhone,
+      phone_country_code: phoneCountryCode,
+      auth_method: authMethod,
       pin_hash: pinHash,
       registered_at: now,
     };
@@ -3226,9 +3290,12 @@ class QuoteFlowStore {
 
     // Also link to other quotations belonging to this customer
     for (const [qId, q] of this.quotations.entries()) {
+      const qPhone = q.customer?.phone ? cleanPhoneNumber(q.customer.phone, q.customer.phone_country_code) : undefined;
+      const qEmail = q.customer?.email ? q.customer.email.toLowerCase().trim() : undefined;
       if (
-        q.customer_id === quote.customer_id ||
-        (q.customer?.email && q.customer.email.toLowerCase().trim() === cleanInputEmail)
+        (quote.customer_id && q.customer_id === quote.customer_id) ||
+        (customerEmail && qEmail === customerEmail) ||
+        (customerPhone && qPhone === customerPhone)
       ) {
         this.portalPins.set(qId, {
           ...reg,
@@ -3248,7 +3315,10 @@ class QuoteFlowStore {
           actor_name: quote.customer?.name || 'Customer',
           event_type: 'PORTAL_PIN_REGISTERED',
           metadata: {
-            customer_email: cleanInputEmail,
+            customer_email: customerEmail,
+            customer_phone: customerPhone,
+            phone_country_code: phoneCountryCode,
+            auth_method: authMethod,
             pin_hash: pinHash,
             registered_at: now,
           },
@@ -3272,17 +3342,20 @@ class QuoteFlowStore {
 
   public async resetPortalPin(
     quotationId: string,
-    email: string,
-    newPin: string
+    credential: string,
+    newPin: string,
+    authMethodOverride?: 'MOBILE' | 'EMAIL'
   ): Promise<{ success: boolean; message?: string }> {
-    return await this.registerPortalPin(quotationId, email, newPin);
+    return await this.registerPortalPin(quotationId, credential, newPin, authMethodOverride);
   }
 
   // --- APPROVAL WORKFLOW (ATOMIC TRANSACTION) ---
   public async approveQuotation(params: {
     token: string;
     signer_name: string;
-    signer_email: string;
+    signer_email?: string;
+    signer_phone?: string;
+    phone_country_code?: string;
     signer_company?: string;
     signature_data_url: string;
     signature_type: 'DRAWN' | 'TYPED';
@@ -3314,6 +3387,7 @@ class QuoteFlowStore {
     }
 
     const now = new Date().toISOString();
+    const effectiveSignerEmail = params.signer_email || quote.customer?.email || `${params.signer_name.toLowerCase().replace(/[^a-z0-9]/g, '')}@client.portal`;
 
     // Compute immutable document hash
     const documentHash = generateDocumentHash({
@@ -3332,7 +3406,7 @@ class QuoteFlowStore {
       })),
       approved_at: now,
       signer_name: params.signer_name,
-      signer_email: params.signer_email,
+      signer_email: effectiveSignerEmail,
     });
 
     // 1. Create Signature Record
@@ -3341,6 +3415,8 @@ class QuoteFlowStore {
       quotation_id: quote.id,
       signer_name: params.signer_name,
       signer_email: params.signer_email,
+      signer_phone: params.signer_phone,
+      phone_country_code: params.phone_country_code,
       signer_company: params.signer_company,
       signature_data_url: params.signature_data_url,
       signature_type: params.signature_type,

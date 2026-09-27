@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import crypto from 'crypto';
+import { cleanPhoneNumber, maskPhone } from '@/lib/country-codes';
 
 function maskEmail(email: string): string {
   if (!email || !email.includes('@')) return '***@***.com';
@@ -46,12 +47,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const customerEmail = quotation.customer?.email || '';
+    const customer = quotation.customer;
+    const authMethod = customer?.auth_method || (customer?.phone && !customer?.email ? 'MOBILE' : 'EMAIL');
+    const phoneCountryCode = customer?.phone_country_code || '+91';
+    const customerPhoneClean = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
+    const customerEmail = customer?.email || '';
 
     return NextResponse.json({
       success: true,
       hasPin,
       authenticated,
+      authMethod,
+      phoneCountryCode,
+      customerPhoneMasked: customerPhoneClean ? maskPhone(customerPhoneClean, phoneCountryCode) : '',
       customerEmailMasked: maskEmail(customerEmail),
       quotationNumber: quotation.quotation_number,
       title: quotation.title,
@@ -68,7 +76,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token, action, email, pin } = body;
+    const { token, action, email, phone, credential, pin } = body;
 
     if (!token) {
       return NextResponse.json({ error: 'Quotation token is required' }, { status: 400 });
@@ -79,40 +87,78 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
     }
 
-    const customerEmail = (quotation.customer?.email || '').toLowerCase().trim();
+    const customer = quotation.customer;
+    const authMethod =
+      body.authMethod ||
+      customer?.auth_method ||
+      (customer?.phone && !customer?.email ? 'MOBILE' : 'EMAIL');
+    const phoneCountryCode = customer?.phone_country_code || '+91';
+    const customerEmail = (customer?.email || '').toLowerCase().trim();
+    const customerPhone = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
 
-    if (action === 'check_email') {
-      const cleanInput = (email || '').toLowerCase().trim();
-      if (!cleanInput) {
-        return NextResponse.json({ error: 'Email address is required' }, { status: 400 });
+    if (action === 'check_credential' || action === 'check_email' || action === 'check_phone') {
+      const isMobile = action === 'check_phone' || (action === 'check_credential' && authMethod === 'MOBILE');
+
+      if (isMobile) {
+        const cleanInput = cleanPhoneNumber(phone || credential || '', phoneCountryCode);
+        if (!cleanInput) {
+          return NextResponse.json(
+            { error: 'Mobile number is required (without country code)' },
+            { status: 400 }
+          );
+        }
+        if (!customerPhone) {
+          return NextResponse.json(
+            { error: 'No customer mobile number registered on this quotation. Please contact the company.' },
+            { status: 400 }
+          );
+        }
+        if (cleanInput !== customerPhone) {
+          return NextResponse.json(
+            {
+              error: `Mobile number does not match the registered client mobile on quotation ${quotation.quotation_number}.`,
+              matches: false,
+            },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ success: true, matches: true });
+      } else {
+        const cleanInput = (email || credential || '').toLowerCase().trim();
+        if (!cleanInput) {
+          return NextResponse.json({ error: 'Email address is required' }, { status: 400 });
+        }
+        if (!customerEmail) {
+          return NextResponse.json(
+            { error: 'No customer email registered on this quotation. Please contact the company.' },
+            { status: 400 }
+          );
+        }
+        if (cleanInput !== customerEmail) {
+          return NextResponse.json(
+            {
+              error: `Email does not match the registered client email on quotation ${quotation.quotation_number}.`,
+              matches: false,
+            },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ success: true, matches: true });
       }
-      if (!customerEmail) {
-        return NextResponse.json(
-          { error: 'No customer email registered on this quotation. Please contact the company.' },
-          { status: 400 }
-        );
-      }
-      if (cleanInput !== customerEmail) {
+    }
+
+    if (action === 'register') {
+      const effectiveCredential = credential || (authMethod === 'MOBILE' ? phone : email);
+      if (!effectiveCredential || !pin) {
         return NextResponse.json(
           {
-            error: `Email does not match the registered client email on quotation ${quotation.quotation_number}.`,
-            matches: false,
+            error: `Both ${authMethod === 'MOBILE' ? 'mobile number' : 'email'} and 6-digit PIN are required to register`,
           },
           { status: 400 }
         );
       }
-      return NextResponse.json({ success: true, matches: true });
-    }
 
-    if (action === 'register') {
-      if (!email || !pin) {
-        return NextResponse.json(
-          { error: 'Both email and 6-digit PIN are required to register' },
-          { status: 400 }
-        );
-      }
-
-      await store.registerPortalPin(quotation.id, email, pin);
+      await store.registerPortalPin(quotation.id, effectiveCredential, pin, authMethod);
       const pinReg = await store.getPortalPin(quotation.id);
       const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
 
@@ -165,14 +211,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'reset') {
-      if (!email || !pin) {
+      const effectiveCredential = credential || (authMethod === 'MOBILE' ? phone : email);
+      if (!effectiveCredential || !pin) {
         return NextResponse.json(
-          { error: 'Registered email and new 6-digit PIN are required' },
+          {
+            error: `Registered ${authMethod === 'MOBILE' ? 'mobile number' : 'email'} and new 6-digit PIN are required`,
+          },
           { status: 400 }
         );
       }
 
-      await store.resetPortalPin(quotation.id, email, pin);
+      await store.resetPortalPin(quotation.id, effectiveCredential, pin, authMethod);
       const pinReg = await store.getPortalPin(quotation.id);
       const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
 

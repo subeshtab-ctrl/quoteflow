@@ -15,6 +15,8 @@ export async function POST(req: NextRequest) {
       token: validated.token,
       signer_name: validated.signer_name,
       signer_email: validated.signer_email,
+      signer_phone: validated.signer_phone,
+      phone_country_code: validated.phone_country_code,
       signer_company: validated.signer_company,
       signature_data_url: validated.signature_data_url,
       signature_type: validated.signature_type,

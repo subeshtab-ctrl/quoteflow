@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
       organization_id: orgId,
       name: validated.name,
       company_name: validated.company_name,
+      auth_method: validated.auth_method,
+      phone_country_code: validated.phone_country_code,
       email: validated.email,
       phone: validated.phone,
       alternate_phone: validated.alternate_phone,

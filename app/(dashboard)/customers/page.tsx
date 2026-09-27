@@ -14,10 +14,15 @@ export default async function CustomersPage() {
 
   const customers = await store.getCustomers(orgId);
   const quotations = await store.getQuotations(orgId);
+  const organization = await store.getOrganization(orgId);
 
   return (
     <DashboardLayout>
-      <CustomersClientView initialCustomers={customers} quotations={quotations} />
+      <CustomersClientView
+        initialCustomers={customers}
+        quotations={quotations}
+        organizationCountry={organization?.country}
+      />
     </DashboardLayout>
   );
 }

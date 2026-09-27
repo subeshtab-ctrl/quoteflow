@@ -56,6 +56,9 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasPin, setHasPin] = useState(false);
+  const [authMethod, setAuthMethod] = useState<'MOBILE' | 'EMAIL'>('MOBILE');
+  const [phoneCountryCode, setPhoneCountryCode] = useState('+91');
+  const [customerPhoneMasked, setCustomerPhoneMasked] = useState('');
   const [customerEmailMasked, setCustomerEmailMasked] = useState('');
 
   // Unopened / "NEW" quotation tracking
@@ -251,6 +254,9 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
             setHasPin(Boolean(data.hasPin));
             setIsAuthenticated(Boolean(data.authenticated));
             setCustomerEmailMasked(data.customerEmailMasked || '');
+            setCustomerPhoneMasked(data.customerPhoneMasked || '');
+            setAuthMethod(data.authMethod || (quotation.customer?.auth_method || 'MOBILE'));
+            setPhoneCountryCode(data.phoneCountryCode || quotation.customer?.phone_country_code || '+91');
             setAuthChecked(true);
           }
         } else {
@@ -482,6 +488,9 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         quotationNumber={quotation.quotation_number}
         companyName={org?.name || 'QuoteFlow'}
         hasPin={hasPin}
+        authMethod={authMethod}
+        phoneCountryCode={phoneCountryCode}
+        customerPhoneMasked={customerPhoneMasked}
         customerEmailMasked={customerEmailMasked}
         onAuthenticated={() => {
           setIsAuthenticated(true);
@@ -1841,8 +1850,11 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         quotationNumber={quotation.quotation_number}
         grandTotalFormatted={grandTotalFormatted}
         token={currentToken}
+        authMethod={authMethod}
         customerName={customer?.name}
         customerEmail={customer?.email}
+        customerPhone={customer?.phone}
+        phoneCountryCode={phoneCountryCode}
         customerCompany={customer?.company_name}
         onApproved={handleApproved}
       />
