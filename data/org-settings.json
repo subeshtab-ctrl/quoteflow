@@ -1,5 +1,8 @@
 {
   "a0000000-0000-0000-0000-000000000001": {
-    "require_full_payment_for_invoice": true
+    "require_full_payment_for_invoice": true,
+    "invoice_prefix": "INV",
+    "invoice_start_number": 1,
+    "current_invoice_counter": 20
   }
 }

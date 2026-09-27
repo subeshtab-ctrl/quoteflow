@@ -65,17 +65,38 @@ class QuoteFlowStore {
     return path.join(dir, 'org-settings.json');
   }
 
-  private loadOrgSettingsFromFile(): Record<string, { require_full_payment_for_invoice?: boolean }> {
+  private loadOrgSettingsFromFile(): Record<string, {
+    require_full_payment_for_invoice?: boolean;
+    invoice_prefix?: string;
+    invoice_start_number?: number;
+    current_invoice_counter?: number;
+  }> {
     try {
       const p = this.getOrgSettingsFilePath();
       if (fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         const parsed = JSON.parse(raw) || {};
-        const result: Record<string, { require_full_payment_for_invoice?: boolean }> = {};
+        const result: Record<string, {
+          require_full_payment_for_invoice?: boolean;
+          invoice_prefix?: string;
+          invoice_start_number?: number;
+          current_invoice_counter?: number;
+        }> = {};
         for (const [key, val] of Object.entries(parsed)) {
-          if (val && typeof val === 'object' && 'require_full_payment_for_invoice' in val) {
+          if (val && typeof val === 'object') {
             result[key] = {
-              require_full_payment_for_invoice: Boolean((val as any).require_full_payment_for_invoice),
+              ...(typeof (val as any).require_full_payment_for_invoice === 'boolean'
+                ? { require_full_payment_for_invoice: (val as any).require_full_payment_for_invoice }
+                : {}),
+              ...(typeof (val as any).invoice_prefix === 'string'
+                ? { invoice_prefix: (val as any).invoice_prefix }
+                : {}),
+              ...(typeof (val as any).invoice_start_number === 'number'
+                ? { invoice_start_number: (val as any).invoice_start_number }
+                : {}),
+              ...(typeof (val as any).current_invoice_counter === 'number'
+                ? { current_invoice_counter: (val as any).current_invoice_counter }
+                : {}),
             };
           }
         }
@@ -86,11 +107,16 @@ class QuoteFlowStore {
   }
 
   private saveOrgSettingsToFile(orgId: string, data: Partial<Organization>): void {
-    if (data.require_full_payment_for_invoice === undefined) return;
     try {
       const all = this.loadOrgSettingsFromFile();
       all[orgId] = {
-        require_full_payment_for_invoice: Boolean(data.require_full_payment_for_invoice),
+        ...(all[orgId] || {}),
+        ...(data.require_full_payment_for_invoice !== undefined
+          ? { require_full_payment_for_invoice: Boolean(data.require_full_payment_for_invoice) }
+          : {}),
+        ...(data.invoice_prefix !== undefined ? { invoice_prefix: data.invoice_prefix } : {}),
+        ...(data.invoice_start_number !== undefined ? { invoice_start_number: data.invoice_start_number } : {}),
+        ...(data.current_invoice_counter !== undefined ? { current_invoice_counter: data.current_invoice_counter } : {}),
       };
       fs.writeFileSync(this.getOrgSettingsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
     } catch {}
@@ -1187,6 +1213,18 @@ class QuoteFlowStore {
               localSettings.require_full_payment_for_invoice !== undefined
                 ? localSettings.require_full_payment_for_invoice
                 : ((data as any).require_full_payment_for_invoice ?? true),
+            invoice_prefix:
+              localSettings.invoice_prefix !== undefined
+                ? localSettings.invoice_prefix
+                : (data as any).invoice_prefix ?? 'INV',
+            invoice_start_number:
+              localSettings.invoice_start_number !== undefined
+                ? localSettings.invoice_start_number
+                : (data as any).invoice_start_number ?? 1,
+            current_invoice_counter:
+              localSettings.current_invoice_counter !== undefined
+                ? localSettings.current_invoice_counter
+                : (data as any).current_invoice_counter ?? 0,
             default_bank_details: effectivePayment.default_bank_details ?? (data as any).default_bank_details ?? null,
             default_upi_details: effectivePayment.default_upi_details ?? (data as any).default_upi_details ?? null,
             default_crypto_details: effectivePayment.default_crypto_details ?? (data as any).default_crypto_details ?? null,
@@ -1216,6 +1254,18 @@ class QuoteFlowStore {
           localSettings.require_full_payment_for_invoice !== undefined
             ? localSettings.require_full_payment_for_invoice
             : ((cached as any).require_full_payment_for_invoice ?? true),
+        invoice_prefix:
+          localSettings.invoice_prefix !== undefined
+            ? localSettings.invoice_prefix
+            : cached.invoice_prefix ?? 'INV',
+        invoice_start_number:
+          localSettings.invoice_start_number !== undefined
+            ? localSettings.invoice_start_number
+            : cached.invoice_start_number ?? 1,
+        current_invoice_counter:
+          localSettings.current_invoice_counter !== undefined
+            ? localSettings.current_invoice_counter
+            : cached.current_invoice_counter ?? 0,
         default_bank_details: localPayment.default_bank_details ?? cached.default_bank_details ?? null,
         default_upi_details: localPayment.default_upi_details ?? cached.default_upi_details ?? null,
         default_crypto_details: localPayment.default_crypto_details ?? cached.default_crypto_details ?? null,
@@ -1354,6 +1404,9 @@ class QuoteFlowStore {
               localSettings.require_full_payment_for_invoice !== undefined
                 ? localSettings.require_full_payment_for_invoice
                 : ((saved as any).require_full_payment_for_invoice ?? true),
+            invoice_prefix: updated.invoice_prefix ?? localSettings.invoice_prefix ?? 'INV',
+            invoice_start_number: updated.invoice_start_number ?? localSettings.invoice_start_number ?? 1,
+            current_invoice_counter: updated.current_invoice_counter ?? localSettings.current_invoice_counter ?? 0,
             default_bank_details: updated.default_bank_details ?? localPayment.default_bank_details ?? (saved as any).default_bank_details ?? null,
             default_upi_details: updated.default_upi_details ?? localPayment.default_upi_details ?? (saved as any).default_upi_details ?? null,
             default_crypto_details: updated.default_crypto_details ?? localPayment.default_crypto_details ?? (saved as any).default_crypto_details ?? null,
@@ -1419,6 +1472,75 @@ class QuoteFlowStore {
 
     const prefix = org?.quotation_prefix || 'Q-';
     return `${prefix}${String(nextCount).padStart(6, '0')}`;
+  }
+
+  // --- INVOICE NUMBER GENERATOR (Atomic sequential per org) ---
+  public async peekNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID): Promise<string> {
+    await this.loadInvoicesFromSupabase(orgId);
+    const org = await this.getOrganization(orgId);
+
+    let maxSeq = 0;
+    for (const inv of this.invoices.values()) {
+      if (inv.organization_id && inv.organization_id !== orgId) continue;
+      if (!inv.invoice_number) continue;
+      const match = inv.invoice_number.match(/(\d+)$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        // Exclude random Date.now() timestamp slices (> 50,000)
+        if (val < 50000 && val > maxSeq) {
+          maxSeq = val;
+        }
+      }
+    }
+
+    const orgCounter = org?.current_invoice_counter || 0;
+    const orgStart = org?.invoice_start_number || 1;
+    const nextCount = Math.max(maxSeq + 1, orgCounter + 1, orgStart);
+
+    const prefix = org?.invoice_prefix !== undefined ? org.invoice_prefix : 'INV';
+    return `${prefix}${String(nextCount).padStart(4, '0')}`;
+  }
+
+  public async generateNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID): Promise<string> {
+    await this.loadInvoicesFromSupabase(orgId);
+    const org = await this.getOrganization(orgId);
+
+    let maxSeq = 0;
+    for (const inv of this.invoices.values()) {
+      if (inv.organization_id && inv.organization_id !== orgId) continue;
+      if (!inv.invoice_number) continue;
+      const match = inv.invoice_number.match(/(\d+)$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (val < 50000 && val > maxSeq) {
+          maxSeq = val;
+        }
+      }
+    }
+
+    const orgCounter = org?.current_invoice_counter || 0;
+    const orgStart = org?.invoice_start_number || 1;
+    const nextCount = Math.max(maxSeq + 1, orgCounter + 1, orgStart);
+
+    if (org) {
+      org.current_invoice_counter = nextCount;
+      this.organizations.set(orgId, org);
+      this.saveOrgSettingsToFile(orgId, { current_invoice_counter: nextCount });
+      try {
+        const supabase = createAdminClient();
+        if (supabase) {
+          await supabase
+            .from('organizations')
+            .update({ current_invoice_counter: nextCount })
+            .eq('id', orgId);
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    const prefix = org?.invoice_prefix !== undefined ? org.invoice_prefix : 'INV';
+    return `${prefix}${String(nextCount).padStart(4, '0')}`;
   }
 
   // --- CUSTOMERS ---
@@ -3978,7 +4100,7 @@ class QuoteFlowStore {
 
     // 3. Create fresh invoice from quote
     const invoiceNumber =
-      customInvoiceNumber || `INV-${quotation.quotation_number.replace(/^Q-/, '')}`;
+      customInvoiceNumber || (await this.generateNextInvoiceNumber(quotation.organization_id));
     const invoiceItems = (quotation.items || []).map((item, idx) => ({
       product_id: item.product_id || null,
       description: item.description,
@@ -4069,11 +4191,36 @@ class QuoteFlowStore {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const invId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    // Auto generate invoice number if not provided
-    let invoiceNumber = data.invoice_number;
-    if (!invoiceNumber) {
-      const count = this.invoices.size + 1;
-      invoiceNumber = `INV-${String(count).padStart(6, '0')}`;
+    // Auto generate sequential invoice number if not provided or if random Date.now() timestamp
+    let invoiceNumber = data.invoice_number?.trim();
+    const isRandomTimestamp =
+      invoiceNumber &&
+      /^INV-?\d{5,}$/.test(invoiceNumber) &&
+      parseInt(invoiceNumber.replace(/^INV-?/, ''), 10) > 50000;
+
+    if (!invoiceNumber || isRandomTimestamp) {
+      invoiceNumber = await this.generateNextInvoiceNumber(orgId);
+    } else {
+      await this.loadInvoicesFromSupabase(orgId);
+      const isTaken = Array.from(this.invoices.values()).some(
+        (inv) => inv.invoice_number === invoiceNumber && inv.id !== invId
+      );
+      if (isTaken) {
+        invoiceNumber = await this.generateNextInvoiceNumber(orgId);
+      } else {
+        const match = invoiceNumber.match(/(\d+)$/);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (val < 50000) {
+            const org = await this.getOrganization(orgId);
+            if (org && (org.current_invoice_counter || 0) < val) {
+              org.current_invoice_counter = val;
+              this.organizations.set(orgId, org);
+              this.saveOrgSettingsToFile(orgId, { current_invoice_counter: val });
+            }
+          }
+        }
+      }
     }
 
     // If quotation_id is provided, check if an invoice already exists and update it to keep everything in sync

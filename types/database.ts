@@ -96,6 +96,9 @@ export interface Organization {
   quotation_prefix: string;
   quotation_start_number: number;
   current_quotation_counter: number;
+  invoice_prefix?: string;
+  invoice_start_number?: number;
+  current_invoice_counter?: number;
   default_terms?: string | null;
   invoice_footer?: string | null;
   require_full_payment_for_invoice?: boolean;

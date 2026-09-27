@@ -1153,12 +1153,19 @@ export function SettingsClientView({
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
           <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">Quotation Defaults</h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Input
               label="Quotation Number Prefix"
               value={org.quotation_prefix}
               onChange={(e) => setOrg({ ...org, quotation_prefix: e.target.value })}
               placeholder="Q-"
+            />
+
+            <Input
+              label="Invoice Number Prefix"
+              value={org.invoice_prefix || ''}
+              onChange={(e) => setOrg({ ...org, invoice_prefix: e.target.value })}
+              placeholder="INV"
             />
 
             <div className="space-y-1">

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Customer, Product, Organization, CurrencyCode, DiscountType, InvoiceStatus, AttachmentItem } from '@/types/database';
@@ -34,6 +34,7 @@ interface InvoiceBuilderProps {
   organization: Organization;
   initialInvoice?: any;
   fromQuotation?: any;
+  suggestedInvoiceNumber?: string;
 }
 
 interface InvoiceItemState {
@@ -57,6 +58,7 @@ export function InvoiceBuilder({
   organization,
   initialInvoice,
   fromQuotation,
+  suggestedInvoiceNumber,
 }: InvoiceBuilderProps) {
   const router = useRouter();
 
@@ -81,10 +83,30 @@ export function InvoiceBuilder({
       ''
   );
 
-  const [invoiceNumber, setInvoiceNumber] = useState<string>(
-    initialInvoice?.invoice_number ||
-      (fromQuotation ? `INV-${fromQuotation.quotation_number.replace(/^Q-/, '')}` : `INV-${Date.now().toString().slice(-6)}`)
-  );
+  const [invoiceNumber, setInvoiceNumber] = useState<string>(() => {
+    if (initialInvoice?.invoice_number) return initialInvoice.invoice_number;
+    if (suggestedInvoiceNumber) return suggestedInvoiceNumber;
+    return '';
+  });
+
+  useEffect(() => {
+    if (suggestedInvoiceNumber && !initialInvoice?.invoice_number) {
+      setInvoiceNumber(suggestedInvoiceNumber);
+    }
+  }, [suggestedInvoiceNumber, initialInvoice?.invoice_number]);
+
+  useEffect(() => {
+    if (!initialInvoice?.invoice_number && !suggestedInvoiceNumber && !invoiceNumber) {
+      fetch('/api/invoices/next-number')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.nextInvoiceNumber) {
+            setInvoiceNumber(data.nextInvoiceNumber);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [initialInvoice?.invoice_number, suggestedInvoiceNumber, invoiceNumber]);
 
   const [poNumber, setPoNumber] = useState<string>(
     initialInvoice?.po_number || ''

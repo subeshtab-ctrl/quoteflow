@@ -132,10 +132,29 @@ export function InvoiceModal({
                   }))
                 );
               }
+              return;
             }
           }
+          // No existing invoice for this quotation, fetch next available sequential invoice number
+          fetch('/api/invoices/next-number')
+            .then((r) => r.json())
+            .then((nextData) => {
+              if (nextData.nextInvoiceNumber) {
+                setInvoiceNumber(nextData.nextInvoiceNumber);
+              }
+            })
+            .catch(() => {});
         })
-        .catch(() => {});
+        .catch(() => {
+          fetch('/api/invoices/next-number')
+            .then((r) => r.json())
+            .then((nextData) => {
+              if (nextData.nextInvoiceNumber) {
+                setInvoiceNumber(nextData.nextInvoiceNumber);
+              }
+            })
+            .catch(() => {});
+        });
     }
   }, [isOpen, quotation.id, quotation.quotation_number]);
 
@@ -192,7 +211,6 @@ export function InvoiceModal({
   // Re-sync when quotation prop changes
   useEffect(() => {
     if (isOpen) {
-      setInvoiceNumber(`INV-${quotation.quotation_number.replace(/^Q-/, '')}`);
       setInvoiceDate(
         (quotation.updated_at || quotation.issue_date || new Date().toISOString()).split('T')[0]
       );
@@ -300,7 +318,6 @@ export function InvoiceModal({
 
   const handleResetDefaults = () => {
     if (!confirm('Reset all invoice fields back to quotation defaults?')) return;
-    setInvoiceNumber(`INV-${quotation.quotation_number.replace(/^Q-/, '')}`);
     setInvoiceDate(
       (quotation.updated_at || quotation.issue_date || new Date().toISOString()).split('T')[0]
     );
