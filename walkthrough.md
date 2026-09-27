@@ -177,23 +177,50 @@
 
 ---
 
+## 5. Crypto Payment Selection & Multi-Mode Display Resolution
+
+### The Issue
+- When users selected **Crypto Only** (or disabled Bank & UPI) during quotation creation or editing, the generated quotation page and client portal continued to display Bank Remittance and UPI details, while Crypto payment details did not appear.
+- **Root Causes**:
+  1. On Vercel serverless environments, local JSON files (`data/payments.json`) are ephemeral and not shared across serverless execution instances. Quotation payment preferences (`payment_display_mode`, `show_bank_details`, `show_upi_details`, `show_crypto_details`, `crypto_details`) were only stored in the local file.
+  2. When loading quotations from Supabase on fresh instances, `filePayments[id]` was undefined, causing `resolvePaymentDetails` to fall back to hardcoded defaults (`BOTH`, `showBank: true`, `showUpi: true`, `showCrypto: false`).
+  3. In UI views (`/quotations/[id]` and `/q/[token]`), default fallback ternary operators evaluated `showBank` and `showUpi` to `true` whenever fields were undefined, ignoring `payment_display_mode === 'CRYPTO_ONLY'`.
+
+### What Was Fixed & Enhanced
+1. **Supabase Event-Driven Payment Config Persistence (`lib/supabase/data-store.ts`)**:
+   - `createQuotation` and `updateQuotation` now emit a `PAYMENT_CONFIG` event into Supabase `quotation_events`.
+   - `resolvePaymentDetails` inspects the latest `PAYMENT_CONFIG` event from Supabase, restoring the exact payment settings across all serverless instances and deploys.
+   - Organization-wide default payment settings persist to Supabase `templates` under key `SETTINGS:PAYMENT`.
+2. **Strict Mode-Aware Display Resolution**:
+   - Updated `resolvePaymentDetails` in [data-store.ts](file:///c:/Users/user/OneDrive/Desktop/ro%20app/lib/supabase/data-store.ts), [page.tsx](file:///c:/Users/user/OneDrive/Desktop/ro%20app/app/%28dashboard%29/quotations/%5Bid%5D/page.tsx), [public-quote-view.tsx](file:///c:/Users/user/OneDrive/Desktop/ro%20app/components/public-quote/public-quote-view.tsx), and [generator.ts](file:///c:/Users/user/OneDrive/Desktop/ro%20app/lib/pdf/generator.ts).
+   - When `payment_display_mode === 'CRYPTO_ONLY'`: `showBank` and `showUpi` are forced to `false`, and `showCrypto` is forced to `true`.
+   - When `payment_display_mode === 'BANK_ONLY'`: `showBank` is `true`, while `showUpi` and `showCrypto` are `false`.
+   - When `payment_display_mode === 'UPI_ONLY'`: `showUpi` is `true`, while `showBank` and `showCrypto` are `false`.
+3. **Backfilled Live Quotation (Q-000020 / `73783385-a8ce-4fff-a79f-a6b1a6e917ca`)**:
+   - Inserted a `PAYMENT_CONFIG` event with `CRYPTO_ONLY`, USDT TRC20 wallet address (`TY9Y4g6vK8G3aVjW97xZ1bN5k3z1B9xQ5M`), and `show_bank_details: false`, `show_upi_details: false`.
+   - The quotation immediately displays only the Crypto payment details and hides Bank/UPI across both the dashboard and client portal.
+
+---
+
 ## 🧪 Comprehensive Automated Test Results
 
 ```bash
 > cmd /c npx vitest run
-✓ tests/pdf.test.ts (1 test)
-✓ tests/advance-payment-and-invoice-pdf.test.ts (4 tests)
-✓ tests/export-and-payment.test.ts (3 tests)
-✓ tests/calculations.test.ts (5 tests)
-✓ tests/invoice-and-completion.test.ts (4 tests)
-✓ tests/portal-pin-and-invoice-audit.test.ts (2 tests)
 ✓ tests/quotation-workflow.test.ts (4 tests)
+✓ tests/quotation-payment-options.test.ts (2 tests)
+✓ tests/payment-proof-chat-and-invoice-terms.test.ts (2 tests)
+✓ tests/advance-payment-and-invoice-pdf.test.ts (4 tests)
+✓ tests/logo.test.ts (6 tests)
+✓ tests/invoice-and-completion.test.ts (4 tests)
+✓ tests/calculations.test.ts (5 tests)
+✓ tests/portal-pin-and-invoice-audit.test.ts (2 tests)
+✓ tests/export-and-payment.test.ts (3 tests)
+✓ tests/pdf.test.ts (1 test)
 ✓ tests/tokens.test.ts (3 tests)
 ✓ tests/validations.test.ts (8 tests)
-✓ tests/logo.test.ts (6 tests)
 
-Test Files: 10 passed (10)
-Tests:      40 passed (40)
+Test Files: 12 passed (12)
+Tests:      44 passed (44)
 Typecheck:  0 errors via tsc --noEmit
 ```
 
