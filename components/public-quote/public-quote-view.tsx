@@ -120,7 +120,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     (m) => m.sender_role === 'STAFF' && !m.is_read
   ).length;
 
-  const org = quotation.organization;
+  const org = quotation.organization || initialQuotation.organization;
   const customer = quotation.customer;
   const grandTotalFormatted = formatCurrency(quotation.grand_total, quotation.currency);
 
@@ -176,10 +176,15 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const isPaid = Boolean(quotation.is_paid || quotation.status === 'PAYMENT_COMPLETED');
   const isCompleted = quotation.status === 'COMPLETED' || quotation.status === 'PAYMENT_COMPLETED';
   const hasPaymentRecorded = Boolean(
-    quotation.is_paid || (quotation.paid_amount && quotation.paid_amount > 0)
+    quotation.is_paid || ((quotation.paid_amount ?? 0) > 0)
   );
   const isPaymentConfirmed = Boolean(
     quotation.payment_confirmed_by_company ?? quotation.is_paid
+  );
+  const isPartiallyPaid = Boolean(
+    !isPaid &&
+      (quotation.payment_status === 'PARTIALLY_PAID' ||
+        ((quotation.paid_amount ?? 0) > 0))
   );
 
   const isExpired =
@@ -586,9 +591,24 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                         } catch {}
                         return next;
                       });
-                      setQuotation(q);
+                      const fullOrg = q.organization || quotation.organization || initialQuotation.organization;
+                      const targetQuote: Quotation = {
+                        ...q,
+                        organization: fullOrg,
+                      };
+                      setQuotation(targetQuote);
                       window.history.pushState(null, '', `/q/${q.public_token}`);
-                      fetch(`/api/public/quote?token=${encodeURIComponent(q.public_token)}&recordView=true`);
+                      fetch(`/api/public/quote?token=${encodeURIComponent(q.public_token)}&recordView=true`)
+                        .then((res) => res.json())
+                        .then((data) => {
+                          if (data?.success && data?.quotation) {
+                            setQuotation({
+                              ...data.quotation,
+                              organization: data.quotation.organization || fullOrg,
+                            });
+                          }
+                        })
+                        .catch(() => {});
                     }}
                     className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
                       isSelected
@@ -635,7 +655,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           </div>
         )}
 
-        {!isPaid && (quotation.payment_status === 'PARTIALLY_PAID' || (quotation.paid_amount && quotation.paid_amount > 0)) && (
+        {isPartiallyPaid && (
           <div className="flex items-center gap-3 rounded-2xl bg-cyan-50 border border-cyan-200 p-4 text-cyan-950 shadow-sm animate-in fade-in">
             <div className="rounded-xl bg-cyan-100 p-2 text-cyan-700 shrink-0">
               <CheckCircle2 className="h-6 w-6" />
@@ -1137,7 +1157,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                         {(() => {
                           const upiQrSrc = upiInfo.qr_code_url || (
                             upiInfo.upi_id
-                              ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || quotation.organization?.name || 'SUBESH M LLC')}&cu=INR`)}`
+                              ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || org?.name || 'SUBESH M LLC')}&cu=INR`)}`
                               : ''
                           );
                           return upiQrSrc ? (

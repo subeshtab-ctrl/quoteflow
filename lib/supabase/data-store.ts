@@ -1932,7 +1932,16 @@ class QuoteFlowStore {
               .then(() => {});
           }
 
-          let results = data.map((q) => this.quotations.get(q.id) as Quotation);
+          const org = (await this.getOrganization(orgId)) || this.organizations.get(orgId);
+          let results = data.map((q) => {
+            const cached = this.quotations.get(q.id) as Quotation;
+            return {
+              ...cached,
+              organization: org,
+              items: cached.items || this.quotationItems.get(q.id) || [],
+              customer: cached.customer || this.customers.get(q.customer_id),
+            };
+          });
           if (filters?.status && filters.status !== 'ALL') {
             results = results.filter((item) => item.status === filters.status);
           }
@@ -1976,10 +1985,12 @@ class QuoteFlowStore {
       });
     }
 
-    // Attach joined customer & items
+    // Attach joined customer, items & organization
+    const fallbackOrg = (await this.getOrganization(orgId)) || this.organizations.get(orgId);
     return list
       .map((quote) => ({
         ...quote,
+        organization: fallbackOrg,
         customer: this.customers.get(quote.customer_id),
         items: this.quotationItems.get(quote.id) || [],
       }))
@@ -3815,15 +3826,23 @@ class QuoteFlowStore {
 
     const orgId = activeQuotation.organization_id;
     const customerId = activeQuotation.customer_id;
+    const org = activeQuotation.organization || (await this.getOrganization(orgId)) || this.organizations.get(orgId);
     const allOrgQuotes = await this.getQuotations(orgId, { customerId });
 
     // Filter quotes for this customer, excluding drafts
-    const customerQuotes = allOrgQuotes
+    const customerQuotes: Quotation[] = allOrgQuotes
       .filter((q) => q.customer_id === customerId && q.status !== 'DRAFT' && q.status !== 'CANCELLED')
+      .map((q) => ({
+        ...q,
+        organization: org || activeQuotation.organization,
+      }))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    // Make sure active quotation is present in customerQuotes
-    if (!customerQuotes.some((q) => q.id === activeQuotation.id)) {
+    // Make sure active quotation is present in customerQuotes and has complete data
+    const activeIdx = customerQuotes.findIndex((q) => q.id === activeQuotation.id);
+    if (activeIdx !== -1) {
+      customerQuotes[activeIdx] = activeQuotation;
+    } else {
       customerQuotes.unshift(activeQuotation);
     }
 
