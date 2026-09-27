@@ -462,7 +462,12 @@ export function InvoiceDetailView({
               </span>
             </div>
 
-            {Boolean(invoice.paid_amount !== undefined && invoice.paid_amount > 0) && (
+            {Boolean(
+              !invoice.is_paid &&
+              invoice.status !== 'PAID' &&
+              invoice.paid_amount !== undefined &&
+              invoice.paid_amount > 0
+            ) && (
               <div className="flex justify-between text-emerald-600 font-semibold pt-1">
                 <span>
                   Amount Paid
@@ -472,18 +477,12 @@ export function InvoiceDetailView({
               </div>
             )}
 
-            {Boolean(invoice.balance_amount !== undefined) && (
+            {!invoice.is_paid && invoice.status !== 'PAID' && Boolean(invoice.balance_amount !== undefined && invoice.balance_amount > 0) && (
               <div className="flex justify-between items-baseline pt-1 border-t border-slate-200 dark:border-slate-800">
                 <span className="text-sm font-black text-slate-900 dark:text-slate-100">
                   Remaining Balance Due
                 </span>
-                <span
-                  className={`text-base font-black ${
-                    invoice.balance_amount === 0
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-amber-600 dark:text-amber-400'
-                  }`}
-                >
+                <span className="text-base font-black text-amber-600 dark:text-amber-400">
                   {formatCurrency(invoice.balance_amount || 0, currency)}
                 </span>
               </div>

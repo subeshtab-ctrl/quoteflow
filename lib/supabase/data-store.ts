@@ -4184,8 +4184,8 @@ class QuoteFlowStore {
       is_paid: isPaid,
       paid_at: data.paid_at ?? (isPaid ? new Date().toISOString() : null),
       payment_notes: data.payment_notes ?? null,
-      paid_amount: data.paid_amount !== undefined ? data.paid_amount : (isPaid ? calculated.grand_total : 0),
-      balance_amount: data.balance_amount !== undefined ? data.balance_amount : (isPaid ? 0 : calculated.grand_total),
+      paid_amount: isPaid ? calculated.grand_total : (data.paid_amount !== undefined ? data.paid_amount : 0),
+      balance_amount: isPaid ? 0 : (data.balance_amount !== undefined ? data.balance_amount : calculated.grand_total),
       payment_confirmed_by_company: data.payment_confirmed_by_company ?? isPaid,
       attachments: data.attachments || [],
       created_by: data.created_by || 'User',
@@ -4258,6 +4258,14 @@ class QuoteFlowStore {
       updated_at: now,
     };
 
+    if (updated.status === 'PAID' || updated.is_paid) {
+      updated.is_paid = true;
+      updated.status = 'PAID';
+      updated.paid_amount = Number(updated.grand_total) || 0;
+      updated.balance_amount = 0;
+      if (!updated.paid_at) updated.paid_at = now;
+    }
+
     if (data.items) {
       updated.items = data.items;
       this.invoiceItems.set(id, data.items);
@@ -4285,7 +4293,11 @@ class QuoteFlowStore {
 
     inv.status = status;
     inv.is_paid = isPaid;
-    inv.paid_at = isPaid ? now : null;
+    inv.paid_at = isPaid ? (inv.paid_at || now) : null;
+    if (isPaid) {
+      inv.paid_amount = Number(inv.grand_total) || 0;
+      inv.balance_amount = 0;
+    }
     if (paymentDetails?.payment_method) {
       inv.payment_method = paymentDetails.payment_method as any;
     }

@@ -546,8 +546,8 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.text(formatCurrency(invoice.grand_total, currency), rightX, rightCurY, { align: 'right' });
   rightCurY += 6;
 
-  // Amount Paid
-  if (invoice.paid_amount !== undefined && Number(invoice.paid_amount) > 0) {
+  // Amount Paid (only show if advance / partial payment and not paid in full)
+  if (!isPaid && invoice.paid_amount !== undefined && Number(invoice.paid_amount) > 0) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(5, 150, 105);
@@ -557,8 +557,8 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     rightCurY += 5;
   }
 
-  // Remaining Balance Due
-  if (invoice.balance_amount !== undefined) {
+  // Remaining Balance Due (only show if not paid in full and balance > 0)
+  if (!isPaid && invoice.balance_amount !== undefined && Number(invoice.balance_amount) > 0) {
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.2);
     doc.line(totalsX, rightCurY - 1, rightX, rightCurY - 1);
@@ -570,15 +570,9 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.text('Remaining Balance Due', totalsX, rightCurY);
 
     const bal = Number(invoice.balance_amount);
-    if (bal === 0) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(5, 150, 105);
-    } else {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(217, 119, 6); // amber-600
-    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(217, 119, 6); // amber-600
     doc.text(formatCurrency(bal, currency), rightX, rightCurY, { align: 'right' });
     rightCurY += 5;
   }

@@ -564,13 +564,23 @@ export function InvoiceModal({
                 <span>Invoice Particulars & Payment Terms</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Input
-                  label="Invoice Number *"
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="e.g. INV-000001"
-                  required
-                />
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Invoice Number
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      readOnly
+                      disabled
+                      className="w-full h-10 px-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-sm font-mono font-bold select-none cursor-not-allowed"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold tracking-wider text-slate-400 uppercase bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded select-none">
+                      Auto-Generated
+                    </span>
+                  </div>
+                </div>
                 <Input
                   label="Invoice Date *"
                   type="date"
@@ -1155,7 +1165,7 @@ export function InvoiceModal({
                     {formatCurrency(grandTotal, currency)}
                   </span>
                 </div>
-                {Boolean(quotation.paid_amount && quotation.paid_amount > 0) && (
+                {Boolean(!isPaidState && quotation.paid_amount && quotation.paid_amount > 0) && (
                   <div className="flex justify-between text-emerald-600 font-semibold text-xs pt-1">
                     <span>
                       Amount Paid
@@ -1164,14 +1174,10 @@ export function InvoiceModal({
                     <span>-{formatCurrency(quotation.paid_amount || 0, currency)}</span>
                   </div>
                 )}
-                {Boolean(quotation.paid_amount && quotation.balance_amount !== undefined) && (
+                {Boolean(!isPaidState && quotation.paid_amount && quotation.balance_amount !== undefined && quotation.balance_amount > 0) && (
                   <div className="flex justify-between items-baseline pt-1 border-t border-slate-200 text-xs">
                     <span className="font-bold text-slate-900">Remaining Balance Due</span>
-                    <span
-                      className={`font-black ${
-                        quotation.balance_amount === 0 ? 'text-emerald-600' : 'text-amber-600'
-                      }`}
-                    >
+                    <span className="font-black text-amber-600">
                       {formatCurrency(quotation.balance_amount || 0, currency)}
                     </span>
                   </div>

@@ -671,12 +671,23 @@ export function InvoiceBuilder({
           </div>
 
           <div className="space-y-3">
-            <Input
-              label="Invoice Number *"
-              value={invoiceNumber}
-              onChange={(e) => setInvoiceNumber(e.target.value)}
-              required
-            />
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Invoice Number
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={invoiceNumber}
+                  readOnly
+                  disabled
+                  className="w-full h-10 px-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-sm font-mono font-bold select-none cursor-not-allowed"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold tracking-wider text-slate-400 uppercase bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded select-none">
+                  Auto-Generated
+                </span>
+              </div>
+            </div>
 
             <Input
               label="PO Number (Optional)"
