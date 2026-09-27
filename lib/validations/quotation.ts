@@ -59,7 +59,7 @@ export const CustomerFormSchema = z
     id: z.string().optional(),
     name: z.string().min(2, 'Contact person name is required'),
     company_name: z.string().optional(),
-    auth_method: z.enum(['MOBILE', 'EMAIL']).default('MOBILE'),
+    auth_method: z.enum(['MOBILE', 'EMAIL', 'BOTH']).optional(),
     phone_country_code: z.string().optional().default('+91'),
     email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
     phone: z.string().optional().or(z.literal('')),
@@ -74,23 +74,34 @@ export const CustomerFormSchema = z
     notes: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.auth_method === 'MOBILE') {
-      const cleanPhone = (data.phone || '').replace(/[\s\-\(\)]/g, '');
-      if (!cleanPhone || cleanPhone.length < 5) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Mobile number is required for mobile authentication (enter without country code)',
-          path: ['phone'],
-        });
-      }
-    } else if (data.auth_method === 'EMAIL') {
-      if (!data.email || !data.email.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Email address is required for email authentication',
-          path: ['email'],
-        });
-      }
+    const cleanPhone = (data.phone || '').replace(/[\s\-\(\)]/g, '');
+    const cleanEmail = (data.email || '').trim();
+    const hasPhone = Boolean(cleanPhone && cleanPhone.length >= 5);
+    const hasEmail = Boolean(cleanEmail && cleanEmail.length > 0);
+
+    if (!hasPhone && !hasEmail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please provide at least a Mobile Number or an Email Address (cannot leave both blank)',
+        path: ['phone'],
+      });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Please provide at least a Mobile Number or an Email Address (cannot leave both blank)',
+        path: ['email'],
+      });
+    } else if (data.auth_method === 'MOBILE' && !hasPhone) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Mobile number is required for mobile authentication (enter without country code)',
+        path: ['phone'],
+      });
+    } else if (data.auth_method === 'EMAIL' && !hasEmail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Email address is required for email authentication',
+        path: ['email'],
+      });
     }
   });
 

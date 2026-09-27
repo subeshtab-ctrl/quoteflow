@@ -1,5 +1,6 @@
 import {
   Customer,
+  CustomerAuthMethod,
   Notification,
   Organization,
   Product,
@@ -27,7 +28,7 @@ import { createAdminClient } from '@/lib/supabase/service-role';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { cleanPhoneNumber, getDefaultCountryCode } from '@/lib/country-codes';
+import { cleanPhoneNumber, getDefaultCountryCode, splitPhoneNumber, formatPhoneNumber } from '@/lib/country-codes';
 
 // Default Demo Organization
 export const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -1551,6 +1552,41 @@ class QuoteFlowStore {
   }
 
   // --- CUSTOMERS ---
+  private normalizeCustomer(raw: any, orgCountry?: string): Customer {
+    if (!raw) return raw;
+    const hasDummyEmail = raw.email && (
+      raw.email.endsWith('@mobile.client') ||
+      raw.email.endsWith('@phone.portal') ||
+      raw.email.endsWith('@customer.local')
+    );
+    const cleanEmail = hasDummyEmail ? undefined : (raw.email?.trim() || undefined);
+
+    const fallbackCode = raw.phone_country_code || getDefaultCountryCode(raw.country || orgCountry);
+    const parsed = splitPhoneNumber(raw.phone, fallbackCode);
+
+    const hasPhone = Boolean(parsed.phone && parsed.phone.length >= 5);
+    const hasRealEmail = Boolean(cleanEmail && cleanEmail.length > 0);
+
+    let authMethod: CustomerAuthMethod = raw.auth_method;
+    if (!authMethod) {
+      if (hasPhone && hasRealEmail) {
+        authMethod = 'BOTH';
+      } else if (hasPhone) {
+        authMethod = 'MOBILE';
+      } else {
+        authMethod = 'EMAIL';
+      }
+    }
+
+    return {
+      ...raw,
+      email: cleanEmail,
+      phone: parsed.phone || undefined,
+      phone_country_code: parsed.countryCode,
+      auth_method: authMethod,
+    };
+  }
+
   public async getCustomers(orgId: string = DEFAULT_ORG_ID): Promise<Customer[]> {
     try {
       const supabase = createAdminClient();
@@ -1568,10 +1604,13 @@ class QuoteFlowStore {
               this.customers.delete(id);
             }
           }
+          const list: Customer[] = [];
           for (const c of data) {
-            this.customers.set(c.id, c as Customer);
+            const normalized = this.normalizeCustomer(c);
+            this.customers.set(normalized.id, normalized);
+            list.push(normalized);
           }
-          return data as Customer[];
+          return list;
         }
       }
     } catch (err) {
@@ -1598,8 +1637,9 @@ class QuoteFlowStore {
           .maybeSingle();
 
         if (!error && data) {
-          this.customers.set(data.id, data as Customer);
-          return data as Customer;
+          const normalized = this.normalizeCustomer(data);
+          this.customers.set(normalized.id, normalized);
+          return normalized;
         }
       }
     } catch (err) {
@@ -1617,19 +1657,24 @@ class QuoteFlowStore {
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
     const now = new Date().toISOString();
     const org = await this.getOrganization(data.organization_id || DEFAULT_ORG_ID);
-    const authMethod = data.auth_method || (data.phone && !data.email ? 'MOBILE' : 'EMAIL');
-    const phoneCountryCode = data.phone_country_code || getDefaultCountryCode(data.country || org?.country);
+
+    const phoneCountryCode = data.phone_country_code || (data.phone ? splitPhoneNumber(data.phone).countryCode : getDefaultCountryCode(data.country || org?.country));
     const cleanPhone = data.phone ? cleanPhoneNumber(data.phone, phoneCountryCode) : undefined;
-    const customerEmail = data.email && data.email.trim()
-      ? data.email.trim()
-      : (authMethod === 'MOBILE' ? undefined : `${(data.name || 'client').toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@customer.local`);
+    const hasPhone = Boolean(cleanPhone && cleanPhone.length >= 5);
+
+    const cleanEmail = data.email && data.email.trim() ? data.email.trim() : undefined;
+    const hasEmail = Boolean(cleanEmail && cleanEmail.length > 0);
+
+    const authMethod: CustomerAuthMethod = data.auth_method || (hasPhone && hasEmail ? 'BOTH' : hasPhone ? 'MOBILE' : 'EMAIL');
+    const fullPhone = cleanPhone ? formatPhoneNumber(phoneCountryCode, cleanPhone) : null;
+    const fallbackDbEmail = cleanEmail || `${cleanPhone || id.slice(0, 8)}@mobile.client`;
 
     const newCustomer: Customer = {
       ...data,
       auth_method: authMethod,
       phone_country_code: phoneCountryCode,
       phone: cleanPhone,
-      email: customerEmail,
+      email: cleanEmail,
       id,
       created_at: now,
       updated_at: now,
@@ -1639,6 +1684,8 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        // Only include columns guaranteed to exist in standard Supabase customers table:
+        // Exclude auth_method and phone_country_code to prevent schema cache / missing column errors
         const { data: inserted, error } = await supabase
           .from('customers')
           .insert({
@@ -1646,10 +1693,8 @@ class QuoteFlowStore {
             organization_id: data.organization_id || DEFAULT_ORG_ID,
             name: data.name,
             company_name: data.company_name || null,
-            auth_method: authMethod,
-            phone_country_code: phoneCountryCode,
-            phone: cleanPhone || null,
-            email: customerEmail || `${(data.name || 'client').toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@customer.local`,
+            phone: fullPhone,
+            email: fallbackDbEmail,
             alternate_phone: data.alternate_phone || null,
             billing_address: data.billing_address || null,
             shipping_address: data.shipping_address || null,
@@ -1667,8 +1712,9 @@ class QuoteFlowStore {
           console.error('Supabase customer insert error:', error);
           throw error;
         } else if (inserted) {
-          this.customers.set(inserted.id, inserted as Customer);
-          return inserted as Customer;
+          const normalized = this.normalizeCustomer(inserted, org?.country || undefined);
+          this.customers.set(normalized.id, normalized);
+          return normalized;
         }
       }
     } catch (err: any) {
@@ -1681,15 +1727,26 @@ class QuoteFlowStore {
 
   public async updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
     const existing = this.customers.get(id);
-    const countryCode = data.phone_country_code || existing?.phone_country_code || '+91';
+    const org = await this.getOrganization(existing?.organization_id || DEFAULT_ORG_ID);
+    const countryCode = data.phone_country_code || existing?.phone_country_code || (data.phone ? splitPhoneNumber(data.phone).countryCode : getDefaultCountryCode(data.country || org?.country));
     const cleanPhone = data.phone !== undefined
       ? (data.phone ? cleanPhoneNumber(data.phone, countryCode) : undefined)
       : existing?.phone;
+    const cleanEmail = data.email !== undefined
+      ? (data.email ? data.email.trim() : undefined)
+      : existing?.email;
+
+    const hasPhone = Boolean(cleanPhone && cleanPhone.length >= 5);
+    const hasEmail = Boolean(cleanEmail && cleanEmail.length > 0);
+    const authMethod: CustomerAuthMethod = data.auth_method || (hasPhone && hasEmail ? 'BOTH' : hasPhone ? 'MOBILE' : 'EMAIL');
 
     const updated = {
       ...(existing || {}),
       ...data,
-      ...(cleanPhone !== undefined ? { phone: cleanPhone } : {}),
+      phone_country_code: countryCode,
+      phone: cleanPhone,
+      email: cleanEmail,
+      auth_method: authMethod,
       updated_at: new Date().toISOString()
     } as Customer;
     this.customers.set(id, updated);
@@ -1697,13 +1754,31 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        const fullPhone = cleanPhone !== undefined ? (cleanPhone ? formatPhoneNumber(countryCode, cleanPhone) : null) : undefined;
+        const fallbackDbEmail = cleanEmail || (cleanPhone ? `${cleanPhone}@mobile.client` : undefined);
+
+        const updatePayload: Record<string, any> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (data.name !== undefined) updatePayload.name = data.name;
+        if (data.company_name !== undefined) updatePayload.company_name = data.company_name;
+        if (fullPhone !== undefined) updatePayload.phone = fullPhone;
+        if (cleanEmail !== undefined || fallbackDbEmail !== undefined) {
+          updatePayload.email = cleanEmail || fallbackDbEmail;
+        }
+        if (data.alternate_phone !== undefined) updatePayload.alternate_phone = data.alternate_phone;
+        if (data.billing_address !== undefined) updatePayload.billing_address = data.billing_address;
+        if (data.shipping_address !== undefined) updatePayload.shipping_address = data.shipping_address;
+        if (data.city !== undefined) updatePayload.city = data.city;
+        if (data.state !== undefined) updatePayload.state = data.state;
+        if (data.country !== undefined) updatePayload.country = data.country;
+        if (data.postal_code !== undefined) updatePayload.postal_code = data.postal_code;
+        if (data.tax_number !== undefined) updatePayload.tax_number = data.tax_number;
+        if (data.notes !== undefined) updatePayload.notes = data.notes;
+
         const { data: updatedRow, error } = await supabase
           .from('customers')
-          .update({
-            ...data,
-            ...(cleanPhone !== undefined ? { phone: cleanPhone } : {}),
-            updated_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq('id', id)
           .select()
           .single();
@@ -1711,8 +1786,9 @@ class QuoteFlowStore {
         if (error) {
           console.error('Supabase customer update error:', error);
         } else if (updatedRow) {
-          this.customers.set(id, updatedRow as Customer);
-          return updatedRow as Customer;
+          const normalized = this.normalizeCustomer(updatedRow, org?.country || undefined);
+          this.customers.set(id, normalized);
+          return normalized;
         }
       }
     } catch (err) {
@@ -3226,24 +3302,40 @@ class QuoteFlowStore {
     quotationId: string,
     credential: string,
     pin: string,
-    authMethodOverride?: 'MOBILE' | 'EMAIL'
+    authMethodOverride?: CustomerAuthMethod
   ): Promise<{ success: boolean; message?: string }> {
     const quote = await this.getQuotationById(quotationId);
     if (!quote) throw new Error('Quotation not found');
 
-    const authMethod = authMethodOverride || quote.customer?.auth_method || (quote.customer?.phone && !quote.customer?.email ? 'MOBILE' : 'EMAIL');
     const cleanPin = pin.trim();
     if (!/^\d{6}$/.test(cleanPin)) {
       throw new Error('Security PIN must be exactly 6 digits (numbers only).');
     }
 
+    const rawEmail = quote.customer?.email || '';
+    const hasDummyEmail = rawEmail.endsWith('@mobile.client') || rawEmail.endsWith('@customer.local');
+    const registeredEmail = hasDummyEmail ? '' : rawEmail.toLowerCase().trim();
+
+    const phoneCountryCode: string = quote.customer?.phone_country_code || (quote.customer?.phone ? splitPhoneNumber(quote.customer.phone).countryCode : '+91');
+    const rawPhone = quote.customer?.phone || '';
+    const registeredPhone = rawPhone ? cleanPhoneNumber(rawPhone, phoneCountryCode) : '';
+
+    let effectiveMethod = authMethodOverride || quote.customer?.auth_method;
+    if (!effectiveMethod || effectiveMethod === 'BOTH') {
+      if (credential.includes('@')) {
+        effectiveMethod = 'EMAIL';
+      } else if (registeredPhone) {
+        effectiveMethod = 'MOBILE';
+      } else {
+        effectiveMethod = 'EMAIL';
+      }
+    }
+
     let customerEmail: string | undefined = undefined;
     let customerPhone: string | undefined = undefined;
-    const phoneCountryCode: string = quote.customer?.phone_country_code || '+91';
 
-    if (authMethod === 'MOBILE') {
+    if (effectiveMethod === 'MOBILE') {
       const cleanInputPhone = cleanPhoneNumber(credential, phoneCountryCode);
-      const registeredPhone = cleanPhoneNumber(quote.customer?.phone || '', phoneCountryCode);
 
       if (!registeredPhone) {
         throw new Error('This quotation does not have a registered customer mobile number. Please contact the company.');
@@ -3254,10 +3346,9 @@ class QuoteFlowStore {
       }
 
       customerPhone = registeredPhone;
-      customerEmail = quote.customer?.email?.toLowerCase().trim();
+      customerEmail = registeredEmail || undefined;
     } else {
       const cleanInputEmail = credential.toLowerCase().trim();
-      const registeredEmail = (quote.customer?.email || '').toLowerCase().trim();
 
       if (!registeredEmail) {
         throw new Error('This quotation does not have a registered customer email. Please contact the company.');
@@ -3268,7 +3359,7 @@ class QuoteFlowStore {
       }
 
       customerEmail = cleanInputEmail;
-      customerPhone = quote.customer?.phone ? cleanPhoneNumber(quote.customer.phone, phoneCountryCode) : undefined;
+      customerPhone = registeredPhone || undefined;
     }
 
     const pinHash = this.hashPin(cleanPin);
@@ -3281,7 +3372,7 @@ class QuoteFlowStore {
       customer_email: customerEmail,
       customer_phone: customerPhone,
       phone_country_code: phoneCountryCode,
-      auth_method: authMethod,
+      auth_method: (registeredPhone && registeredEmail) ? 'BOTH' : (registeredPhone ? 'MOBILE' : 'EMAIL'),
       pin_hash: pinHash,
       registered_at: now,
     };
@@ -3318,7 +3409,7 @@ class QuoteFlowStore {
             customer_email: customerEmail,
             customer_phone: customerPhone,
             phone_country_code: phoneCountryCode,
-            auth_method: authMethod,
+            auth_method: reg.auth_method,
             pin_hash: pinHash,
             registered_at: now,
           },
@@ -3344,7 +3435,7 @@ class QuoteFlowStore {
     quotationId: string,
     credential: string,
     newPin: string,
-    authMethodOverride?: 'MOBILE' | 'EMAIL'
+    authMethodOverride?: CustomerAuthMethod
   ): Promise<{ success: boolean; message?: string }> {
     return await this.registerPortalPin(quotationId, credential, newPin, authMethodOverride);
   }

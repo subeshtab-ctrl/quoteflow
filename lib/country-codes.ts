@@ -158,3 +158,32 @@ export function maskPhone(phone: string, countryCode?: string): string {
   const prefix = countryCode ? (countryCode.startsWith('+') ? countryCode : `+${countryCode}`) + ' ' : '';
   return `${prefix}******${last4}`;
 }
+
+/**
+ * Splits a stored phone string (which may include a +countryCode) into its country code and local number
+ */
+export function splitPhoneNumber(
+  phone?: string | null,
+  fallbackCountryCode: string = '+91'
+): { countryCode: string; phone: string } {
+  if (!phone) return { countryCode: fallbackCountryCode, phone: '' };
+  const trimmed = phone.trim();
+
+  if (trimmed.startsWith('+')) {
+    // Sort country codes by descending dialCode length to match e.g. +971 before +9
+    const sorted = [...COUNTRY_CODES].sort((a, b) => b.dialCode.length - a.dialCode.length);
+    for (const item of sorted) {
+      if (trimmed.startsWith(item.dialCode)) {
+        const rest = cleanPhoneNumber(trimmed.substring(item.dialCode.length), item.dialCode);
+        return { countryCode: item.dialCode, phone: rest };
+      }
+    }
+    // Generic regex match: + followed by 1 to 4 digits
+    const match = trimmed.match(/^(\+\d{1,4})\s*(.*)$/);
+    if (match) {
+      return { countryCode: match[1], phone: cleanPhoneNumber(match[2], match[1]) };
+    }
+  }
+
+  return { countryCode: fallbackCountryCode, phone: cleanPhoneNumber(trimmed, fallbackCountryCode) };
+}

@@ -60,7 +60,58 @@ describe('Customer Client Authentication & Details', () => {
   });
 
   describe('Customer Form Schema Validation (Mobile vs Email)', () => {
-    it('accepts customer with mobile authentication and optional email', () => {
+    it('accepts customer with only mobile number (email blank, no auth_method specified)', () => {
+      const mobileOnly = {
+        name: 'Arjun Das',
+        company_name: 'Das Enterprises',
+        phone_country_code: '+91',
+        phone: '9812345678',
+        email: '',
+      };
+
+      const result = CustomerFormSchema.safeParse(mobileOnly);
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts customer with only email address (phone blank, no auth_method specified)', () => {
+      const emailOnly = {
+        name: 'Sarah Connor',
+        email: 'sarah@skynet.example.com',
+        phone: '',
+      };
+
+      const result = CustomerFormSchema.safeParse(emailOnly);
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts customer with both mobile and email provided', () => {
+      const bothProvided = {
+        name: 'John Wick',
+        phone_country_code: '+1',
+        phone: '5551234567',
+        email: 'john@continental.com',
+      };
+
+      const result = CustomerFormSchema.safeParse(bothProvided);
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects customer when both mobile and email are blank', () => {
+      const bothBlank = {
+        name: 'Ghost User',
+        phone: '',
+        email: '',
+      };
+
+      const result = CustomerFormSchema.safeParse(bothBlank);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.path.includes('phone'))).toBe(true);
+        expect(result.error.issues.some((i) => i.path.includes('email'))).toBe(true);
+      }
+    });
+
+    it('accepts customer with explicit mobile authentication and optional email', () => {
       const validMobileCust = {
         name: 'Arjun Das',
         company_name: 'Das Enterprises',
@@ -74,7 +125,7 @@ describe('Customer Client Authentication & Details', () => {
       expect(result.success).toBe(true);
     });
 
-    it('rejects customer with mobile authentication when mobile number is missing or too short', () => {
+    it('rejects customer with explicit mobile authentication when mobile number is missing or too short', () => {
       const invalidMobileCust = {
         name: 'Arjun Das',
         auth_method: 'MOBILE',
@@ -89,7 +140,7 @@ describe('Customer Client Authentication & Details', () => {
       }
     });
 
-    it('accepts customer with email authentication and optional phone', () => {
+    it('accepts customer with explicit email authentication and optional phone', () => {
       const validEmailCust = {
         name: 'Sarah Connor',
         auth_method: 'EMAIL',
@@ -101,7 +152,7 @@ describe('Customer Client Authentication & Details', () => {
       expect(result.success).toBe(true);
     });
 
-    it('rejects customer with email authentication when email is missing', () => {
+    it('rejects customer with explicit email authentication when email is missing', () => {
       const invalidEmailCust = {
         name: 'Sarah Connor',
         auth_method: 'EMAIL',
@@ -117,12 +168,11 @@ describe('Customer Client Authentication & Details', () => {
   });
 
   describe('Data Store Integration & Authentication Flow', () => {
-    it('creates customer with separate country code and mobile authentication', async () => {
+    it('creates customer with only mobile number and infers MOBILE auth method', async () => {
       const created = await store.createCustomer({
         organization_id: DEFAULT_ORG_ID,
         name: 'Sunil Verma',
         company_name: 'Verma Logistics',
-        auth_method: 'MOBILE',
         phone_country_code: '+91',
         phone: '98444 55566',
       });
@@ -132,6 +182,37 @@ describe('Customer Client Authentication & Details', () => {
       expect(created.auth_method).toBe('MOBILE');
       expect(created.phone_country_code).toBe('+91');
       expect(created.phone).toBe('9844455566'); // cleaned without spaces or +91
+    });
+
+    it('creates customer with only email and infers EMAIL auth method', async () => {
+      const created = await store.createCustomer({
+        organization_id: DEFAULT_ORG_ID,
+        name: 'Priya Sharma',
+        company_name: 'Sharma Tech',
+        email: 'priya@sharmatech.in',
+      });
+
+      expect(created.id).toBeDefined();
+      expect(created.name).toBe('Priya Sharma');
+      expect(created.auth_method).toBe('EMAIL');
+      expect(created.email).toBe('priya@sharmatech.in');
+    });
+
+    it('creates customer with both mobile and email and infers BOTH auth method', async () => {
+      const created = await store.createCustomer({
+        organization_id: DEFAULT_ORG_ID,
+        name: 'Anil Kapoor',
+        company_name: 'Kapoor Films',
+        phone_country_code: '+91',
+        phone: '98222 33344',
+        email: 'anil@kapoorfilms.in',
+      });
+
+      expect(created.id).toBeDefined();
+      expect(created.name).toBe('Anil Kapoor');
+      expect(created.auth_method).toBe('BOTH');
+      expect(created.phone).toBe('9822233344');
+      expect(created.email).toBe('anil@kapoorfilms.in');
     });
 
     it('handles portal PIN registration and verification with mobile number', async () => {

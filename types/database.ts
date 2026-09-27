@@ -134,7 +134,7 @@ export interface OrganizationMember {
   updated_at: string;
 }
 
-export type CustomerAuthMethod = 'MOBILE' | 'EMAIL';
+export type CustomerAuthMethod = 'MOBILE' | 'EMAIL' | 'BOTH';
 
 export interface Customer {
   id: string;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import crypto from 'crypto';
-import { cleanPhoneNumber, maskPhone } from '@/lib/country-codes';
+import { cleanPhoneNumber, maskPhone, splitPhoneNumber } from '@/lib/country-codes';
 
 function maskEmail(email: string): string {
   if (!email || !email.includes('@')) return '***@***.com';
@@ -48,10 +48,23 @@ export async function GET(request: NextRequest) {
     }
 
     const customer = quotation.customer;
-    const authMethod = customer?.auth_method || (customer?.phone && !customer?.email ? 'MOBILE' : 'EMAIL');
-    const phoneCountryCode = customer?.phone_country_code || '+91';
+    const phoneCountryCode = customer?.phone_country_code || (customer?.phone ? splitPhoneNumber(customer.phone).countryCode : '+91');
     const customerPhoneClean = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
-    const customerEmail = customer?.email || '';
+    const rawEmail = customer?.email || '';
+    const hasDummyEmail = rawEmail.endsWith('@mobile.client') || rawEmail.endsWith('@customer.local');
+    const customerEmail = hasDummyEmail ? '' : rawEmail;
+
+    const hasPhone = Boolean(customerPhoneClean && customerPhoneClean.length >= 5);
+    const hasEmail = Boolean(customerEmail && customerEmail.length > 0);
+
+    let authMethod: 'MOBILE' | 'EMAIL' | 'BOTH' = 'MOBILE';
+    if (hasPhone && hasEmail) {
+      authMethod = 'BOTH';
+    } else if (hasPhone) {
+      authMethod = 'MOBILE';
+    } else {
+      authMethod = 'EMAIL';
+    }
 
     return NextResponse.json({
       success: true,
@@ -60,7 +73,7 @@ export async function GET(request: NextRequest) {
       authMethod,
       phoneCountryCode,
       customerPhoneMasked: customerPhoneClean ? maskPhone(customerPhoneClean, phoneCountryCode) : '',
-      customerEmailMasked: maskEmail(customerEmail),
+      customerEmailMasked: customerEmail ? maskEmail(customerEmail) : '',
       quotationNumber: quotation.quotation_number,
       title: quotation.title,
     });
@@ -88,16 +101,25 @@ export async function POST(request: NextRequest) {
     }
 
     const customer = quotation.customer;
-    const authMethod =
-      body.authMethod ||
-      customer?.auth_method ||
-      (customer?.phone && !customer?.email ? 'MOBILE' : 'EMAIL');
-    const phoneCountryCode = customer?.phone_country_code || '+91';
-    const customerEmail = (customer?.email || '').toLowerCase().trim();
+    const phoneCountryCode = customer?.phone_country_code || (customer?.phone ? splitPhoneNumber(customer.phone).countryCode : '+91');
     const customerPhone = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
+    const rawEmail = customer?.email || '';
+    const hasDummyEmail = rawEmail.endsWith('@mobile.client') || rawEmail.endsWith('@customer.local');
+    const customerEmail = hasDummyEmail ? '' : rawEmail.toLowerCase().trim();
+
+    const hasPhone = Boolean(customerPhone && customerPhone.length >= 5);
+    const hasEmail = Boolean(customerEmail && customerEmail.length > 0);
+
+    let authMethod: 'MOBILE' | 'EMAIL' | 'BOTH' = body.authMethod || customer?.auth_method;
+    if (!authMethod) {
+      if (hasPhone && hasEmail) authMethod = 'BOTH';
+      else if (hasPhone) authMethod = 'MOBILE';
+      else authMethod = 'EMAIL';
+    }
 
     if (action === 'check_credential' || action === 'check_email' || action === 'check_phone') {
-      const isMobile = action === 'check_phone' || (action === 'check_credential' && authMethod === 'MOBILE');
+      const isEmailInput = Boolean(email || (credential && credential.includes('@')) || action === 'check_email');
+      const isMobile = action === 'check_phone' || (!isEmailInput && (authMethod === 'MOBILE' || (credential && !credential.includes('@'))));
 
       if (isMobile) {
         const cleanInput = cleanPhoneNumber(phone || credential || '', phoneCountryCode);
@@ -148,11 +170,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'register') {
-      const effectiveCredential = credential || (authMethod === 'MOBILE' ? phone : email);
+      const isEmailInput = Boolean(email || (credential && credential.includes('@')));
+      const effectiveCredential = credential || (isEmailInput ? email : (phone || email));
       if (!effectiveCredential || !pin) {
         return NextResponse.json(
           {
-            error: `Both ${authMethod === 'MOBILE' ? 'mobile number' : 'email'} and 6-digit PIN are required to register`,
+            error: 'Credential and 6-digit PIN are required to register',
           },
           { status: 400 }
         );

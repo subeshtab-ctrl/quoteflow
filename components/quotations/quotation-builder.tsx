@@ -91,7 +91,6 @@ export function QuotationBuilder({
   const [customerList, setCustomerList] = useState<Customer[]>(customers);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const defaultCountryCode = getDefaultCountryCode(organization?.country);
-  const [quickAuthMethod, setQuickAuthMethod] = useState<'MOBILE' | 'EMAIL'>('MOBILE');
   const [quickPhoneCountryCode, setQuickPhoneCountryCode] = useState(defaultCountryCode);
   const [quickName, setQuickName] = useState('');
   const [quickCompany, setQuickCompany] = useState('');
@@ -366,21 +365,12 @@ export function QuotationBuilder({
       return;
     }
 
-    let cleanPhone = '';
-    if (quickAuthMethod === 'MOBILE') {
-      cleanPhone = cleanPhoneNumber(quickPhone, quickPhoneCountryCode);
-      if (!cleanPhone || cleanPhone.length < 5) {
-        setQuickCustomerError('Mobile number is required for mobile authentication (without country code)');
-        return;
-      }
-    } else {
-      if (!quickEmail.trim() || !quickEmail.includes('@')) {
-        setQuickCustomerError('A valid email address is required for email authentication');
-        return;
-      }
-      if (quickPhone.trim()) {
-        cleanPhone = cleanPhoneNumber(quickPhone, quickPhoneCountryCode);
-      }
+    const cleanPhone = quickPhone.trim() ? cleanPhoneNumber(quickPhone, quickPhoneCountryCode) : '';
+    const cleanEmail = quickEmail.trim();
+
+    if (!cleanPhone && !cleanEmail) {
+      setQuickCustomerError('Please enter either a mobile number or an email address (cannot leave both blank).');
+      return;
     }
 
     setIsSavingQuickCustomer(true);
@@ -393,10 +383,9 @@ export function QuotationBuilder({
         body: JSON.stringify({
           name: quickName.trim(),
           company_name: quickCompany.trim() || undefined,
-          auth_method: quickAuthMethod,
           phone_country_code: quickPhoneCountryCode,
           phone: cleanPhone || undefined,
-          email: quickEmail.trim() || undefined,
+          email: cleanEmail || undefined,
         }),
       });
 
@@ -408,7 +397,6 @@ export function QuotationBuilder({
       setIsQuickAddOpen(false);
       setQuickName('');
       setQuickCompany('');
-      setQuickAuthMethod('MOBILE');
       setQuickPhoneCountryCode(defaultCountryCode);
       setQuickEmail('');
       setQuickPhone('');
@@ -636,39 +624,6 @@ export function QuotationBuilder({
                   </p>
                 )}
 
-                {/* Authentication Method Selector */}
-                <div>
-                  <label className="block text-[11px] font-bold text-indigo-950 uppercase tracking-wider mb-1.5">
-                    Client Authentication Method *
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setQuickAuthMethod('MOBILE')}
-                      className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${
-                        quickAuthMethod === 'MOBILE'
-                          ? 'border-indigo-600 bg-white shadow-sm ring-1 ring-indigo-500 text-indigo-950 font-bold'
-                          : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-white'
-                      }`}
-                    >
-                      <Smartphone className={`h-3.5 w-3.5 ${quickAuthMethod === 'MOBILE' ? 'text-indigo-600' : 'text-slate-400'}`} />
-                      <span>Mobile Number</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setQuickAuthMethod('EMAIL')}
-                      className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${
-                        quickAuthMethod === 'EMAIL'
-                          ? 'border-indigo-600 bg-white shadow-sm ring-1 ring-indigo-500 text-indigo-950 font-bold'
-                          : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-white'
-                      }`}
-                    >
-                      <Mail className={`h-3.5 w-3.5 ${quickAuthMethod === 'EMAIL' ? 'text-indigo-600' : 'text-slate-400'}`} />
-                      <span>Email Address</span>
-                    </button>
-                  </div>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">
@@ -695,89 +650,49 @@ export function QuotationBuilder({
                     />
                   </div>
 
-                  {quickAuthMethod === 'MOBILE' ? (
-                    <>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                          Mobile Number * (Mandatory)
-                        </label>
-                        <div className="flex gap-1.5">
-                          <select
-                            value={quickPhoneCountryCode}
-                            onChange={(e) => setQuickPhoneCountryCode(e.target.value)}
-                            title="Country code"
-                            className="h-8 w-28 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 shrink-0"
-                          >
-                            {COUNTRY_CODES.map((c) => (
-                              <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
-                                {c.flag} {c.dialCode} ({c.name})
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type="tel"
-                            placeholder="98765 43210 (without country code)"
-                            value={quickPhone}
-                            onChange={(e) => setQuickPhone(e.target.value.replace(/[^\d\s]/g, ''))}
-                            className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                          Email (Optional)
-                        </label>
-                        <input
-                          type="email"
-                          placeholder="client@example.com"
-                          value={quickEmail}
-                          onChange={(e) => setQuickEmail(e.target.value)}
-                          className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                          Email Address * (Mandatory)
-                        </label>
-                        <input
-                          type="email"
-                          placeholder="client@example.com"
-                          value={quickEmail}
-                          onChange={(e) => setQuickEmail(e.target.value)}
-                          className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                          Phone Number (Optional)
-                        </label>
-                        <div className="flex gap-1.5">
-                          <select
-                            value={quickPhoneCountryCode}
-                            onChange={(e) => setQuickPhoneCountryCode(e.target.value)}
-                            title="Country code"
-                            className="h-8 w-28 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 shrink-0"
-                          >
-                            {COUNTRY_CODES.map((c) => (
-                              <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
-                                {c.flag} {c.dialCode} ({c.name})
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type="tel"
-                            placeholder="98765 43210"
-                            value={quickPhone}
-                            onChange={(e) => setQuickPhone(e.target.value.replace(/[^\d\s]/g, ''))}
-                            className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </div>
-                      </div>
-                    </>
-                  )}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Mobile Number
+                    </label>
+                    <div className="flex gap-1.5">
+                      <select
+                        value={quickPhoneCountryCode}
+                        onChange={(e) => setQuickPhoneCountryCode(e.target.value)}
+                        title="Country code"
+                        className="h-8 w-28 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 shrink-0"
+                      >
+                        {COUNTRY_CODES.map((c) => (
+                          <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
+                            {c.flag} {c.dialCode} ({c.name})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        placeholder="e.g. 7848861162"
+                        value={quickPhone}
+                        onChange={(e) => setQuickPhone(e.target.value.replace(/[^\d\s]/g, ''))}
+                        className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="client@example.com"
+                      value={quickEmail}
+                      onChange={(e) => setQuickEmail(e.target.value)}
+                      className="h-8 w-full rounded-lg border border-slate-300 px-2.5 text-xs bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 col-span-1 sm:col-span-2">
+                    Enter at least a mobile number or an email address (or both) for customer portal authentication. Both cannot be left blank.
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-1">
