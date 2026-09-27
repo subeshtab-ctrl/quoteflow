@@ -4141,11 +4141,20 @@ class QuoteFlowStore {
     const defaultInvoiceNotes = 'Thank you for your business. Please remit payment according to the agreed terms.';
 
     let resolvedTerms = data.terms_conditions;
-    if (!resolvedTerms || resolvedTerms.includes('Quotation valid for 30 days') || resolvedTerms.includes('50% advance required')) {
+    if (resolvedTerms === undefined) {
+      resolvedTerms = defaultInvoiceTerms;
+    } else if (resolvedTerms === null) {
+      resolvedTerms = '';
+    } else if (resolvedTerms.includes('Quotation valid for 30 days') || resolvedTerms.includes('50% advance required')) {
       resolvedTerms = defaultInvoiceTerms;
     }
+
     let resolvedNotes = data.notes;
-    if (!resolvedNotes || resolvedNotes.includes('Payment within 30 days of completion')) {
+    if (resolvedNotes === undefined) {
+      resolvedNotes = defaultInvoiceNotes;
+    } else if (resolvedNotes === null) {
+      resolvedNotes = '';
+    } else if (resolvedNotes.includes('Payment within 30 days of completion')) {
       resolvedNotes = defaultInvoiceNotes;
     }
 

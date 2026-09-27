@@ -15,7 +15,7 @@
     "advance_percentage": 100,
     "payment_status": "PAID",
     "payment_confirmed_by_company": true,
-    "payment_confirmed_at": "2026-09-27T02:48:41.499Z"
+    "payment_confirmed_at": "2026-09-27T07:07:48.846Z"
   },
   "d0000000-0000-0000-0000-000000000002": {
     "is_paid": false,
@@ -639,6 +639,182 @@
     "advance_percentage": 50
   },
   "3b78f7e2-9538-4fe7-80af-be56ab4b84ba": {
+    "is_paid": false,
+    "payment_display_mode": "BOTH",
+    "show_bank_details": true,
+    "show_upi_details": true,
+    "show_crypto_details": false,
+    "bank_details": {
+      "bank_name": "State Bank of India",
+      "account_name": "SUBESH M LLC",
+      "account_number": "12345678901",
+      "ifsc_code": "SBIN0001234",
+      "branch_name": "Main Branch"
+    },
+    "upi_details": {
+      "upi_id": "subeshm@sbi",
+      "payee_name": "SUBESH M LLC",
+      "qr_code_url": ""
+    },
+    "crypto_details": {
+      "currency": "USDT",
+      "network": "TRC20",
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
+    },
+    "payment_terms_instructions": "",
+    "accepted_payment_methods": null,
+    "advance_percentage": 50
+  },
+  "a5349ebe-da9e-439b-a2a8-7af15ac1211d": {
+    "is_paid": false,
+    "payment_display_mode": "BOTH",
+    "show_bank_details": true,
+    "show_upi_details": true,
+    "show_crypto_details": false,
+    "bank_details": {
+      "bank_name": "State Bank of India",
+      "account_name": "SUBESH M LLC",
+      "account_number": "12345678901",
+      "ifsc_code": "SBIN0001234",
+      "branch_name": "Main Branch"
+    },
+    "upi_details": {
+      "upi_id": "subeshm@sbi",
+      "payee_name": "SUBESH M LLC",
+      "qr_code_url": ""
+    },
+    "crypto_details": {
+      "currency": "USDT",
+      "network": "TRC20",
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
+    },
+    "payment_terms_instructions": "Please transfer 50% advance to initiate sprint development.",
+    "accepted_payment_methods": [
+      "Bank Transfer (NEFT/RTGS)",
+      "UPI",
+      "Corporate Card"
+    ],
+    "advance_percentage": 50
+  },
+  "dc54d6e7-a743-467a-a7af-353f90e194ae": {
+    "is_paid": false,
+    "payment_display_mode": "BOTH",
+    "show_bank_details": true,
+    "show_upi_details": true,
+    "show_crypto_details": false,
+    "bank_details": {
+      "bank_name": "State Bank of India",
+      "account_name": "SUBESH M LLC",
+      "account_number": "12345678901",
+      "ifsc_code": "SBIN0001234",
+      "branch_name": "Main Branch"
+    },
+    "upi_details": {
+      "upi_id": "subeshm@sbi",
+      "payee_name": "SUBESH M LLC",
+      "qr_code_url": ""
+    },
+    "crypto_details": {
+      "currency": "USDT",
+      "network": "TRC20",
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
+    },
+    "payment_terms_instructions": "",
+    "accepted_payment_methods": null,
+    "advance_percentage": 50
+  },
+  "6351df94-0ecf-4892-8933-56ba78e1803f": {
+    "is_paid": false,
+    "payment_display_mode": "BOTH",
+    "show_bank_details": true,
+    "show_upi_details": true,
+    "show_crypto_details": false,
+    "bank_details": {
+      "bank_name": "State Bank of India",
+      "account_name": "SUBESH M LLC",
+      "account_number": "12345678901",
+      "ifsc_code": "SBIN0001234",
+      "branch_name": "Main Branch"
+    },
+    "upi_details": {
+      "upi_id": "subeshm@sbi",
+      "payee_name": "SUBESH M LLC",
+      "qr_code_url": ""
+    },
+    "crypto_details": {
+      "currency": "USDT",
+      "network": "TRC20",
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
+    },
+    "payment_terms_instructions": "",
+    "accepted_payment_methods": null,
+    "advance_percentage": 50
+  },
+  "01ab387f-91d2-4721-9288-37676e27aca3": {
+    "is_paid": false,
+    "payment_display_mode": "BOTH",
+    "show_bank_details": true,
+    "show_upi_details": true,
+    "show_crypto_details": false,
+    "bank_details": {
+      "bank_name": "State Bank of India",
+      "account_name": "SUBESH M LLC",
+      "account_number": "12345678901",
+      "ifsc_code": "SBIN0001234",
+      "branch_name": "Main Branch"
+    },
+    "upi_details": {
+      "upi_id": "subeshm@sbi",
+      "payee_name": "SUBESH M LLC",
+      "qr_code_url": ""
+    },
+    "crypto_details": {
+      "currency": "USDT",
+      "network": "TRC20",
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
+    },
+    "payment_terms_instructions": "",
+    "accepted_payment_methods": [
+      "Bank Transfer",
+      "Online / Card",
+      "Cheque"
+    ],
+    "advance_percentage": 50
+  },
+  "bcdbd837-f463-42c7-a6d5-7a56154d7927": {
+    "is_paid": false,
+    "payment_display_mode": "BOTH",
+    "show_bank_details": true,
+    "show_upi_details": true,
+    "show_crypto_details": false,
+    "bank_details": {
+      "bank_name": "State Bank of India",
+      "account_name": "SUBESH M LLC",
+      "account_number": "12345678901",
+      "ifsc_code": "SBIN0001234",
+      "branch_name": "Main Branch"
+    },
+    "upi_details": {
+      "upi_id": "subeshm@sbi",
+      "payee_name": "SUBESH M LLC",
+      "qr_code_url": ""
+    },
+    "crypto_details": {
+      "currency": "USDT",
+      "network": "TRC20",
+      "wallet_address": "TDefaultWalletAddress123",
+      "qr_code_url": ""
+    },
+    "payment_terms_instructions": "",
+    "accepted_payment_methods": null,
+    "advance_percentage": 50
+  },
+  "c7994e6c-58d0-4e76-bff0-8612596a2786": {
     "is_paid": false,
     "payment_display_mode": "BOTH",
     "show_bank_details": true,

@@ -163,22 +163,28 @@ export function InvoiceBuilder({
   ].join('\n');
 
   const [notes, setNotes] = useState<string>(() => {
-    if (
-      initialInvoice?.notes &&
-      !initialInvoice.notes.includes('Payment within 30 days of completion')
-    ) {
-      return initialInvoice.notes;
+    if (initialInvoice) {
+      if (typeof initialInvoice.notes === 'string') {
+        if (!initialInvoice.notes.includes('Payment within 30 days of completion')) {
+          return initialInvoice.notes;
+        }
+      }
+      return '';
     }
     return defaultInvoiceNotes;
   });
 
   const [terms, setTerms] = useState<string>(() => {
-    if (
-      initialInvoice?.terms_conditions &&
-      !initialInvoice.terms_conditions.includes('Quotation valid for 30 days') &&
-      !initialInvoice.terms_conditions.includes('50% advance required')
-    ) {
-      return initialInvoice.terms_conditions;
+    if (initialInvoice) {
+      if (typeof initialInvoice.terms_conditions === 'string') {
+        if (
+          !initialInvoice.terms_conditions.includes('Quotation valid for 30 days') &&
+          !initialInvoice.terms_conditions.includes('50% advance required')
+        ) {
+          return initialInvoice.terms_conditions;
+        }
+      }
+      return '';
     }
     return defaultInvoiceTerms;
   });
@@ -434,8 +440,8 @@ export function InvoiceBuilder({
         due_date: dueDate,
         currency,
         payment_terms: paymentTerms,
-        notes,
-        terms_conditions: terms,
+        notes: (notes || '').trim(),
+        terms_conditions: (terms || '').trim(),
         attachments,
         tax_breakdown: aggregateTaxBreakdown,
         items: calculatedItems.map((item, idx) => ({

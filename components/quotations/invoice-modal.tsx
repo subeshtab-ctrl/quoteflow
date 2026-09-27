@@ -115,8 +115,8 @@ export function InvoiceModal({
               if (match.due_date) setDueDate(match.due_date.split('T')[0]);
               if (match.po_number) setPoNumber(match.po_number);
               if (match.payment_terms) setPaymentTerms(match.payment_terms);
-              if (match.notes) setInvoiceNotes(match.notes);
-              if (match.terms_conditions) setInvoiceTerms(match.terms_conditions);
+              if (typeof match.notes === 'string') setInvoiceNotes(match.notes);
+              if (typeof match.terms_conditions === 'string') setInvoiceTerms(match.terms_conditions);
               if (match.items && match.items.length > 0) {
                 setItems(
                   match.items.map((it: any, idx: number) => ({
@@ -357,8 +357,8 @@ export function InvoiceModal({
         due_date: dueDate,
         currency: currency,
         payment_terms: paymentTerms,
-        notes: invoiceNotes,
-        terms_conditions: invoiceTerms,
+        notes: (invoiceNotes || '').trim(),
+        terms_conditions: (invoiceTerms || '').trim(),
         discount_type: discountType,
         discount_value: discountValue,
         items: items.map((it, idx) => ({

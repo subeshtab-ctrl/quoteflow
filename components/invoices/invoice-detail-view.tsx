@@ -401,7 +401,7 @@ export function InvoiceDetailView({
         {/* Financial Summary */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="space-y-3 max-w-sm">
-            {invoice.notes && (
+            {Boolean(invoice.notes && invoice.notes.trim()) && (
               <div>
                 <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">
                   Notes
@@ -409,7 +409,7 @@ export function InvoiceDetailView({
                 <p className="text-slate-500 mt-0.5 leading-relaxed">{invoice.notes}</p>
               </div>
             )}
-            {invoice.terms_conditions && (
+            {Boolean(invoice.terms_conditions && invoice.terms_conditions.trim()) && (
               <div>
                 <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">
                   Payment Terms
