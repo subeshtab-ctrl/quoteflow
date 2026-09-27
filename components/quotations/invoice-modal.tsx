@@ -585,16 +585,21 @@ export function InvoiceModal({
                   label="Invoice Date *"
                   type="date"
                   value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  onChange={(e) => {
+                    setInvoiceDate(e.target.value);
+                    if (paymentTerms === 'Due on Receipt') setDueDate(e.target.value);
+                  }}
                   required
                 />
-                <Input
-                  label="Due Date *"
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  required
-                />
+                {paymentTerms !== 'Due on Receipt' && (
+                  <Input
+                    label="Due Date *"
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    required
+                  />
+                )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Input
@@ -985,9 +990,11 @@ export function InvoiceModal({
                   Invoice Date:{' '}
                   <span className="font-semibold text-slate-800">{formatDate(invoiceDate)}</span>
                 </p>
-                <p className="text-xs text-slate-500">
-                  Due Date: <span className="font-semibold text-slate-800">{formatDate(dueDate)}</span>
-                </p>
+                {paymentTerms !== 'Due on Receipt' && (
+                  <p className="text-xs text-slate-500">
+                    Due Date: <span className="font-semibold text-slate-800">{formatDate(dueDate)}</span>
+                  </p>
+                )}
                 <div className="pt-1 flex flex-col items-start sm:items-end gap-1">
                   {isPaidState ? (
                     <div className="flex flex-col items-start sm:items-end gap-1">

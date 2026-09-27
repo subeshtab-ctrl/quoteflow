@@ -696,20 +696,32 @@ export function InvoiceBuilder({
               placeholder="e.g. PO-2026-001"
             />
 
-            <div className="grid grid-cols-2 gap-2">
+            {paymentTerms === 'Due on Receipt' ? (
               <Input
                 label="Invoice Date"
                 type="date"
                 value={issueDate}
-                onChange={(e) => setIssueDate(e.target.value)}
+                onChange={(e) => {
+                  setIssueDate(e.target.value);
+                  setDueDate(e.target.value);
+                }}
               />
-              <Input
-                label="Due Date"
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
-            </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  label="Invoice Date"
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => setIssueDate(e.target.value)}
+                />
+                <Input
+                  label="Due Date"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
@@ -735,7 +747,25 @@ export function InvoiceBuilder({
                 </label>
                 <select
                   value={paymentTerms}
-                  onChange={(e) => setPaymentTerms(e.target.value)}
+                  onChange={(e) => {
+                    const newTerms = e.target.value;
+                    setPaymentTerms(newTerms);
+                    if (newTerms === 'Due on Receipt') {
+                      setDueDate(issueDate);
+                    } else if (newTerms === 'Net 15 Days') {
+                      const d = new Date(issueDate);
+                      d.setDate(d.getDate() + 15);
+                      setDueDate(d.toISOString().split('T')[0]);
+                    } else if (newTerms === 'Net 30 Days') {
+                      const d = new Date(issueDate);
+                      d.setDate(d.getDate() + 30);
+                      setDueDate(d.toISOString().split('T')[0]);
+                    } else if (newTerms === 'Net 60 Days') {
+                      const d = new Date(issueDate);
+                      d.setDate(d.getDate() + 60);
+                      setDueDate(d.toISOString().split('T')[0]);
+                    }
+                  }}
                   className="w-full h-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-800 dark:text-slate-200"
                 >
                   <option value="Due on Receipt">Due on Receipt</option>

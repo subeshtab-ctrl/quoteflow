@@ -300,7 +300,9 @@ export function InvoiceDetailView({
             <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">{invoice.invoice_number}</h1>
             <div className="text-xs text-slate-500 dark:text-slate-400">
               <p>Invoice Date: {formatDate(invoice.issue_date)}</p>
-              <p>Due Date: {formatDate(invoice.due_date)}</p>
+              {invoice.payment_terms !== 'Due on Receipt' && (
+                <p>Due Date: {formatDate(invoice.due_date)}</p>
+              )}
               {invoice.po_number && <p className="font-semibold">PO #: {invoice.po_number}</p>}
             </div>
           </div>

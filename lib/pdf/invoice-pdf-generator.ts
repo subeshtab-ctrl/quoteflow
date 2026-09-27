@@ -232,16 +232,20 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
   doc.text(`Invoice Date: ${formatDate(invoice.issue_date)}`, pageWidth - margin, rightY + 17, { align: 'right' });
-  doc.text(`Due Date: ${formatDate(invoice.due_date)}`, pageWidth - margin, rightY + 21.5, { align: 'right' });
+  let nextDateY = rightY + 21.5;
+  if (invoice.payment_terms !== 'Due on Receipt') {
+    doc.text(`Due Date: ${formatDate(invoice.due_date)}`, pageWidth - margin, nextDateY, { align: 'right' });
+    nextDateY += 4.5;
+  }
 
   if (invoice.po_number) {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(51, 65, 85);
-    doc.text(`PO #: ${invoice.po_number}`, pageWidth - margin, rightY + 26, { align: 'right' });
-    rightY += 5;
+    doc.text(`PO #: ${invoice.po_number}`, pageWidth - margin, nextDateY, { align: 'right' });
+    nextDateY += 4.5;
   }
 
-  const headerEndY = Math.max(compY, rightY + 23) + 3;
+  const headerEndY = Math.max(compY, nextDateY) + 3;
 
   // Header Divider
   doc.setDrawColor(241, 245, 249);
