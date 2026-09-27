@@ -19,6 +19,7 @@ import {
   Loader2,
   ShieldCheck,
   CheckCircle2,
+  Pencil,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -27,6 +28,7 @@ import {
   getDefaultCountryCode,
   cleanPhoneNumber,
   formatPhoneNumber,
+  splitPhoneNumber,
 } from '@/lib/country-codes';
 
 export function CustomersClientView({
@@ -48,7 +50,7 @@ export function CustomersClientView({
 
   const defaultCountryCode = getDefaultCountryCode(organizationCountry);
 
-  // Form fields
+  // Add Form fields
   const [name, setName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [phoneCountryCode, setPhoneCountryCode] = useState(defaultCountryCode);
@@ -58,6 +60,98 @@ export function CustomersClientView({
   const [state, setState] = useState('');
   const [taxNumber, setTaxNumber] = useState('');
   const [billingAddress, setBillingAddress] = useState('');
+
+  // Edit State & Fields
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const [editName, setEditName] = useState('');
+  const [editCompanyName, setEditCompanyName] = useState('');
+  const [editPhoneCountryCode, setEditPhoneCountryCode] = useState(defaultCountryCode);
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editState, setEditState] = useState('');
+  const [editTaxNumber, setEditTaxNumber] = useState('');
+  const [editBillingAddress, setEditBillingAddress] = useState('');
+
+  const handleOpenEdit = (cust: Customer) => {
+    setEditingCustomer(cust);
+    setEditName(cust.name || '');
+    setEditCompanyName(cust.company_name || '');
+    const fallbackCode = cust.phone_country_code || defaultCountryCode;
+    const parsed = splitPhoneNumber(cust.phone, fallbackCode);
+    setEditPhoneCountryCode(parsed.countryCode || defaultCountryCode);
+    setEditPhone(parsed.phone || '');
+    const cleanEmail =
+      cust.email &&
+      !cust.email.endsWith('@mobile.client') &&
+      !cust.email.endsWith('@customer.local') &&
+      !cust.email.endsWith('@phone.portal')
+        ? cust.email
+        : '';
+    setEditEmail(cleanEmail);
+    setEditCity(cust.city || '');
+    setEditState(cust.state || '');
+    setEditTaxNumber(cust.tax_number || '');
+    setEditBillingAddress(cust.billing_address || '');
+    setEditError(null);
+    setIsEditOpen(true);
+  };
+
+  const handleUpdateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCustomer) return;
+    setEditError(null);
+
+    if (!editName.trim()) {
+      setEditError('Contact Person Name is required.');
+      return;
+    }
+
+    const cleanPhone = editPhone.trim() ? cleanPhoneNumber(editPhone, editPhoneCountryCode) : '';
+    const cleanEmail = editEmail.trim();
+
+    if (!cleanPhone && !cleanEmail) {
+      setEditError('Please provide at least a Mobile Number or an Email Address (cannot leave both blank).');
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const res = await fetch(`/api/customers/${editingCustomer.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          company_name: editCompanyName.trim() || undefined,
+          phone_country_code: editPhoneCountryCode,
+          phone: cleanPhone || '',
+          email: cleanEmail || '',
+          city: editCity.trim() || undefined,
+          state: editState.trim() || undefined,
+          tax_number: editTaxNumber.trim() || undefined,
+          billing_address: editBillingAddress.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update customer');
+
+      setCustomers((prev) =>
+        prev.map((c) => (c.id === data.customer.id ? data.customer : c))
+      );
+      setIsEditOpen(false);
+      setEditingCustomer(null);
+      router.refresh();
+    } catch (err: any) {
+      setEditError(err.message || 'Error updating customer');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   const handleDeleteCustomer = async (id: string, customerName: string) => {
     if (
@@ -211,9 +305,14 @@ export function CustomersClientView({
                   )}
                 </div>
                 <div className="flex items-center gap-1">
-                  <div className="rounded-xl bg-slate-100 p-2 text-slate-500">
-                    <Building className="h-4 w-4" />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(cust)}
+                    className="rounded-xl p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                    title="Edit Customer"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleDeleteCustomer(cust.id, cust.name)}
@@ -279,9 +378,18 @@ export function CustomersClientView({
                   {custQuotes.length} {custQuotes.length === 1 ? 'quotation' : 'quotations'}
                 </span>
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(cust)}
+                    className="text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 transition-colors"
+                    title="Edit Customer"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    <span>Edit</span>
+                  </button>
                   <Link
                     href={`/quotations?search=${encodeURIComponent(cust.name)}`}
-                    className="text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
+                    className="text-slate-600 hover:text-slate-800 font-medium flex items-center gap-1 transition-colors"
                   >
                     <FileText className="h-3.5 w-3.5" />
                     <span>View Quotes</span>
@@ -414,6 +522,132 @@ export function CustomersClientView({
             </Button>
             <Button type="submit" variant="primary" isLoading={isLoading}>
               Save Customer
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Customer Modal */}
+      <Modal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingCustomer(null);
+        }}
+        title="Edit Customer Details"
+        description="Update customer contact details, company name, address, and client portal authentication credentials."
+        maxWidth="lg"
+      >
+        <form onSubmit={handleUpdateCustomer} className="space-y-4">
+          {editError && (
+            <div className="p-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">
+              {editError}
+            </div>
+          )}
+
+          {/* Section 1: Customer Contact Details (Mandatory) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Contact Person Name *"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder="e.g. John Mathew"
+              required
+            />
+            <Input
+              label="Company Name"
+              value={editCompanyName}
+              onChange={(e) => setEditCompanyName(e.target.value)}
+              placeholder="e.g. JM Architect Studio"
+            />
+          </div>
+
+          {/* Section 2: Contact Numbers & Email */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Mobile Number
+              </label>
+              <div className="flex gap-2">
+                <select
+                  value={editPhoneCountryCode}
+                  onChange={(e) => setEditPhoneCountryCode(e.target.value)}
+                  title="Select country code"
+                  className="h-10 w-32 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shrink-0"
+                >
+                  {COUNTRY_CODES.map((c) => (
+                    <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
+                      {c.flag} {c.dialCode} ({c.name})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="tel"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value.replace(/[^\d\s]/g, ''))}
+                  placeholder="e.g. 7848861162"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Input
+                label="Email Address"
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="client@example.com"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 sm:col-span-2">
+              Enter at least a mobile number or an email address (or both) for customer portal authentication. Both cannot be left blank.
+            </p>
+          </div>
+
+          {/* Section 3: Billing & Tax Details */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Input
+              label="City"
+              value={editCity}
+              onChange={(e) => setEditCity(e.target.value)}
+              placeholder="e.g. Kochi"
+            />
+            <Input
+              label="State"
+              value={editState}
+              onChange={(e) => setEditState(e.target.value)}
+              placeholder="e.g. Kerala"
+            />
+            <Input
+              label="Tax / GST ID"
+              value={editTaxNumber}
+              onChange={(e) => setEditTaxNumber(e.target.value)}
+              placeholder="GSTIN"
+            />
+          </div>
+
+          <Textarea
+            label="Billing Address"
+            value={editBillingAddress}
+            onChange={(e) => setEditBillingAddress(e.target.value)}
+            rows={2}
+            placeholder="Street address, building, suite..."
+          />
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsEditOpen(false);
+                setEditingCustomer(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" isLoading={isUpdating}>
+              Save Changes
             </Button>
           </div>
         </form>

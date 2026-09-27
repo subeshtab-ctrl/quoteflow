@@ -316,5 +316,66 @@ describe('Customer Client Authentication & Details', () => {
       expect(sig?.signer_phone).toBe('9855566677');
       expect(sig?.phone_country_code).toBe('+91');
     });
+
+    it('enables editing customer details including phone, email, and company details', async () => {
+      // 1. Create initial customer
+      const customer = await store.createCustomer({
+        organization_id: DEFAULT_ORG_ID,
+        name: 'Rohan Sharma',
+        company_name: 'RS Traders',
+        phone_country_code: '+91',
+        phone: '9811122233',
+        email: 'rohan@rstraders.com',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+      });
+
+      expect(customer.auth_method).toBe('BOTH');
+
+      // 2. Edit contact person name, company name, city, and tax number
+      const updated1 = await store.updateCustomer(customer.id, {
+        name: 'Rohan M. Sharma',
+        company_name: 'RS Global Enterprises',
+        city: 'Pune',
+        state: 'Maharashtra',
+        tax_number: '27AAAAA0000A1Z5',
+      });
+
+      expect(updated1.name).toBe('Rohan M. Sharma');
+      expect(updated1.company_name).toBe('RS Global Enterprises');
+      expect(updated1.city).toBe('Pune');
+      expect(updated1.tax_number).toBe('27AAAAA0000A1Z5');
+      expect(updated1.phone).toBe('9811122233');
+      expect(updated1.email).toBe('rohan@rstraders.com');
+
+      // 3. Edit mobile number with different country code (UAE +971)
+      const updated2 = await store.updateCustomer(customer.id, {
+        phone_country_code: '+971',
+        phone: '50 999 8888',
+      });
+
+      expect(updated2.phone_country_code).toBe('+971');
+      expect(updated2.phone).toBe('509998888');
+      expect(updated2.auth_method).toBe('BOTH');
+
+      // 4. Edit to clear email, leaving only phone
+      const updated3 = await store.updateCustomer(customer.id, {
+        email: '',
+      });
+
+      expect(updated3.email).toBeUndefined();
+      expect(updated3.phone).toBe('509998888');
+      expect(updated3.auth_method).toBe('MOBILE');
+
+      // 5. Edit to clear phone, leaving only email
+      const updated4 = await store.updateCustomer(customer.id, {
+        phone: '',
+        email: 'rohan.new@global.com',
+      });
+
+      expect(updated4.phone).toBeUndefined();
+      expect(updated4.email).toBe('rohan.new@global.com');
+      expect(updated4.auth_method).toBe('EMAIL');
+    });
   });
 });

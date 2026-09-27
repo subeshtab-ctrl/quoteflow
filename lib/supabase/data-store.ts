@@ -1730,22 +1730,22 @@ class QuoteFlowStore {
     const org = await this.getOrganization(existing?.organization_id || DEFAULT_ORG_ID);
     const countryCode = data.phone_country_code || existing?.phone_country_code || (data.phone ? splitPhoneNumber(data.phone).countryCode : getDefaultCountryCode(data.country || org?.country));
     const cleanPhone = data.phone !== undefined
-      ? (data.phone ? cleanPhoneNumber(data.phone, countryCode) : undefined)
+      ? (data.phone && data.phone.trim() ? cleanPhoneNumber(data.phone, countryCode) : undefined)
       : existing?.phone;
     const cleanEmail = data.email !== undefined
-      ? (data.email ? data.email.trim() : undefined)
+      ? (data.email && data.email.trim() ? data.email.trim() : undefined)
       : existing?.email;
 
     const hasPhone = Boolean(cleanPhone && cleanPhone.length >= 5);
-    const hasEmail = Boolean(cleanEmail && cleanEmail.length > 0);
+    const hasEmail = Boolean(cleanEmail && cleanEmail.length > 0 && !cleanEmail.endsWith('@mobile.client') && !cleanEmail.endsWith('@customer.local'));
     const authMethod: CustomerAuthMethod = data.auth_method || (hasPhone && hasEmail ? 'BOTH' : hasPhone ? 'MOBILE' : 'EMAIL');
 
     const updated = {
       ...(existing || {}),
       ...data,
       phone_country_code: countryCode,
-      phone: cleanPhone,
-      email: cleanEmail,
+      phone: hasPhone ? cleanPhone : undefined,
+      email: hasEmail ? cleanEmail : undefined,
       auth_method: authMethod,
       updated_at: new Date().toISOString()
     } as Customer;
@@ -1754,17 +1754,17 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        const fullPhone = cleanPhone !== undefined ? (cleanPhone ? formatPhoneNumber(countryCode, cleanPhone) : null) : undefined;
-        const fallbackDbEmail = cleanEmail || (cleanPhone ? `${cleanPhone}@mobile.client` : undefined);
+        const fullPhone = hasPhone ? formatPhoneNumber(countryCode, cleanPhone) : null;
+        const fallbackDbEmail = hasEmail ? cleanEmail : (hasPhone ? `${cleanPhone}@mobile.client` : null);
 
         const updatePayload: Record<string, any> = {
           updated_at: new Date().toISOString(),
         };
         if (data.name !== undefined) updatePayload.name = data.name;
         if (data.company_name !== undefined) updatePayload.company_name = data.company_name;
-        if (fullPhone !== undefined) updatePayload.phone = fullPhone;
-        if (cleanEmail !== undefined || fallbackDbEmail !== undefined) {
-          updatePayload.email = cleanEmail || fallbackDbEmail;
+        if (data.phone !== undefined) updatePayload.phone = fullPhone;
+        if (data.email !== undefined || (data.phone !== undefined && !hasEmail && hasPhone)) {
+          updatePayload.email = fallbackDbEmail;
         }
         if (data.alternate_phone !== undefined) updatePayload.alternate_phone = data.alternate_phone;
         if (data.billing_address !== undefined) updatePayload.billing_address = data.billing_address;
