@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
       organization_id: orgId,
     });
 
-    // If quotation status was set to SENT, send email if customer has email
-    if (quotation.status === 'SENT' && quotation.customer?.email) {
+    // If quotation status was set to SENT, send email if customer has email (ONLY in LIVE mode)
+    if (quotation.status === 'SENT' && quotation.customer?.email && quotation.environment !== 'test') {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
       const org = quotation.organization || (await store.getOrganization(orgId));
       const emailPayload = generateQuotationSentEmail({

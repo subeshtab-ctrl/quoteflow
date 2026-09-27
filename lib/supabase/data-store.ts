@@ -43,6 +43,40 @@ export const DEFAULT_INVOICE_TERMS = [
   '4. Goods/services provided in accordance with approved scope are non-refundable.',
 ].join('\n');
 
+export function buildInvoiceNotesWithPaymentRefs(
+  baseNotes?: string | null,
+  advanceRef?: string | null,
+  finalRef?: string | null,
+  generalRef?: string | null
+): string {
+  let cleanBase = (baseNotes || '')
+    .replace(/\n*\s*Payment References?:[\s\S]*$/i, '')
+    .trim();
+
+  const adv = advanceRef?.trim();
+  const fin = finalRef?.trim();
+  const gen = generalRef?.trim();
+
+  const lines: string[] = [];
+  if (adv && fin) {
+    lines.push(`• Advance Payment Ref: ${adv}`);
+    lines.push(`• Final Settlement Ref: ${fin}`);
+  } else if (adv) {
+    lines.push(`• Advance Payment Ref: ${adv}`);
+  } else if (fin) {
+    lines.push(`• Final Settlement Ref: ${fin}`);
+  } else if (gen) {
+    lines.push(`• Payment Ref: ${gen}`);
+  }
+
+  if (lines.length === 0) {
+    return cleanBase || DEFAULT_INVOICE_NOTES;
+  }
+
+  const prefix = cleanBase ? `${cleanBase}\n\n` : '';
+  return `${prefix}Payment References:\n${lines.join('\n')}`;
+}
+
 class QuoteFlowStore {
   private organizations: Map<string, Organization> = new Map();
   private customers: Map<string, Customer> = new Map();
@@ -72,6 +106,9 @@ class QuoteFlowStore {
     invoice_prefix?: string;
     invoice_start_number?: number;
     current_invoice_counter?: number;
+    mode?: 'test' | 'live';
+    current_test_invoice_counter?: number;
+    current_test_quotation_counter?: number;
   }> {
     try {
       const p = this.getOrgSettingsFilePath();
@@ -83,6 +120,9 @@ class QuoteFlowStore {
           invoice_prefix?: string;
           invoice_start_number?: number;
           current_invoice_counter?: number;
+          mode?: 'test' | 'live';
+          current_test_invoice_counter?: number;
+          current_test_quotation_counter?: number;
         }> = {};
         for (const [key, val] of Object.entries(parsed)) {
           if (val && typeof val === 'object') {
@@ -98,6 +138,15 @@ class QuoteFlowStore {
                 : {}),
               ...(typeof (val as any).current_invoice_counter === 'number'
                 ? { current_invoice_counter: (val as any).current_invoice_counter }
+                : {}),
+              ...((val as any).mode === 'test' || (val as any).mode === 'live'
+                ? { mode: (val as any).mode }
+                : {}),
+              ...(typeof (val as any).current_test_invoice_counter === 'number'
+                ? { current_test_invoice_counter: (val as any).current_test_invoice_counter }
+                : {}),
+              ...(typeof (val as any).current_test_quotation_counter === 'number'
+                ? { current_test_quotation_counter: (val as any).current_test_quotation_counter }
                 : {}),
             };
           }
@@ -119,6 +168,9 @@ class QuoteFlowStore {
         ...(data.invoice_prefix !== undefined ? { invoice_prefix: data.invoice_prefix } : {}),
         ...(data.invoice_start_number !== undefined ? { invoice_start_number: data.invoice_start_number } : {}),
         ...(data.current_invoice_counter !== undefined ? { current_invoice_counter: data.current_invoice_counter } : {}),
+        ...(data.mode !== undefined ? { mode: data.mode } : {}),
+        ...(data.current_test_invoice_counter !== undefined ? { current_test_invoice_counter: data.current_test_invoice_counter } : {}),
+        ...(data.current_test_quotation_counter !== undefined ? { current_test_quotation_counter: data.current_test_quotation_counter } : {}),
       };
       fs.writeFileSync(this.getOrgSettingsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
     } catch {}
@@ -182,6 +234,8 @@ class QuoteFlowStore {
       paid_at?: string | null;
       payment_method?: string | null;
       payment_notes?: string | null;
+      advance_payment_notes?: string | null;
+      final_payment_notes?: string | null;
       paid_amount?: number;
       balance_amount?: number;
       advance_percentage?: number | null;
@@ -219,6 +273,8 @@ class QuoteFlowStore {
       paid_at?: string | null;
       payment_method?: string | null;
       payment_notes?: string | null;
+      advance_payment_notes?: string | null;
+      final_payment_notes?: string | null;
       paid_amount?: number;
       balance_amount?: number;
       advance_percentage?: number | null;
@@ -261,6 +317,8 @@ class QuoteFlowStore {
     paid_at: string | null;
     payment_method: string | null;
     payment_notes: string | null;
+    advance_payment_notes: string | null;
+    final_payment_notes: string | null;
     paid_amount: number;
     balance_amount: number;
     advance_percentage: number | null;
@@ -279,6 +337,13 @@ class QuoteFlowStore {
     accepted_payment_methods?: string[] | null;
   } {
     const filePayment = filePayments[quotationId];
+
+    // Historical advance payment event (if any)
+    const advancePaidEvent = eventsData?.find((e: any) => e.event_type === 'ADVANCE_PAID');
+    const historicalAdvanceRef =
+      advancePaidEvent?.metadata?.advance_payment_notes ||
+      advancePaidEvent?.metadata?.payment_notes ||
+      null;
 
     // 1. Look for latest payment event and payment config event in eventsData
     const latestPaymentEvent = eventsData?.find(
@@ -356,12 +421,16 @@ class QuoteFlowStore {
       const meta = latestPaymentEvent.metadata || {};
       if (latestPaymentEvent.event_type === 'MARKED_PAID') {
         const pAmt = meta.paid_amount !== undefined ? Number(meta.paid_amount) : grandTotal;
+        const advRef = meta.advance_payment_notes || historicalAdvanceRef || filePayment?.advance_payment_notes || existingQuote?.advance_payment_notes || null;
+        const finRef = meta.final_payment_notes || (advRef ? meta.payment_notes : null) || filePayment?.final_payment_notes || existingQuote?.final_payment_notes || null;
         return {
           ...baseConfig,
           is_paid: true,
           paid_at: meta.paid_at || latestPaymentEvent.created_at,
           payment_method: meta.payment_method || null,
-          payment_notes: meta.payment_notes || null,
+          payment_notes: meta.payment_notes || finRef || advRef || null,
+          advance_payment_notes: advRef,
+          final_payment_notes: finRef,
           paid_amount: pAmt,
           balance_amount: 0,
           advance_percentage: 100,
@@ -376,12 +445,15 @@ class QuoteFlowStore {
         const advPct = meta.advance_percentage !== undefined && meta.advance_percentage !== null
           ? Number(meta.advance_percentage)
           : (grandTotal > 0 && pAmt > 0 ? Math.round((pAmt / grandTotal) * 100) : null);
+        const advRef = meta.advance_payment_notes || meta.payment_notes || filePayment?.advance_payment_notes || existingQuote?.advance_payment_notes || null;
         return {
           ...baseConfig,
           is_paid: false,
           paid_at: meta.paid_at || latestPaymentEvent.created_at,
           payment_method: meta.payment_method || null,
-          payment_notes: meta.payment_notes || null,
+          payment_notes: meta.payment_notes || advRef || null,
+          advance_payment_notes: advRef,
+          final_payment_notes: null,
           paid_amount: pAmt,
           balance_amount: bAmt,
           advance_percentage: advPct,
@@ -397,6 +469,8 @@ class QuoteFlowStore {
           paid_at: null,
           payment_method: null,
           payment_notes: null,
+          advance_payment_notes: null,
+          final_payment_notes: null,
           paid_amount: 0,
           balance_amount: grandTotal,
           advance_percentage: 0,
@@ -420,6 +494,8 @@ class QuoteFlowStore {
         paid_at: filePayment.paid_at || null,
         payment_method: filePayment.payment_method || null,
         payment_notes: filePayment.payment_notes || null,
+        advance_payment_notes: filePayment.advance_payment_notes || existingQuote?.advance_payment_notes || null,
+        final_payment_notes: filePayment.final_payment_notes || existingQuote?.final_payment_notes || null,
         paid_amount: pAmt,
         balance_amount: bAmt,
         advance_percentage: advPct,
@@ -440,6 +516,8 @@ class QuoteFlowStore {
         paid_at: existingQuote.paid_at || null,
         payment_method: existingQuote.payment_method || null,
         payment_notes: existingQuote.payment_notes || null,
+        advance_payment_notes: existingQuote.advance_payment_notes || null,
+        final_payment_notes: existingQuote.final_payment_notes || null,
         paid_amount: pAmt,
         balance_amount: bAmt,
         advance_percentage: existingQuote.advance_percentage ?? (isPaid ? 100 : null),
@@ -456,6 +534,8 @@ class QuoteFlowStore {
       paid_at: null,
       payment_method: null,
       payment_notes: null,
+      advance_payment_notes: null,
+      final_payment_notes: null,
       paid_amount: 0,
       balance_amount: grandTotal,
       advance_percentage: null,
@@ -648,6 +728,9 @@ class QuoteFlowStore {
       default_terms: '1. Quotation valid for 30 days.\n2. 50% advance required to commence work.\n3. Taxes applicable as per local regulations.',
       invoice_footer: 'Thank you for your business!',
       require_full_payment_for_invoice: true,
+      mode: 'test',
+      current_test_quotation_counter: 0,
+      current_test_invoice_counter: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1233,6 +1316,18 @@ class QuoteFlowStore {
               localSettings.current_invoice_counter !== undefined
                 ? localSettings.current_invoice_counter
                 : (data as any).current_invoice_counter ?? 0,
+            mode:
+              localSettings.mode !== undefined
+                ? localSettings.mode
+                : ((data as any).mode || 'test'),
+            current_test_invoice_counter:
+              localSettings.current_test_invoice_counter !== undefined
+                ? localSettings.current_test_invoice_counter
+                : ((data as any).current_test_invoice_counter ?? 0),
+            current_test_quotation_counter:
+              localSettings.current_test_quotation_counter !== undefined
+                ? localSettings.current_test_quotation_counter
+                : ((data as any).current_test_quotation_counter ?? 0),
             default_bank_details: effectivePayment.default_bank_details ?? (data as any).default_bank_details ?? null,
             default_upi_details: effectivePayment.default_upi_details ?? (data as any).default_upi_details ?? null,
             default_crypto_details: effectivePayment.default_crypto_details ?? (data as any).default_crypto_details ?? null,
@@ -1274,6 +1369,15 @@ class QuoteFlowStore {
           localSettings.current_invoice_counter !== undefined
             ? localSettings.current_invoice_counter
             : cached.current_invoice_counter ?? 0,
+        mode: localSettings.mode !== undefined ? localSettings.mode : (cached.mode ?? 'test'),
+        current_test_invoice_counter:
+          localSettings.current_test_invoice_counter !== undefined
+            ? localSettings.current_test_invoice_counter
+            : (cached.current_test_invoice_counter ?? 0),
+        current_test_quotation_counter:
+          localSettings.current_test_quotation_counter !== undefined
+            ? localSettings.current_test_quotation_counter
+            : (cached.current_test_quotation_counter ?? 0),
         default_bank_details: localPayment.default_bank_details ?? cached.default_bank_details ?? null,
         default_upi_details: localPayment.default_upi_details ?? cached.default_upi_details ?? null,
         default_crypto_details: localPayment.default_crypto_details ?? cached.default_crypto_details ?? null,
@@ -1286,12 +1390,45 @@ class QuoteFlowStore {
     return null;
   }
 
+  public async hasLiveDocuments(orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    await this.loadInvoicesFromSupabase(orgId);
+    const liveInvoice = Array.from(this.invoices.values()).some(
+      (inv) => (inv.organization_id === orgId || !inv.organization_id) && inv.environment === 'live'
+    );
+    if (liveInvoice) return true;
+
+    const quotes = await this.getQuotations(orgId);
+    const liveQuote = quotes.some(
+      (q) => (q.organization_id === orgId || !q.organization_id) && q.environment === 'live' && q.status !== 'DRAFT'
+    );
+    return liveQuote;
+  }
+
   public setCachedOrganization(orgId: string, org: Organization): void {
     this.organizations.set(orgId, org);
   }
 
   public async updateOrganization(orgId: string = DEFAULT_ORG_ID, data: Partial<Organization>): Promise<Organization> {
-    const org = (await this.getOrganization(orgId)) || this.organizations.get(orgId)!;
+    let org = (await this.getOrganization(orgId)) || this.organizations.get(orgId);
+    if (!org) {
+      org = {
+        id: orgId,
+        name: data.name || 'My Company',
+        slug: data.slug || 'my-company',
+        email: data.email || '',
+        default_currency: 'USD',
+        default_tax_rate: 0,
+        default_validity_days: 30,
+        quotation_prefix: 'Q-',
+        quotation_start_number: 1,
+        current_quotation_counter: 0,
+        mode: 'test',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as Organization;
+      this.organizations.set(orgId, org);
+    }
+
     const compName = data.name || org.name || 'us';
     let cleanFooter = data.invoice_footer !== undefined ? data.invoice_footer : org.invoice_footer;
     if (cleanFooter && cleanFooter.includes('The Mining Future')) {
@@ -1342,6 +1479,9 @@ class QuoteFlowStore {
           invoice_footer: cleanFooter,
           updated_at: new Date().toISOString(),
         };
+        if (updated.mode !== undefined) dbPayload.mode = updated.mode;
+        if (updated.current_test_invoice_counter !== undefined) dbPayload.current_test_invoice_counter = updated.current_test_invoice_counter;
+        if (updated.current_test_quotation_counter !== undefined) dbPayload.current_test_quotation_counter = updated.current_test_quotation_counter;
 
         let { data: saved, error } = await supabase
           .from('organizations')
@@ -1415,6 +1555,9 @@ class QuoteFlowStore {
             invoice_prefix: updated.invoice_prefix ?? localSettings.invoice_prefix ?? 'INV',
             invoice_start_number: updated.invoice_start_number ?? localSettings.invoice_start_number ?? 1,
             current_invoice_counter: updated.current_invoice_counter ?? localSettings.current_invoice_counter ?? 0,
+            mode: updated.mode ?? localSettings.mode ?? (saved as any).mode ?? 'test',
+            current_test_invoice_counter: updated.current_test_invoice_counter ?? localSettings.current_test_invoice_counter ?? (saved as any).current_test_invoice_counter ?? 0,
+            current_test_quotation_counter: updated.current_test_quotation_counter ?? localSettings.current_test_quotation_counter ?? (saved as any).current_test_quotation_counter ?? 0,
             default_bank_details: updated.default_bank_details ?? localPayment.default_bank_details ?? (saved as any).default_bank_details ?? null,
             default_upi_details: updated.default_upi_details ?? localPayment.default_upi_details ?? (saved as any).default_upi_details ?? null,
             default_crypto_details: updated.default_crypto_details ?? localPayment.default_crypto_details ?? (saved as any).default_crypto_details ?? null,
@@ -1435,7 +1578,42 @@ class QuoteFlowStore {
   }
 
   // --- QUOTATION NUMBER GENERATOR (Atomic sequential per org) ---
-  public async generateNextQuotationNumber(orgId: string = DEFAULT_ORG_ID): Promise<string> {
+  public async generateNextQuotationNumber(orgId: string = DEFAULT_ORG_ID, modeOverride?: 'test' | 'live'): Promise<string> {
+    const org = await this.getOrganization(orgId);
+    const isTest = (modeOverride || org?.mode || 'test') === 'test';
+
+    if (isTest) {
+      let nextCount = (org?.current_test_quotation_counter || 0) + 1;
+      // Also check existing test quotations in memory
+      for (const q of this.quotations.values()) {
+        if (q.organization_id && q.organization_id !== orgId) continue;
+        if (q.environment !== 'test') continue;
+        const match = q.quotation_number?.match(/(\d+)$/);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (val < 50000 && val >= nextCount) {
+            nextCount = val + 1;
+          }
+        }
+      }
+
+      if (org) {
+        org.current_test_quotation_counter = nextCount;
+        this.organizations.set(orgId, org);
+        this.saveOrgSettingsToFile(orgId, { current_test_quotation_counter: nextCount });
+        try {
+          const supabase = createAdminClient();
+          if (supabase) {
+            await supabase
+              .from('organizations')
+              .update({ current_test_quotation_counter: nextCount })
+              .eq('id', orgId);
+          }
+        } catch {}
+      }
+      return `TEST-Q-${String(nextCount).padStart(5, '0')}`;
+    }
+
     let nextCount = 1;
     try {
       const supabase = createAdminClient();
@@ -1458,7 +1636,6 @@ class QuoteFlowStore {
       console.warn('Error finding latest quotation number from Supabase:', err);
     }
 
-    const org = await this.getOrganization(orgId);
     const orgCount = (org?.current_quotation_counter || 0) + 1;
     nextCount = Math.max(nextCount, orgCount);
 
@@ -1478,18 +1655,40 @@ class QuoteFlowStore {
       }
     }
 
-    const prefix = org?.quotation_prefix || 'Q-';
+    const rawPrefix = org?.quotation_prefix || 'Q-';
+    const prefix = rawPrefix.endsWith('-') ? rawPrefix : `${rawPrefix}-`;
     return `${prefix}${String(nextCount).padStart(6, '0')}`;
   }
 
   // --- INVOICE NUMBER GENERATOR (Atomic sequential per org) ---
-  public async peekNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID): Promise<string> {
+  public async peekNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID, modeOverride?: 'test' | 'live'): Promise<string> {
     await this.loadInvoicesFromSupabase(orgId);
     const org = await this.getOrganization(orgId);
+    const isTest = (modeOverride || org?.mode || 'test') === 'test';
+
+    if (isTest) {
+      let maxSeq = 0;
+      for (const inv of this.invoices.values()) {
+        if (inv.organization_id && inv.organization_id !== orgId) continue;
+        if (inv.environment !== 'test') continue;
+        if (!inv.invoice_number) continue;
+        const match = inv.invoice_number.match(/(\d+)$/);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (val < 50000 && val > maxSeq) {
+            maxSeq = val;
+          }
+        }
+      }
+      const testCounter = org?.current_test_invoice_counter || 0;
+      const nextCount = Math.max(maxSeq + 1, testCounter + 1, 1);
+      return `TEST-INV-${String(nextCount).padStart(5, '0')}`;
+    }
 
     let maxSeq = 0;
     for (const inv of this.invoices.values()) {
       if (inv.organization_id && inv.organization_id !== orgId) continue;
+      if (inv.environment === 'test') continue;
       if (!inv.invoice_number) continue;
       const match = inv.invoice_number.match(/(\d+)$/);
       if (match) {
@@ -1505,17 +1704,54 @@ class QuoteFlowStore {
     const orgStart = org?.invoice_start_number || 1;
     const nextCount = Math.max(maxSeq + 1, orgCounter + 1, orgStart);
 
-    const prefix = org?.invoice_prefix !== undefined ? org.invoice_prefix : 'INV';
-    return `${prefix}${String(nextCount).padStart(4, '0')}`;
+    const rawPrefix = org?.invoice_prefix !== undefined ? org.invoice_prefix : 'INV';
+    const prefix = rawPrefix.endsWith('-') ? rawPrefix : `${rawPrefix}-`;
+    return `${prefix}${String(nextCount).padStart(6, '0')}`;
   }
 
-  public async generateNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID): Promise<string> {
+  public async generateNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID, modeOverride?: 'test' | 'live'): Promise<string> {
     await this.loadInvoicesFromSupabase(orgId);
     const org = await this.getOrganization(orgId);
+    const isTest = (modeOverride || org?.mode || 'test') === 'test';
+
+    if (isTest) {
+      let maxSeq = 0;
+      for (const inv of this.invoices.values()) {
+        if (inv.organization_id && inv.organization_id !== orgId) continue;
+        if (inv.environment !== 'test') continue;
+        if (!inv.invoice_number) continue;
+        const match = inv.invoice_number.match(/(\d+)$/);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (val < 50000 && val > maxSeq) {
+            maxSeq = val;
+          }
+        }
+      }
+      const testCounter = org?.current_test_invoice_counter || 0;
+      const nextCount = Math.max(maxSeq + 1, testCounter + 1, 1);
+
+      if (org) {
+        org.current_test_invoice_counter = nextCount;
+        this.organizations.set(orgId, org);
+        this.saveOrgSettingsToFile(orgId, { current_test_invoice_counter: nextCount });
+        try {
+          const supabase = createAdminClient();
+          if (supabase) {
+            await supabase
+              .from('organizations')
+              .update({ current_test_invoice_counter: nextCount })
+              .eq('id', orgId);
+          }
+        } catch {}
+      }
+      return `TEST-INV-${String(nextCount).padStart(5, '0')}`;
+    }
 
     let maxSeq = 0;
     for (const inv of this.invoices.values()) {
       if (inv.organization_id && inv.organization_id !== orgId) continue;
+      if (inv.environment === 'test') continue;
       if (!inv.invoice_number) continue;
       const match = inv.invoice_number.match(/(\d+)$/);
       if (match) {
@@ -1547,8 +1783,9 @@ class QuoteFlowStore {
       }
     }
 
-    const prefix = org?.invoice_prefix !== undefined ? org.invoice_prefix : 'INV';
-    return `${prefix}${String(nextCount).padStart(4, '0')}`;
+    const rawPrefix = org?.invoice_prefix !== undefined ? org.invoice_prefix : 'INV';
+    const prefix = rawPrefix.endsWith('-') ? rawPrefix : `${rawPrefix}-`;
+    return `${prefix}${String(nextCount).padStart(6, '0')}`;
   }
 
   // --- CUSTOMERS ---
@@ -2111,12 +2348,15 @@ class QuoteFlowStore {
             const merged: Quotation = {
               ...(existing || {}),
               ...q,
+              environment: (q.environment || existing?.environment || 'live') as 'test' | 'live',
               status: currentStatus,
               expired_at: expiredAt,
               is_paid: finalIsPaid,
               paid_at: payDetails.paid_at,
               payment_method: payDetails.payment_method,
               payment_notes: payDetails.payment_notes,
+              advance_payment_notes: payDetails.advance_payment_notes,
+              final_payment_notes: payDetails.final_payment_notes,
               paid_amount: completedInfo && completedInfo.unpaid ? 0 : payDetails.paid_amount,
               balance_amount: completedInfo && completedInfo.unpaid ? Number(q.grand_total) : payDetails.balance_amount,
               advance_percentage: completedInfo && completedInfo.unpaid ? 0 : payDetails.advance_percentage,
@@ -2319,6 +2559,8 @@ class QuoteFlowStore {
             paid_at: payDetails.paid_at,
             payment_method: payDetails.payment_method,
             payment_notes: payDetails.payment_notes,
+            advance_payment_notes: payDetails.advance_payment_notes,
+            final_payment_notes: payDetails.final_payment_notes,
             paid_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount,
             balance_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount,
             advance_percentage: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage,
@@ -2483,6 +2725,8 @@ class QuoteFlowStore {
             paid_at: payDetails.paid_at,
             payment_method: payDetails.payment_method,
             payment_notes: payDetails.payment_notes,
+            advance_payment_notes: payDetails.advance_payment_notes,
+            final_payment_notes: payDetails.final_payment_notes,
             paid_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount,
             balance_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount,
             advance_percentage: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage,
@@ -2574,6 +2818,7 @@ class QuoteFlowStore {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
     const customerId = data.customer_id || 'b0000000-0000-0000-0000-000000000001';
+    const env: 'test' | 'live' = org?.mode === 'live' ? 'live' : 'test';
 
     // Recalculate totals server-side
     const calculation = calculateQuotationTotals({
@@ -2583,7 +2828,7 @@ class QuoteFlowStore {
       tax_rate: data.tax_rate || 0,
     });
 
-    const quotationNumber = await this.generateNextQuotationNumber(orgId);
+    const quotationNumber = await this.generateNextQuotationNumber(orgId, env);
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `d0000000-0000-0000-0000-${Math.floor(Math.random() * 1000000000000).toString().padStart(12, '0')}`;
     const publicToken = generateSecureToken();
     const publicTokenHash = hashToken(publicToken);
@@ -2604,6 +2849,7 @@ class QuoteFlowStore {
       revision_number: 1,
       title: data.title,
       status: data.status || 'DRAFT',
+      environment: env,
       issue_date: data.issue_date,
       valid_until: data.valid_until,
       currency: data.currency || org?.default_currency || 'INR',
@@ -2707,6 +2953,7 @@ class QuoteFlowStore {
           revision_number: 1,
           title: data.title,
           status: newQuotation.status,
+          environment: env,
           issue_date: data.issue_date,
           valid_until: data.valid_until,
           currency: newQuotation.currency,
@@ -3729,6 +3976,8 @@ class QuoteFlowStore {
       paid_at?: string | null;
       payment_method?: string | null;
       payment_notes?: string | null;
+      advance_payment_notes?: string | null;
+      final_payment_notes?: string | null;
       confirmed_by?: string | null;
     },
     orgId?: string
@@ -3790,6 +4039,28 @@ class QuoteFlowStore {
       ? (paymentData.paid_at || quote.paid_at || now)
       : null;
 
+    // Track both advance and final settlement references
+    if (paymentStatus === 'PARTIALLY_PAID') {
+      const advRef = paymentData.advance_payment_notes ?? paymentData.payment_notes ?? quote.advance_payment_notes ?? quote.payment_notes ?? null;
+      quote.advance_payment_notes = advRef;
+      quote.payment_notes = advRef;
+    } else if (paymentStatus === 'PAID') {
+      const hadPriorAdvance = Boolean(
+        quote.advance_payment_notes ||
+        (quote.paid_amount && quote.paid_amount > 0 && quote.paid_amount < grandTotal) ||
+        paymentData.advance_payment_notes
+      );
+      const advRef = paymentData.advance_payment_notes ?? quote.advance_payment_notes ?? (quote.paid_amount && quote.paid_amount < grandTotal ? quote.payment_notes : null);
+      const finRef = paymentData.final_payment_notes ?? (hadPriorAdvance ? (paymentData.payment_notes ?? quote.final_payment_notes) : (paymentData.payment_notes ?? quote.payment_notes)) ?? null;
+      quote.advance_payment_notes = advRef;
+      quote.final_payment_notes = finRef;
+      quote.payment_notes = finRef || advRef || null;
+    } else if (paymentStatus === 'UNPAID') {
+      quote.advance_payment_notes = null;
+      quote.final_payment_notes = null;
+      quote.payment_notes = null;
+    }
+
     quote.is_paid = isPaid;
     quote.paid_amount = paidAmount;
     quote.balance_amount = balanceAmount;
@@ -3800,7 +4071,6 @@ class QuoteFlowStore {
     quote.payment_confirmed_by = confirmed ? (paymentData.confirmed_by || 'Company Finance Team') : null;
     quote.paid_at = paidAt;
     quote.payment_method = paymentStatus !== 'UNPAID' ? (paymentData.payment_method ?? quote.payment_method ?? null) : null;
-    quote.payment_notes = paymentStatus !== 'UNPAID' ? (paymentData.payment_notes ?? quote.payment_notes ?? null) : null;
     quote.updated_at = now;
 
     if (confirmed) {
@@ -3887,6 +4157,30 @@ class QuoteFlowStore {
       }
     }
 
+    // Synchronize any existing invoice linked to this quotation
+    const existingInvoice = Array.from(this.invoices.values()).find((inv) => inv.quotation_id === id);
+    if (existingInvoice) {
+      existingInvoice.is_paid = quote.is_paid;
+      existingInvoice.status = quote.is_paid ? 'PAID' : (quote.paid_amount && quote.paid_amount > 0 ? 'ISSUED' : existingInvoice.status);
+      existingInvoice.paid_amount = quote.paid_amount;
+      existingInvoice.balance_amount = quote.balance_amount;
+      existingInvoice.advance_percentage = quote.advance_percentage;
+      existingInvoice.payment_method = quote.payment_method;
+      existingInvoice.paid_at = quote.paid_at;
+      existingInvoice.payment_notes = quote.payment_notes;
+      existingInvoice.advance_payment_notes = quote.advance_payment_notes;
+      existingInvoice.final_payment_notes = quote.final_payment_notes;
+      existingInvoice.notes = buildInvoiceNotesWithPaymentRefs(
+        existingInvoice.notes,
+        quote.advance_payment_notes,
+        quote.final_payment_notes,
+        quote.payment_notes
+      );
+      this.invoices.set(existingInvoice.id, existingInvoice);
+      this.saveInvoicesToFile();
+      this.persistInvoiceToSupabase(existingInvoice).catch(() => {});
+    }
+
     this.quotations.set(id, quote);
 
     // Save to local file storage for rock-solid persistence
@@ -3895,6 +4189,8 @@ class QuoteFlowStore {
       paid_at: quote.paid_at,
       payment_method: quote.payment_method,
       payment_notes: quote.payment_notes,
+      advance_payment_notes: quote.advance_payment_notes,
+      final_payment_notes: quote.final_payment_notes,
       paid_amount: quote.paid_amount,
       balance_amount: quote.balance_amount,
       advance_percentage: quote.advance_percentage,
@@ -3923,6 +4219,8 @@ class QuoteFlowStore {
         paid_at: quote.paid_at,
         payment_method: quote.payment_method,
         payment_notes: quote.payment_notes,
+        advance_payment_notes: quote.advance_payment_notes,
+        final_payment_notes: quote.final_payment_notes,
         status: quote.status,
       }
     );
@@ -3954,6 +4252,8 @@ class QuoteFlowStore {
               paid_at: quote.paid_at,
               payment_method: quote.payment_method,
               payment_notes: quote.payment_notes,
+              advance_payment_notes: quote.advance_payment_notes,
+              final_payment_notes: quote.final_payment_notes,
               status: quote.status,
             },
             created_at: now,
@@ -3989,6 +4289,8 @@ class QuoteFlowStore {
       paid_amount?: number;
       payment_method?: string;
       payment_notes?: string;
+      advance_payment_notes?: string;
+      final_payment_notes?: string;
       is_paid?: boolean;
       advance_percentage?: number | null;
       payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
@@ -4003,6 +4305,8 @@ class QuoteFlowStore {
         paid_amount: data.paid_amount,
         payment_method: data.payment_method,
         payment_notes: data.payment_notes,
+        advance_payment_notes: data.advance_payment_notes,
+        final_payment_notes: data.final_payment_notes,
         is_paid: data.is_paid,
         advance_percentage: data.advance_percentage,
         payment_status: data.payment_status || (data.confirmed ? 'PAID' : undefined),
@@ -4144,7 +4448,7 @@ class QuoteFlowStore {
   // --- INVOICES CRUD MODULE ---
   public async getInvoices(
     orgId: string = DEFAULT_ORG_ID,
-    filters?: { status?: string; search?: string; customerId?: string }
+    filters?: { status?: string; search?: string; customerId?: string; environment?: string }
   ): Promise<Invoice[]> {
     // 0. Ensure quotations are loaded so auto-sync sees approved/completed paid quotes
     if (this.quotations.size === 0) {
@@ -4183,8 +4487,16 @@ class QuoteFlowStore {
 
     let list = Array.from(this.invoices.values()).filter((inv) => inv.organization_id === orgId);
 
+    if (filters?.environment && filters.environment !== 'ALL') {
+      list = list.filter((inv) => (inv.environment || 'live') === filters.environment);
+    }
+
     if (filters?.status && filters.status !== 'ALL') {
-      list = list.filter((inv) => inv.status === filters.status);
+      if (filters.status === 'CANCELLED') {
+        list = list.filter((inv) => inv.status === 'CANCELLED' || inv.status === 'VOIDED');
+      } else {
+        list = list.filter((inv) => inv.status === filters.status);
+      }
     }
 
     if (filters?.customerId) {
@@ -4192,13 +4504,24 @@ class QuoteFlowStore {
     }
 
     if (filters?.search) {
-      const s = filters.search.toLowerCase();
+      const s = filters.search.toLowerCase().trim();
       list = list.filter((inv) => {
         const cust = inv.customer || this.customers.get(inv.customer_id);
+        const linkedQuote = inv.quotation_id ? this.quotations.get(inv.quotation_id) : undefined;
         return (
           inv.invoice_number.toLowerCase().includes(s) ||
           (inv.po_number && inv.po_number.toLowerCase().includes(s)) ||
-          (cust && (cust.name.toLowerCase().includes(s) || (cust.company_name && cust.company_name.toLowerCase().includes(s))))
+          (cust && (
+            (cust.name && cust.name.toLowerCase().includes(s)) ||
+            (cust.company_name && cust.company_name.toLowerCase().includes(s))
+          )) ||
+          (inv.payment_notes && inv.payment_notes.toLowerCase().includes(s)) ||
+          (inv.advance_payment_notes && inv.advance_payment_notes.toLowerCase().includes(s)) ||
+          (inv.final_payment_notes && inv.final_payment_notes.toLowerCase().includes(s)) ||
+          (linkedQuote?.payment_notes && linkedQuote.payment_notes.toLowerCase().includes(s)) ||
+          (linkedQuote?.advance_payment_notes && linkedQuote.advance_payment_notes.toLowerCase().includes(s)) ||
+          (linkedQuote?.final_payment_notes && linkedQuote.final_payment_notes.toLowerCase().includes(s)) ||
+          (inv.notes && inv.notes.toLowerCase().includes(s))
         );
       });
     }
@@ -4206,6 +4529,7 @@ class QuoteFlowStore {
     return list
       .map((inv) => ({
         ...inv,
+        environment: (inv.environment || 'live') as 'test' | 'live',
         customer: inv.customer || this.customers.get(inv.customer_id),
         organization: inv.organization || this.organizations.get(inv.organization_id),
         items: inv.items || this.invoiceItems.get(inv.id) || [],
@@ -4231,9 +4555,11 @@ class QuoteFlowStore {
     }
 
     if (!inv) return null;
+    if (inv.organization_id && inv.organization_id !== orgId) return null;
 
     return {
       ...inv,
+      environment: (inv.environment || 'live') as 'test' | 'live',
       customer: inv.customer || this.customers.get(inv.customer_id),
       organization: inv.organization || (await this.getOrganization(inv.organization_id)) || this.organizations.get(inv.organization_id),
       items: inv.items || this.invoiceItems.get(inv.id) || [],
@@ -4249,6 +4575,25 @@ class QuoteFlowStore {
       (inv) => inv.quotation_id === quotation.id
     );
     if (existing) {
+      existing.is_paid = Boolean(quotation.is_paid);
+      existing.status = quotation.is_paid ? 'PAID' : (quotation.paid_amount && quotation.paid_amount > 0 ? 'ISSUED' : existing.status);
+      existing.paid_amount = quotation.paid_amount;
+      existing.balance_amount = quotation.balance_amount;
+      existing.advance_percentage = quotation.advance_percentage;
+      existing.payment_method = quotation.payment_method;
+      existing.paid_at = quotation.paid_at;
+      existing.payment_notes = quotation.payment_notes;
+      existing.advance_payment_notes = quotation.advance_payment_notes;
+      existing.final_payment_notes = quotation.final_payment_notes;
+      existing.notes = buildInvoiceNotesWithPaymentRefs(
+        existing.notes,
+        quotation.advance_payment_notes,
+        quotation.final_payment_notes,
+        quotation.payment_notes
+      );
+      this.invoices.set(existing.id, existing);
+      this.saveInvoicesToFile();
+      this.persistInvoiceToSupabase(existing).catch(() => {});
       return existing;
     }
 
@@ -4256,6 +4601,25 @@ class QuoteFlowStore {
     const loaded = await this.loadInvoicesFromSupabase(quotation.organization_id);
     const existingInDb = loaded.find((inv) => inv.quotation_id === quotation.id);
     if (existingInDb) {
+      existingInDb.is_paid = Boolean(quotation.is_paid);
+      existingInDb.status = quotation.is_paid ? 'PAID' : (quotation.paid_amount && quotation.paid_amount > 0 ? 'ISSUED' : existingInDb.status);
+      existingInDb.paid_amount = quotation.paid_amount;
+      existingInDb.balance_amount = quotation.balance_amount;
+      existingInDb.advance_percentage = quotation.advance_percentage;
+      existingInDb.payment_method = quotation.payment_method;
+      existingInDb.paid_at = quotation.paid_at;
+      existingInDb.payment_notes = quotation.payment_notes;
+      existingInDb.advance_payment_notes = quotation.advance_payment_notes;
+      existingInDb.final_payment_notes = quotation.final_payment_notes;
+      existingInDb.notes = buildInvoiceNotesWithPaymentRefs(
+        existingInDb.notes,
+        quotation.advance_payment_notes,
+        quotation.final_payment_notes,
+        quotation.payment_notes
+      );
+      this.invoices.set(existingInDb.id, existingInDb);
+      this.saveInvoicesToFile();
+      this.persistInvoiceToSupabase(existingInDb).catch(() => {});
       return existingInDb;
     }
 
@@ -4307,13 +4671,12 @@ class QuoteFlowStore {
       discount_type: quotation.discount_type,
       discount_value: quotation.discount_value,
       tax_rate: quotation.tax_rate,
-      notes: 'Thank you for your business. Please remit payment according to the agreed terms.',
-      terms_conditions: [
-        '1. Payment is due within agreed terms from the date of invoice.',
-        '2. Please quote the invoice number when making remittance.',
-        '3. Overdue payments may be subject to interest as permitted by applicable law.',
-        '4. Goods/services provided in accordance with approved scope are non-refundable.',
-      ].join('\n'),
+      notes: buildInvoiceNotesWithPaymentRefs(
+        DEFAULT_INVOICE_NOTES,
+        quotation.advance_payment_notes,
+        quotation.final_payment_notes
+      ),
+      terms_conditions: DEFAULT_INVOICE_TERMS,
       payment_terms: 'Net 30 Days',
       items: invoiceItems,
       attachments: (quotation.attachments || []) as any,
@@ -4322,6 +4685,8 @@ class QuoteFlowStore {
       payment_confirmed_by_company: quotation.payment_confirmed_by_company,
       payment_method: quotation.payment_method,
       payment_notes: quotation.payment_notes,
+      advance_payment_notes: quotation.advance_payment_notes,
+      final_payment_notes: quotation.final_payment_notes,
       paid_at: quotation.paid_at,
     });
 
@@ -4353,37 +4718,57 @@ class QuoteFlowStore {
     payment_confirmed_by_company?: boolean;
     payment_method?: string | null;
     payment_notes?: string | null;
+    advance_payment_notes?: string | null;
+    final_payment_notes?: string | null;
     paid_at?: string | null;
+    environment?: 'test' | 'live';
   }): Promise<Invoice> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
+    const org = await this.getOrganization(orgId);
+    let env: 'test' | 'live' = org?.mode === 'live' ? 'live' : 'test';
+    if (data.environment) {
+      env = data.environment;
+    } else if (data.quotation_id) {
+      const q = this.quotations.get(data.quotation_id);
+      if (q?.environment === 'test') {
+        env = 'test';
+      }
+    }
     const invId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Auto generate sequential invoice number if not provided or if random Date.now() timestamp
     let invoiceNumber = data.invoice_number?.trim();
     const isRandomTimestamp =
       invoiceNumber &&
-      /^INV-?\d{5,}$/.test(invoiceNumber) &&
-      parseInt(invoiceNumber.replace(/^INV-?/, ''), 10) > 50000;
+      /^(TEST-)?INV-?\d{5,}$/.test(invoiceNumber) &&
+      parseInt(invoiceNumber.replace(/^(TEST-)?INV-?/, ''), 10) > 50000;
 
     if (!invoiceNumber || isRandomTimestamp) {
-      invoiceNumber = await this.generateNextInvoiceNumber(orgId);
+      invoiceNumber = await this.generateNextInvoiceNumber(orgId, env);
     } else {
       await this.loadInvoicesFromSupabase(orgId);
       const isTaken = Array.from(this.invoices.values()).some(
         (inv) => inv.invoice_number === invoiceNumber && inv.id !== invId
       );
       if (isTaken) {
-        invoiceNumber = await this.generateNextInvoiceNumber(orgId);
+        invoiceNumber = await this.generateNextInvoiceNumber(orgId, env);
       } else {
         const match = invoiceNumber.match(/(\d+)$/);
         if (match) {
           const val = parseInt(match[1], 10);
           if (val < 50000) {
-            const org = await this.getOrganization(orgId);
-            if (org && (org.current_invoice_counter || 0) < val) {
-              org.current_invoice_counter = val;
-              this.organizations.set(orgId, org);
-              this.saveOrgSettingsToFile(orgId, { current_invoice_counter: val });
+            if (env === 'test') {
+              if (org && (org.current_test_invoice_counter || 0) < val) {
+                org.current_test_invoice_counter = val;
+                this.organizations.set(orgId, org);
+                this.saveOrgSettingsToFile(orgId, { current_test_invoice_counter: val });
+              }
+            } else {
+              if (org && (org.current_invoice_counter || 0) < val) {
+                org.current_invoice_counter = val;
+                this.organizations.set(orgId, org);
+                this.saveOrgSettingsToFile(orgId, { current_invoice_counter: val });
+              }
             }
           }
         }
@@ -4472,6 +4857,15 @@ class QuoteFlowStore {
       resolvedNotes = defaultInvoiceNotes;
     }
 
+    const finalNotes =
+      data.advance_payment_notes || data.final_payment_notes
+        ? buildInvoiceNotesWithPaymentRefs(
+            resolvedNotes,
+            data.advance_payment_notes,
+            data.final_payment_notes
+          )
+        : resolvedNotes;
+
     const newInvoice: Invoice = {
       id: invId,
       organization_id: orgId,
@@ -4480,6 +4874,11 @@ class QuoteFlowStore {
       invoice_number: invoiceNumber,
       po_number: data.po_number || null,
       status,
+      environment: env,
+      cancellation_reason: null,
+      cancelled_at: null,
+      cancelled_by: null,
+      cancelled_by_role: null,
       issue_date: data.issue_date,
       due_date: data.due_date,
       currency: data.currency,
@@ -4491,13 +4890,15 @@ class QuoteFlowStore {
       tax_amount: calculated.tax_amount,
       grand_total: calculated.grand_total,
       tax_breakdown: data.tax_breakdown || [],
-      notes: resolvedNotes,
+      notes: finalNotes,
       terms_conditions: resolvedTerms,
       payment_terms: data.payment_terms || 'Net 30 Days',
       payment_method: data.payment_method ?? (isPaid ? 'BANK_TRANSFER' : null),
       is_paid: isPaid,
       paid_at: data.paid_at ?? (isPaid ? new Date().toISOString() : null),
       payment_notes: data.payment_notes ?? null,
+      advance_payment_notes: data.advance_payment_notes ?? null,
+      final_payment_notes: data.final_payment_notes ?? null,
       paid_amount: isPaid ? calculated.grand_total : (data.paid_amount !== undefined ? data.paid_amount : 0),
       balance_amount: isPaid ? 0 : (data.balance_amount !== undefined ? data.balance_amount : calculated.grand_total),
       payment_confirmed_by_company: data.payment_confirmed_by_company ?? isPaid,
@@ -4522,8 +4923,6 @@ class QuoteFlowStore {
     this.invoiceItems.set(invId, invoiceItems);
     this.saveInvoicesToFile();
     await this.persistInvoiceToSupabase(newInvoice);
-
-    const org = await this.getOrganization(orgId);
     const customer = this.customers.get(data.customer_id);
 
     return {
@@ -4572,6 +4971,30 @@ class QuoteFlowStore {
       updated_at: now,
     };
 
+    if (data.advance_payment_notes !== undefined) {
+      updated.advance_payment_notes = data.advance_payment_notes;
+    }
+    if (data.final_payment_notes !== undefined) {
+      updated.final_payment_notes = data.final_payment_notes;
+    }
+    if (data.payment_notes !== undefined) {
+      updated.payment_notes = data.payment_notes;
+    }
+    if (data.notes !== undefined) {
+      updated.notes = data.notes;
+    } else if (
+      data.advance_payment_notes !== undefined ||
+      data.final_payment_notes !== undefined ||
+      data.payment_notes !== undefined
+    ) {
+      updated.notes = buildInvoiceNotesWithPaymentRefs(
+        updated.notes,
+        updated.advance_payment_notes,
+        updated.final_payment_notes,
+        updated.payment_notes
+      );
+    }
+
     if (updated.status === 'PAID' || updated.is_paid) {
       updated.is_paid = true;
       updated.status = 'PAID';
@@ -4596,7 +5019,12 @@ class QuoteFlowStore {
     id: string,
     orgId: string = DEFAULT_ORG_ID,
     status: InvoiceStatus,
-    paymentDetails?: { payment_method?: string; payment_notes?: string },
+    paymentDetails?: {
+      payment_method?: string;
+      payment_notes?: string;
+      advance_payment_notes?: string;
+      final_payment_notes?: string;
+    },
     actor?: { name?: string; role?: string }
   ): Promise<Invoice> {
     const inv = await this.getInvoiceById(id, orgId);
@@ -4615,9 +5043,22 @@ class QuoteFlowStore {
     if (paymentDetails?.payment_method) {
       inv.payment_method = paymentDetails.payment_method as any;
     }
-    if (paymentDetails?.payment_notes) {
+    if (paymentDetails?.payment_notes !== undefined) {
       inv.payment_notes = paymentDetails.payment_notes;
     }
+    if (paymentDetails?.advance_payment_notes !== undefined) {
+      inv.advance_payment_notes = paymentDetails.advance_payment_notes;
+    }
+    if (paymentDetails?.final_payment_notes !== undefined) {
+      inv.final_payment_notes = paymentDetails.final_payment_notes;
+    }
+
+    inv.notes = buildInvoiceNotesWithPaymentRefs(
+      inv.notes,
+      inv.advance_payment_notes,
+      inv.final_payment_notes,
+      inv.payment_notes
+    );
     inv.updated_at = now;
 
     const auditItem: InvoiceAuditEvent = {
@@ -4637,7 +5078,26 @@ class QuoteFlowStore {
     return inv;
   }
 
-  public async deleteInvoice(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+  public async deleteInvoice(
+    id: string,
+    orgId: string = DEFAULT_ORG_ID,
+    actorRole: string = 'ADMIN'
+  ): Promise<boolean> {
+    const inv = await this.getInvoiceById(id, orgId);
+    if (!inv) return false;
+
+    if (inv.organization_id && inv.organization_id !== orgId) {
+      throw new Error('Unauthorized to delete invoice from another organization');
+    }
+
+    if (actorRole === 'STAFF') {
+      throw new Error('Unauthorized: Staff members cannot delete invoices.');
+    }
+
+    if (inv.environment === 'live') {
+      throw new Error('Live invoices cannot be permanently deleted. You can cancel or void the invoice instead.');
+    }
+
     this.invoices.delete(id);
     this.invoiceItems.delete(id);
     this.saveInvoicesToFile();
@@ -4650,6 +5110,83 @@ class QuoteFlowStore {
     } catch {}
 
     return true;
+  }
+
+  public async cancelInvoice(params: {
+    id: string;
+    orgId?: string;
+    reason: string;
+    action?: 'CANCEL' | 'VOID';
+    actor?: { name?: string; role?: string };
+  }): Promise<Invoice> {
+    const orgId = params.orgId || DEFAULT_ORG_ID;
+    const inv = await this.getInvoiceById(params.id, orgId);
+    if (!inv) throw new Error('Invoice not found');
+
+    if (inv.organization_id && inv.organization_id !== orgId) {
+      throw new Error('Unauthorized to cancel invoice from another organization');
+    }
+
+    const role = params.actor?.role || 'ADMIN';
+    if (role === 'STAFF') {
+      throw new Error('Unauthorized: Staff members cannot cancel or void invoices. Owner or Admin permission is required.');
+    }
+
+    if (inv.status === 'CANCELLED' || inv.status === 'VOIDED') {
+      throw new Error('This invoice has already been cancelled or voided.');
+    }
+
+    const cleanReason = (params.reason || '').trim();
+    if (cleanReason.length < 5 || cleanReason.length > 500) {
+      throw new Error('Cancellation reason must be between 5 and 500 characters.');
+    }
+
+    const now = new Date().toISOString();
+    const actionType = params.action === 'VOID' ? 'VOIDED' : 'CANCELLED';
+    const newStatus: InvoiceStatus = actionType;
+
+    inv.status = newStatus;
+    inv.cancellation_reason = cleanReason;
+    inv.cancelled_at = now;
+    inv.cancelled_by = params.actor?.name || 'Admin User';
+    inv.cancelled_by_role = role;
+    inv.updated_at = now;
+
+    const auditItem: InvoiceAuditEvent = {
+      id: `inv_audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_name: inv.cancelled_by,
+      user_role: role,
+      action: actionType,
+      details: `Invoice ${actionType.toLowerCase()}: "${cleanReason}"`,
+      timestamp: now,
+    };
+    inv.audit_history = [auditItem, ...(inv.audit_history || [])];
+
+    this.invoices.set(params.id, inv);
+    this.saveInvoicesToFile();
+    await this.persistInvoiceToSupabase(inv);
+
+    // Record in invoice_audit_logs if Supabase is active
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('invoice_audit_logs').insert({
+          organization_id: orgId,
+          invoice_id: inv.id,
+          invoice_number: inv.invoice_number,
+          user_name: inv.cancelled_by,
+          user_role: role,
+          action: actionType,
+          reason: cleanReason,
+          details: auditItem.details,
+          created_at: now,
+        });
+      }
+    } catch (err) {
+      console.warn('Could not record to invoice_audit_logs:', err);
+    }
+
+    return inv;
   }
 
   // --- REJECTION WORKFLOW ---
@@ -5119,7 +5656,9 @@ class QuoteFlowStore {
 
   // --- ANALYTICS ---
   public async getDashboardAnalytics(orgId: string = DEFAULT_ORG_ID) {
-    const quotes = await this.getQuotations(orgId);
+    const allQuotes = await this.getQuotations(orgId);
+    // CRITICAL: Test documents MUST NOT pollute live financial totals
+    const quotes = allQuotes.filter((q) => q.environment !== 'test');
 
     const totalCount = quotes.length;
     const draftCount = quotes.filter((q) => q.status === 'DRAFT').length;

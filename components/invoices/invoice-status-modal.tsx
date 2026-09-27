@@ -26,6 +26,21 @@ export function InvoiceStatusModal({
   const [status, setStatus] = useState<InvoiceStatus>(invoice.status);
   const [paymentMethod, setPaymentMethod] = useState(invoice.payment_method || 'BANK_TRANSFER');
   const [paymentNotes, setPaymentNotes] = useState(invoice.payment_notes || '');
+
+  const hasPriorAdvance = Boolean(
+    invoice.advance_payment_notes ||
+    (invoice.paid_amount && invoice.paid_amount > 0 && invoice.paid_amount < invoice.grand_total)
+  );
+
+  const [advancePaymentNotes, setAdvancePaymentNotes] = useState(
+    invoice.advance_payment_notes ||
+    (invoice.paid_amount && invoice.paid_amount < invoice.grand_total ? invoice.payment_notes || '' : '')
+  );
+  const [finalPaymentNotes, setFinalPaymentNotes] = useState(
+    invoice.final_payment_notes ||
+    (invoice.status === 'PAID' && (invoice.advance_payment_notes || invoice.paid_amount) ? invoice.payment_notes || '' : '')
+  );
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +49,22 @@ export function InvoiceStatusModal({
     setIsLoading(true);
     setError(null);
 
+    let effectiveAdvRef: string | null = null;
+    let effectiveFinalRef: string | null = null;
+    let effectiveGeneralRef: string | null = null;
+
+    if (status === 'PAID') {
+      if (hasPriorAdvance || advancePaymentNotes.trim()) {
+        effectiveAdvRef = advancePaymentNotes.trim() || invoice.advance_payment_notes || null;
+        effectiveFinalRef = finalPaymentNotes.trim() || paymentNotes.trim() || null;
+        effectiveGeneralRef = effectiveFinalRef || effectiveAdvRef;
+      } else {
+        effectiveAdvRef = null;
+        effectiveFinalRef = finalPaymentNotes.trim() || paymentNotes.trim() || null;
+        effectiveGeneralRef = effectiveFinalRef;
+      }
+    }
+
     try {
       const res = await fetch(`/api/invoices/${invoice.id}`, {
         method: 'PATCH',
@@ -41,7 +72,9 @@ export function InvoiceStatusModal({
         body: JSON.stringify({
           status,
           payment_method: status === 'PAID' ? paymentMethod : null,
-          payment_notes: status === 'PAID' ? paymentNotes : null,
+          payment_notes: status === 'PAID' ? effectiveGeneralRef : null,
+          advance_payment_notes: status === 'PAID' ? effectiveAdvRef : null,
+          final_payment_notes: status === 'PAID' ? effectiveFinalRef : null,
         }),
       });
 
@@ -149,12 +182,40 @@ export function InvoiceStatusModal({
               </select>
             </div>
 
-            <Input
-              label="Transaction ID / Payment Ref (Optional)"
-              value={paymentNotes}
-              onChange={(e) => setPaymentNotes(e.target.value)}
-              placeholder="e.g. UTR / NEFT / Stripe Ref..."
-            />
+            {hasPriorAdvance || invoice.advance_payment_notes || advancePaymentNotes ? (
+              <div className="space-y-3 pt-1">
+                <div className="rounded-xl bg-amber-50/70 border border-amber-200/80 p-2.5 text-xs text-amber-900 leading-relaxed">
+                  <span className="font-bold">Two-Stage Settlement</span>: Save both the advance reference and final settlement reference. They will be formatted under Note on the invoice.
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label="Advance Payment Ref #"
+                    value={advancePaymentNotes}
+                    onChange={(e) => setAdvancePaymentNotes(e.target.value)}
+                    placeholder="e.g. UTR-ADV-001"
+                  />
+                  <Input
+                    label="Final Settlement Ref #"
+                    value={finalPaymentNotes}
+                    onChange={(e) => {
+                      setFinalPaymentNotes(e.target.value);
+                      setPaymentNotes(e.target.value);
+                    }}
+                    placeholder="e.g. UTR-FINAL-002"
+                  />
+                </div>
+              </div>
+            ) : (
+              <Input
+                label="Transaction ID / Payment Ref (Optional)"
+                value={paymentNotes || finalPaymentNotes}
+                onChange={(e) => {
+                  setPaymentNotes(e.target.value);
+                  setFinalPaymentNotes(e.target.value);
+                }}
+                placeholder="e.g. UTR / NEFT / Stripe Ref..."
+              />
+            )}
           </div>
         )}
 

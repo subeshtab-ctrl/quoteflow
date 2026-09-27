@@ -182,4 +182,14 @@ export const OrganizationSettingsSchema = z.object({
   service_classification_label: z.string().nullish().or(z.literal('')),
   tax_rate_type: z.string().nullish().or(z.literal('')),
   require_full_payment_for_invoice: z.boolean().optional().default(true),
+  mode: z.enum(['test', 'live']).optional(),
 }).passthrough();
+
+export const InvoiceCancelSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(5, 'Cancellation reason must be at least 5 characters')
+    .max(500, 'Cancellation reason cannot exceed 500 characters'),
+  action: z.enum(['CANCEL', 'VOID']).optional().default('CANCEL'),
+});

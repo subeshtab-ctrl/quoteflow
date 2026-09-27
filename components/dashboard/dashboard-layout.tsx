@@ -2,6 +2,7 @@ import React from 'react';
 import { redirect } from 'next/navigation';
 import { DashboardSidebar } from '@/components/dashboard/sidebar';
 import { DashboardHeader, UserProfileInfo } from '@/components/dashboard/header';
+import { TestModeBanner } from '@/components/dashboard/test-mode-banner';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 export async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -22,6 +23,8 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
     initials = auth.email.slice(0, 2).toUpperCase();
   }
 
+  const isTestMode = (auth.organization.mode || 'test') === 'test';
+
   const userProfile: UserProfileInfo = {
     id: auth.userId,
     email: auth.email,
@@ -29,6 +32,7 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
     companyName: auth.organization.name,
     initials,
     role: auth.role,
+    mode: isTestMode ? 'test' : 'live',
   };
 
   const brandColor = auth.organization.brand_color || '#4f46e5';
@@ -39,10 +43,16 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
       style={{ '--brand-color': brandColor } as React.CSSProperties}
     >
       {/* Desktop Sidebar */}
-      <DashboardSidebar className="hidden md:flex shrink-0 sticky top-0 h-screen" />
+      <DashboardSidebar
+        organizationName={auth.organization.name}
+        logoUrl={auth.organization.logo_url || undefined}
+        mode={auth.organization.mode || 'live'}
+        className="hidden md:flex shrink-0 sticky top-0 h-screen"
+      />
 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col min-w-0">
+        <TestModeBanner isTestMode={isTestMode} userRole={auth.role} />
         <DashboardHeader initialUser={userProfile} />
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {children}

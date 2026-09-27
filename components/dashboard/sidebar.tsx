@@ -18,19 +18,22 @@ import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } 
 
 interface SidebarProps {
   organizationName?: string;
-  logoUrl?: string;
+  logoUrl?: string | null;
+  mode?: string;
   className?: string;
 }
 
 export function DashboardSidebar({
   organizationName = 'QuoteFlow',
   logoUrl,
+  mode = 'live',
   className,
 }: SidebarProps) {
   const pathname = usePathname();
-  const [orgData, setOrgData] = useState<{ name: string; logoUrl?: string }>({
+  const [orgData, setOrgData] = useState<{ name: string; logoUrl?: string | null; mode?: string }>({
     name: organizationName,
-    logoUrl,
+    logoUrl: logoUrl || undefined,
+    mode,
   });
 
   useEffect(() => {
@@ -41,6 +44,7 @@ export function DashboardSidebar({
           setOrgData({
             name: data.organization.name || organizationName,
             logoUrl: data.organization.logo_url,
+            mode: data.organization.mode || 'test',
           });
         }
       })
@@ -103,9 +107,20 @@ export function DashboardSidebar({
             >
               {orgData.name}
             </h2>
-            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none mt-0.5">
-              Workspace
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none">
+                Workspace
+              </p>
+              {orgData.mode === 'test' ? (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                  TEST
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                  LIVE
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

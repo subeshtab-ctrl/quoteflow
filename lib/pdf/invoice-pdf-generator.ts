@@ -362,13 +362,12 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     cardRightY += 3.8;
   }
 
-  if (invoice.payment_method || invoice.payment_notes) {
+  if (invoice.payment_method) {
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    const methodStr = invoice.payment_method ? invoice.payment_method.replace(/_/g, ' ') : 'Bank Transfer';
-    const txnStr = invoice.payment_notes ? ` • Ref/Txn No: ${invoice.payment_notes}` : '';
-    const payText = `Mode of Payment: ${methodStr}${txnStr}`;
+    const methodStr = invoice.payment_method.replace(/_/g, ' ');
+    const payText = `Mode of Payment: ${methodStr}`;
     const payLines = doc.splitTextToSize(payText, 80);
     doc.text(payLines[0], pageWidth - margin - 5, cardRightY, { align: 'right' });
   }
@@ -582,14 +581,13 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   // Mode of payment
-  if (invoice.payment_method || invoice.payment_notes) {
+  if (invoice.payment_method) {
     rightCurY += 1;
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    const methodStr = invoice.payment_method ? invoice.payment_method.replace(/_/g, ' ') : 'Bank Transfer';
-    const txnStr = invoice.payment_notes ? ` • Ref/Txn No: ${invoice.payment_notes}` : '';
-    const payModeText = `Mode of Payment: ${methodStr}${txnStr}`;
+    const methodStr = invoice.payment_method.replace(/_/g, ' ');
+    const payModeText = `Mode of Payment: ${methodStr}`;
     const payLines = doc.splitTextToSize(payModeText, totalsWidth);
     doc.text(payLines, rightX, rightCurY, { align: 'right' });
     rightCurY += payLines.length * 3.5;
@@ -606,6 +604,57 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.setFontSize(7.5);
     doc.setTextColor(148, 163, 184);
     doc.text(org.invoice_footer, pageWidth / 2, footerY, { align: 'center' });
+  }
+
+  // 6. Watermarks & Environment/Status Overlays on every page
+  const totalPages = (doc.internal as any).getNumberOfPages ? (doc.internal as any).getNumberOfPages() : 1;
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+
+    if (invoice.environment === 'test') {
+      // Top test banner
+      doc.setFillColor(245, 158, 11); // Amber 500
+      doc.rect(0, 0, pageWidth, 5.5, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text('TEST DOCUMENT — NOT A REAL INVOICE', pageWidth / 2, 3.8, { align: 'center' });
+
+      // Watermark in center
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(36);
+      doc.setTextColor(220, 220, 225);
+      doc.text('TEST DOCUMENT', pageWidth / 2, pageHeight / 2 - 8, {
+        align: 'center',
+        angle: 45,
+      });
+      doc.setFontSize(18);
+      doc.text('NOT A REAL INVOICE', pageWidth / 2, pageHeight / 2 + 10, {
+        align: 'center',
+        angle: 45,
+      });
+    }
+
+    if (invoice.status === 'CANCELLED' || invoice.status === 'VOIDED') {
+      const isVoid = invoice.status === 'VOIDED';
+      // Top cancelled banner
+      doc.setFillColor(225, 29, 72); // Rose 600
+      doc.rect(0, 0, pageWidth, 5.5, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+      const cancelText = `${isVoid ? 'VOIDED' : 'CANCELLED'} INVOICE${invoice.cancellation_reason ? ` — Reason: ${invoice.cancellation_reason.substring(0, 80)}` : ''}`;
+      doc.text(cancelText, pageWidth / 2, 3.8, { align: 'center' });
+
+      // Diagonal watermark
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(52);
+      doc.setTextColor(248, 113, 113); // Light red
+      doc.text(isVoid ? 'VOID' : 'CANCELLED', pageWidth / 2, pageHeight / 2, {
+        align: 'center',
+        angle: 45,
+      });
+    }
   }
 
   const arrayBuffer = doc.output('arraybuffer');

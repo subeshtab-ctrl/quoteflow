@@ -22,6 +22,11 @@ import {
   Shield,
   Clock,
   UserCheck,
+  FlaskConical,
+  Ban,
+  Trash2,
+  AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -31,6 +36,7 @@ import {
 } from '@/lib/utils/logo';
 import { getCountryProfile } from '@/lib/tax/country-config';
 import { InvoiceStatusModal } from '@/components/invoices/invoice-status-modal';
+import { InvoiceCancelModal } from '@/components/invoices/invoice-cancel-modal';
 
 interface InvoiceDetailViewProps {
   invoice: Invoice;
@@ -44,6 +50,10 @@ export function InvoiceDetailView({
   const router = useRouter();
   const [invoice, setInvoice] = useState<Invoice>(initialInvoice);
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showAuditHistory, setShowAuditHistory] = useState(false);
 
   const org = invoice.organization;
@@ -58,6 +68,28 @@ export function InvoiceDetailView({
   const auditCount = invoice.audit_history?.length || (invoice.created_at ? 1 : 0);
   const logoConfig = parseLogoUrl(org?.logo_url);
 
+  const isTest = invoice.environment === 'test';
+  const isCancelledOrVoid = invoice.status === 'CANCELLED' || invoice.status === 'VOIDED';
+  const canManage = currentUserRole === 'OWNER' || currentUserRole === 'ADMIN';
+
+  const handleDeleteTestInvoice = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete test invoice');
+      }
+      router.push('/invoices');
+    } catch (err: any) {
+      setDeleteError(err.message || 'Error deleting invoice');
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-16">
       {/* Top Header Controls (Hidden during print) */}
@@ -70,10 +102,20 @@ export function InvoiceDetailView({
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">
                 {invoice.invoice_number}
               </h1>
+              {isTest ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-800 text-[10px] font-bold uppercase tracking-wider">
+                  <FlaskConical className="h-3 w-3" />
+                  Test
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold uppercase tracking-wider">
+                  Live
+                </span>
+              )}
               <InvoiceStatusBadge status={invoice.status} />
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -102,15 +144,41 @@ export function InvoiceDetailView({
             )}
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsStatusModalOpen(true)}
-            className="gap-1.5 text-xs"
-          >
-            <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
-            <span>Update Status</span>
-          </Button>
+          {!isCancelledOrVoid && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsStatusModalOpen(true)}
+              className="gap-1.5 text-xs"
+            >
+              <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
+              <span>Update Status</span>
+            </Button>
+          )}
+
+          {!isCancelledOrVoid && !isTest && canManage && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsCancelModalOpen(true)}
+              className="gap-1.5 text-xs text-rose-600 border-rose-200 dark:border-rose-900 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            >
+              <Ban className="h-3.5 w-3.5" />
+              <span>Cancel / Void</span>
+            </Button>
+          )}
+
+          {isTest && canManage && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="gap-1.5 text-xs text-rose-600 border-rose-200 dark:border-rose-900 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Delete</span>
+            </Button>
+          )}
 
           <Button
             variant="outline"
@@ -133,6 +201,43 @@ export function InvoiceDetailView({
           </Button>
         </div>
       </div>
+
+      {/* Prominent Environment / Status Notice Banners (Hidden during print) */}
+      {isTest && (
+        <div className="print:hidden rounded-xl p-3.5 bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              <strong>TEST INVOICE:</strong> Created for demonstrations, testing, or training. This document does not affect live accounting or tax totals and can be permanently deleted.
+            </span>
+          </div>
+          {canManage && (
+            <button
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="text-xs font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline shrink-0 cursor-pointer"
+            >
+              Delete Test Document
+            </button>
+          )}
+        </div>
+      )}
+
+      {isCancelledOrVoid && (
+        <div className="print:hidden rounded-xl p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs space-y-1.5">
+          <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300 text-sm">
+            <Ban className="h-4 w-4 shrink-0" />
+            <span>THIS INVOICE HAS BEEN {invoice.status === 'VOIDED' ? 'VOIDED' : 'CANCELLED'}</span>
+          </div>
+          {invoice.cancellation_reason && (
+            <p className="text-slate-700 dark:text-slate-300 font-medium">
+              <strong>Reason:</strong> {invoice.cancellation_reason}
+            </p>
+          )}
+          <p className="text-slate-500 dark:text-slate-400 text-[11px]">
+            Action recorded by {invoice.cancelled_by || 'Admin User'}{invoice.cancelled_by_role ? ` (${invoice.cancelled_by_role})` : ''} on {formatDate(invoice.cancelled_at || invoice.updated_at)}. This invoice cannot be modified or reactivated.
+          </p>
+        </div>
+      )}
 
       {/* Collapsible Audit History (Hidden during print) */}
       {showAuditHistory && (
@@ -408,7 +513,7 @@ export function InvoiceDetailView({
                 <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">
                   Notes
                 </span>
-                <p className="text-slate-500 mt-0.5 leading-relaxed">{invoice.notes}</p>
+                <p className="text-slate-500 mt-0.5 leading-relaxed whitespace-pre-line">{invoice.notes}</p>
               </div>
             )}
             {Boolean(invoice.terms_conditions && invoice.terms_conditions.trim()) && (
@@ -490,9 +595,9 @@ export function InvoiceDetailView({
               </div>
             )}
 
-            {(invoice.payment_method || invoice.payment_notes) && (
+            {invoice.payment_method && (
               <p className="text-[11px] text-slate-500 italic mt-2 text-right font-serif">
-                Mode of Payment: {invoice.payment_method?.replace(/_/g, ' ') || 'Bank Transfer'}{invoice.payment_notes ? ` • Ref/Txn No: ${invoice.payment_notes}` : ''}
+                Mode of Payment: {invoice.payment_method.replace(/_/g, ' ')}
               </p>
             )}
           </div>
@@ -543,6 +648,66 @@ export function InvoiceDetailView({
         invoice={invoice}
         onStatusUpdated={(updated) => setInvoice(updated)}
       />
+
+      {/* Cancel / Void Modal */}
+      <InvoiceCancelModal
+        isOpen={isCancelModalOpen}
+        onClose={() => setIsCancelModalOpen(false)}
+        invoice={invoice}
+        onSuccess={(updated: Invoice) => setInvoice(updated)}
+      />
+
+      {/* Test Invoice Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-rose-200 dark:border-rose-900/40 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 dark:bg-rose-950/60 flex items-center justify-center text-rose-600 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Delete Test Invoice?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  This test invoice will be permanently removed.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-xl p-3 text-xs text-rose-800 dark:text-rose-300">
+              You are deleting test invoice <span className="font-mono font-bold">{invoice.invoice_number}</span>. This action is irreversible. (Live invoices can never be deleted).
+            </div>
+
+            {deleteError && (
+              <div className="text-xs text-rose-600 bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-lg border border-rose-200 dark:border-rose-900/40">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDeleteModalOpen(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDeleteTestInvoice}
+                disabled={isDeleting}
+                className="gap-1.5"
+              >
+                {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Permanently Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

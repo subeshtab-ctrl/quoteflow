@@ -43,6 +43,7 @@ export async function GET() {
         initials,
         role: auth.role,
         organizationId: auth.orgId,
+        mode: auth.organization.mode || 'test',
       },
       organization: auth.organization,
     });

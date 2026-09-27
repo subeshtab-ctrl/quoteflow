@@ -11,8 +11,9 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') || undefined;
     const search = searchParams.get('search') || undefined;
     const customerId = searchParams.get('customerId') || undefined;
+    const environment = searchParams.get('environment') || searchParams.get('env') || undefined;
 
-    const invoices = await store.getInvoices(orgId, { status, search, customerId });
+    const invoices = await store.getInvoices(orgId, { status, search, customerId, environment });
 
     return NextResponse.json({ success: true, invoices });
   } catch (err: any) {

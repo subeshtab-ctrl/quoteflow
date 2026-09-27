@@ -208,8 +208,16 @@ export function InvoiceStatusBadge({ status, className }: { status: InvoiceStatu
       );
     case 'CANCELLED':
       return (
-        <Badge variant="default" className={cn('bg-slate-200 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-400', className)}>
+        <Badge variant="default" className={cn('bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-900 font-semibold line-through', className)}>
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
           Cancelled
+        </Badge>
+      );
+    case 'VOIDED':
+      return (
+        <Badge variant="default" className={cn('bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-900 font-semibold line-through', className)}>
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          Void
         </Badge>
       );
     case 'DRAFT':

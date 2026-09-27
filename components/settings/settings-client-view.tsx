@@ -36,6 +36,8 @@ import {
   Bitcoin,
   Smartphone,
   Eye,
+  FlaskConical,
+  ShieldCheck,
 } from 'lucide-react';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
 import { ThemeSegmentedControl } from '@/components/theme/theme-toggle';
@@ -94,6 +96,59 @@ export function SettingsClientView({
 
   const [isUploadingDefaultUpiQr, setIsUploadingDefaultUpiQr] = useState(false);
   const [isUploadingDefaultCryptoQr, setIsUploadingDefaultCryptoQr] = useState(false);
+
+  // Operating Mode State (Test vs Live)
+  const [isSwitchModeModalOpen, setIsSwitchModeModalOpen] = useState(false);
+  const [targetMode, setTargetMode] = useState<'test' | 'live'>('live');
+  const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+  const [hasLiveDocuments, setHasLiveDocuments] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.has_live_documents !== undefined) {
+          setHasLiveDocuments(data.has_live_documents);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const openSwitchModeModal = (newMode: 'test' | 'live') => {
+    setTargetMode(newMode);
+    setIsSwitchModeModalOpen(true);
+  };
+
+  const handleConfirmSwitchMode = async () => {
+    setIsSwitchingMode(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...org,
+          mode: targetMode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to switch mode');
+      }
+      setOrg((prev) => ({ ...prev, mode: targetMode }));
+      setIsSwitchModeModalOpen(false);
+      setSuccessMsg(
+        targetMode === 'live'
+          ? 'Switched to Live Production Mode successfully!'
+          : 'Switched to Test / Demo Mode successfully!'
+      );
+      router.refresh();
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error updating operating mode');
+    } finally {
+      setIsSwitchingMode(false);
+    }
+  };
 
   const handleDefaultUpiQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -652,6 +707,76 @@ export function SettingsClientView({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Operating Environment Mode Card */}
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <FlaskConical className="h-5 w-5 text-amber-500" />
+                <span>Operating Environment & Document Mode</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Toggle between Test / Demo mode for staff training and Live Production mode for legally binding commercial documents.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {org.mode === 'live' ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Live Production Mode
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  Test / Demo Mode
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {org.mode === 'live'
+                  ? 'Currently issuing live, legally binding commercial documents'
+                  : 'Currently in safe demonstration mode (watermarked, zero financial impact)'}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl leading-relaxed">
+                {org.mode === 'live'
+                  ? 'All invoices and quotations issued are official commercial records. Live invoices cannot be permanently deleted once issued, only cancelled or voided with an immutable audit log.'
+                  : 'Test invoices and quotes are clearly labelled, generate watermarked PDFs, will not trigger customer emails or affect your dashboard analytics, and can be permanently deleted by owners or administrators.'}
+              </p>
+            </div>
+
+            <div className="shrink-0">
+              {org.mode === 'live' ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openSwitchModeModal('test')}
+                  disabled={currentUserRole === 'STAFF'}
+                  className="gap-2 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                >
+                  <FlaskConical className="h-4 w-4 text-amber-600" />
+                  <span>Switch to Test Mode</span>
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => openSwitchModeModal('live')}
+                  disabled={currentUserRole === 'STAFF'}
+                  className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Switch to Live Mode</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Appearance & Soft Dark Mode Card */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
@@ -2116,6 +2241,96 @@ export function SettingsClientView({
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Operating Mode Confirmation Modal */}
+      {isSwitchModeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                  targetMode === 'live'
+                    ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600'
+                    : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600'
+                }`}
+              >
+                {targetMode === 'live' ? (
+                  <ShieldCheck className="w-5 h-5" />
+                ) : (
+                  <FlaskConical className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {targetMode === 'live' ? 'Switch to Live Mode?' : 'Switch to Test Mode?'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {targetMode === 'live'
+                    ? 'Begin issuing real, legally binding commercial invoices'
+                    : 'Switch back to training and demonstration mode'}
+                </p>
+              </div>
+            </div>
+
+            {targetMode === 'live' ? (
+              <div className="bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-xl p-3.5 space-y-2 text-xs text-emerald-900 dark:text-emerald-200">
+                <p className="font-semibold text-slate-900 dark:text-white">
+                  You are about to switch to Live Mode. In Live Mode:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-700 dark:text-slate-300">
+                  <li>Invoices and quotes will be legally binding documents</li>
+                  <li>Live documents CANNOT be deleted (only cancelled or voided)</li>
+                  <li>Live documents will affect your real financial analytics</li>
+                  <li>Real sequence numbers will be used (e.g. INV-000001)</li>
+                </ul>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-400 font-medium pt-1">
+                  Existing test documents will remain marked as TEST.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3.5 space-y-2 text-xs text-amber-900 dark:text-amber-200">
+                {hasLiveDocuments && (
+                  <p className="font-semibold text-amber-900 dark:text-amber-200">
+                    Switching to Test Mode will not hide or delete your live documents. Any new documents created will be marked as TEST and will not affect your live metrics.
+                  </p>
+                )}
+                <p className="text-slate-700 dark:text-slate-300">
+                  Are you sure you want to switch to Test Mode? In Test Mode, documents are watermarked as test documents and will not count towards your business dashboard metrics.
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                  Note: Any previously issued live invoices will still retain full live protection and can never be deleted.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsSwitchModeModalOpen(false)}
+                disabled={isSwitchingMode}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleConfirmSwitchMode}
+                disabled={isSwitchingMode}
+                className={
+                  targetMode === 'live'
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5'
+                    : 'bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1.5'
+                }
+              >
+                {isSwitchingMode && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {targetMode === 'live' ? 'Switch to Live Mode' : 'Switch to Test Mode'}
+              </Button>
+            </div>
           </div>
         </div>
       )}

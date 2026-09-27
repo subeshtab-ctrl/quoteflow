@@ -471,6 +471,36 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   const footerText = (org.invoice_footer || `Thank you for partnering with ${compName}.`).replace(/The Mining Future/gi, compName);
   doc.text(footerText, pageWidth / 2, pageHeight - 8, { align: 'center' });
 
+  // 10. Watermarks & Test Mode Overlays on every page
+  const totalPages = (doc.internal as any).getNumberOfPages ? (doc.internal as any).getNumberOfPages() : 1;
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+
+    if (quotation.environment === 'test') {
+      // Top test banner
+      doc.setFillColor(245, 158, 11); // Amber 500
+      doc.rect(0, 0, pageWidth, 5.5, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text('TEST DOCUMENT — NOT A REAL QUOTATION', pageWidth / 2, 3.8, { align: 'center' });
+
+      // Watermark in center
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(36);
+      doc.setTextColor(220, 220, 225);
+      doc.text('TEST DOCUMENT', pageWidth / 2, pageHeight / 2 - 8, {
+        align: 'center',
+        angle: 45,
+      });
+      doc.setFontSize(18);
+      doc.text('NOT A REAL ESTIMATE', pageWidth / 2, pageHeight / 2 + 10, {
+        align: 'center',
+        angle: 45,
+      });
+    }
+  }
+
   // Output as Uint8Array
   const arrayBuffer = doc.output('arraybuffer');
   return new Uint8Array(arrayBuffer);

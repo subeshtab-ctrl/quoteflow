@@ -3,6 +3,45 @@
     "require_full_payment_for_invoice": true,
     "invoice_prefix": "INV",
     "invoice_start_number": 1,
-    "current_invoice_counter": 20
+    "current_invoice_counter": 33,
+    "mode": "test",
+    "current_test_invoice_counter": 29,
+    "current_test_quotation_counter": 8
+  },
+  "test-org-1790526545647": {
+    "require_full_payment_for_invoice": true,
+    "invoice_prefix": "INV",
+    "invoice_start_number": 1,
+    "current_invoice_counter": 108,
+    "mode": "live",
+    "current_test_invoice_counter": 10,
+    "current_test_quotation_counter": 1
+  },
+  "test-org-1790527199838": {
+    "require_full_payment_for_invoice": true,
+    "invoice_prefix": "INV",
+    "invoice_start_number": 1,
+    "current_invoice_counter": 108,
+    "mode": "live",
+    "current_test_invoice_counter": 10,
+    "current_test_quotation_counter": 1
+  },
+  "test-org-1790527299331": {
+    "require_full_payment_for_invoice": true,
+    "invoice_prefix": "INV",
+    "invoice_start_number": 1,
+    "current_invoice_counter": 108,
+    "mode": "live",
+    "current_test_invoice_counter": 10,
+    "current_test_quotation_counter": 1
+  },
+  "test-org-1790527378421": {
+    "require_full_payment_for_invoice": true,
+    "invoice_prefix": "INV",
+    "invoice_start_number": 1,
+    "current_invoice_counter": 108,
+    "mode": "live",
+    "current_test_invoice_counter": 10,
+    "current_test_quotation_counter": 1
   }
 }

@@ -24,7 +24,7 @@ describe('Sequential Invoice Number Auto-Generation & Refresh Stability', () => 
     const peek3 = await store.peekNextInvoiceNumber(DEFAULT_ORG_ID);
 
     expect(peek1).toBeDefined();
-    expect(peek1).toMatch(/^INV\d{4,}$/);
+    expect(peek1).toMatch(/^INV-?\d{4,}$/);
     expect(peek2).toBe(peek1);
     expect(peek3).toBe(peek1);
   });
@@ -89,9 +89,21 @@ describe('Sequential Invoice Number Auto-Generation & Refresh Stability', () => 
     const numAfter2 = parseInt(nextAfter2.match(/(\d+)$/)![1], 10);
     expect(numAfter2).toBe(numBefore + 2);
 
-    // Clean up created test invoices
-    await store.deleteInvoice(inv1.id);
-    await store.deleteInvoice(inv2.id);
+    // Clean up created test invoices via cancellation
+    try {
+      await store.cancelInvoice({
+        id: inv1.id,
+        orgId: DEFAULT_ORG_ID,
+        reason: 'Automated test suite cleanup',
+        action: 'CANCEL',
+      });
+      await store.cancelInvoice({
+        id: inv2.id,
+        orgId: DEFAULT_ORG_ID,
+        reason: 'Automated test suite cleanup',
+        action: 'CANCEL',
+      });
+    } catch {}
   });
 
   it('rejects old random timestamp invoice numbers (> 50000) and replaces with sequential order', async () => {
@@ -118,6 +130,13 @@ describe('Sequential Invoice Number Auto-Generation & Refresh Stability', () => 
     expect(seqNum).toBeLessThan(50000);
 
     // Clean up created test invoice
-    await store.deleteInvoice(inv.id);
+    try {
+      await store.cancelInvoice({
+        id: inv.id,
+        orgId: DEFAULT_ORG_ID,
+        reason: 'Automated test suite cleanup',
+        action: 'CANCEL',
+      });
+    } catch {}
   });
 });

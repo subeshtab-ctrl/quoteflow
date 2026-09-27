@@ -86,6 +86,21 @@ export function PaymentModal({
   const [paymentNotes, setPaymentNotes] = useState<string>(
     quotation.payment_notes || ''
   );
+
+  const hasPriorAdvance = Boolean(
+    quotation.advance_payment_notes ||
+    (quotation.paid_amount && quotation.paid_amount > 0 && quotation.paid_amount < grandTotal)
+  );
+
+  const [advancePaymentNotes, setAdvancePaymentNotes] = useState<string>(
+    quotation.advance_payment_notes ||
+    (quotation.paid_amount && quotation.paid_amount < grandTotal ? quotation.payment_notes || '' : '')
+  );
+  const [finalPaymentNotes, setFinalPaymentNotes] = useState<string>(
+    quotation.final_payment_notes ||
+    (quotation.is_paid && quotation.advance_payment_notes ? quotation.payment_notes || '' : '')
+  );
+
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,7 +139,15 @@ export function PaymentModal({
           : new Date().toISOString().split('T')[0]
       );
       setPaymentMethod(quotation.payment_method || 'BANK_TRANSFER');
-      setPaymentNotes(quotation.payment_notes || '');
+      
+      const initialAdvance = quotation.advance_payment_notes ||
+        (quotation.paid_amount && quotation.paid_amount < grandTotal ? quotation.payment_notes || '' : '');
+      const initialFinal = quotation.final_payment_notes ||
+        (quotation.is_paid && (quotation.advance_payment_notes || (quotation.paid_amount && quotation.paid_amount < grandTotal)) ? quotation.payment_notes || '' : '');
+      
+      setAdvancePaymentNotes(initialAdvance);
+      setFinalPaymentNotes(initialFinal);
+      setPaymentNotes(quotation.payment_notes || initialFinal || initialAdvance || '');
       setError(null);
     }
   }, [quotation, isOpen, grandTotal]);
@@ -135,6 +158,30 @@ export function PaymentModal({
 
     const isFullyPaid = paymentMode === 'FULL' || (paymentMode === 'ADVANCE' && activeBalanceAmount <= 0);
     const isUnpaid = paymentMode === 'UNPAID' || activePaidAmount <= 0;
+
+    let effectiveAdvRef: string | null = null;
+    let effectiveFinalRef: string | null = null;
+    let effectiveGeneralRef: string | null = null;
+
+    if (isUnpaid) {
+      effectiveAdvRef = null;
+      effectiveFinalRef = null;
+      effectiveGeneralRef = null;
+    } else if (paymentMode === 'ADVANCE') {
+      effectiveAdvRef = advancePaymentNotes.trim() || paymentNotes.trim() || null;
+      effectiveFinalRef = null;
+      effectiveGeneralRef = effectiveAdvRef;
+    } else if (isFullyPaid) {
+      if (hasPriorAdvance || advancePaymentNotes.trim()) {
+        effectiveAdvRef = advancePaymentNotes.trim() || quotation.advance_payment_notes || null;
+        effectiveFinalRef = finalPaymentNotes.trim() || paymentNotes.trim() || null;
+        effectiveGeneralRef = effectiveFinalRef || effectiveAdvRef;
+      } else {
+        effectiveAdvRef = null;
+        effectiveFinalRef = finalPaymentNotes.trim() || paymentNotes.trim() || null;
+        effectiveGeneralRef = effectiveFinalRef;
+      }
+    }
 
     try {
       const res = await fetch(`/api/quotations/${quotation.id}/payment`, {
@@ -149,7 +196,9 @@ export function PaymentModal({
           payment_confirmed_by_company: isUnpaid ? false : paymentConfirmed,
           paid_at: isUnpaid ? null : (paidAt ? new Date(paidAt).toISOString() : new Date().toISOString()),
           payment_method: isUnpaid ? null : paymentMethod,
-          payment_notes: isUnpaid ? null : paymentNotes.trim(),
+          payment_notes: isUnpaid ? null : effectiveGeneralRef,
+          advance_payment_notes: isUnpaid ? null : effectiveAdvRef,
+          final_payment_notes: isUnpaid ? null : effectiveFinalRef,
         }),
       });
 
@@ -195,6 +244,8 @@ export function PaymentModal({
           paid_at: null,
           payment_method: null,
           payment_notes: null,
+          advance_payment_notes: null,
+          final_payment_notes: null,
         }),
       });
 
@@ -483,12 +534,52 @@ export function PaymentModal({
               </div>
             </div>
 
-            <Input
-              label="Transaction / Reference # (UTR, Cheque, or UPI ID)"
-              value={paymentNotes}
-              onChange={(e) => setPaymentNotes(e.target.value)}
-              placeholder="e.g. UTR-9821382910, Cheque #49281, or UPI Ref"
-            />
+            {paymentMode === 'FULL' && (hasPriorAdvance || quotation.advance_payment_notes || advancePaymentNotes) ? (
+              <div className="space-y-3">
+                <div className="rounded-xl bg-amber-50/70 border border-amber-200/80 p-3 text-xs text-amber-900 leading-relaxed">
+                  <span className="font-bold">Two-Stage Payment Settlement</span>: An advance payment was previously recorded for this quotation. Both the advance and final settlement references will be securely saved and listed on the final invoice under Note.
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label="Advance Payment Reference #"
+                    value={advancePaymentNotes}
+                    onChange={(e) => setAdvancePaymentNotes(e.target.value)}
+                    placeholder="e.g. UTR-ADV-10023, UPI Advance"
+                  />
+                  <Input
+                    label="Final Settlement Reference #"
+                    value={finalPaymentNotes}
+                    onChange={(e) => {
+                      setFinalPaymentNotes(e.target.value);
+                      setPaymentNotes(e.target.value);
+                    }}
+                    placeholder="e.g. UTR-FINAL-9921, Cheque #2910"
+                    required
+                  />
+                </div>
+              </div>
+            ) : paymentMode === 'ADVANCE' ? (
+              <Input
+                label="Advance Payment Reference # (UTR, Cheque, or UPI ID)"
+                value={advancePaymentNotes || paymentNotes}
+                onChange={(e) => {
+                  setAdvancePaymentNotes(e.target.value);
+                  setPaymentNotes(e.target.value);
+                }}
+                placeholder="e.g. UTR-ADV-10023, UPI Advance"
+              />
+            ) : (
+              <Input
+                label="Transaction / Reference # (UTR, Cheque, or UPI ID)"
+                value={paymentNotes || finalPaymentNotes}
+                onChange={(e) => {
+                  setPaymentNotes(e.target.value);
+                  setFinalPaymentNotes(e.target.value);
+                }}
+                placeholder="e.g. UTR-9821382910, Cheque #49281, or UPI Ref"
+              />
+            )}
 
             {/* Company Payment Confirmation Checkbox */}
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 space-y-1.5">

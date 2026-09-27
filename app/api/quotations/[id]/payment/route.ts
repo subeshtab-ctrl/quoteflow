@@ -32,6 +32,8 @@ export async function PATCH(
         paid_at: body.paid_at || null,
         payment_method: body.payment_method || null,
         payment_notes: body.payment_notes || null,
+        advance_payment_notes: body.advance_payment_notes || null,
+        final_payment_notes: body.final_payment_notes || null,
         confirmed_by: auth?.fullName || auth?.email || 'Company Finance Team',
       },
       orgId

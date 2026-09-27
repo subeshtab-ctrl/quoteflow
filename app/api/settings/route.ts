@@ -11,7 +11,8 @@ export async function GET() {
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
   const org = await store.getOrganization(orgId);
-  return NextResponse.json({ success: true, organization: org });
+  const hasLiveDocuments = await store.hasLiveDocuments(orgId);
+  return NextResponse.json({ success: true, organization: org, has_live_documents: hasLiveDocuments });
 }
 
 export async function PUT(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const validated = OrganizationSettingsSchema.parse(body);
+    const validated = OrganizationSettingsSchema.partial().parse(body);
 
     const updated = await store.updateOrganization(orgId, validated as Partial<Organization>);
 

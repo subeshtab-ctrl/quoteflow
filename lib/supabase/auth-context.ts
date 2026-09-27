@@ -97,10 +97,11 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
     }
   }
 
-  // 3. If user is Subesh M, link to primary org
+  // 3. If user is Subesh M, link to primary org with OWNER role
   const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
-  if (!orgId && user.email?.toLowerCase() === 'subeshtab@gmail.com') {
-    orgId = DEFAULT_ORG_ID;
+  if (user.email?.toLowerCase() === 'subeshtab@gmail.com') {
+    if (!orgId) orgId = DEFAULT_ORG_ID;
+    role = 'OWNER';
   }
 
   // 4. For any other user without an organization, auto-provision an isolated workspace

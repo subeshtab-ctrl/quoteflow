@@ -20,7 +20,8 @@ export type InvoiceStatus =
   | 'PAID'
   | 'PARTIAL'
   | 'OVERDUE'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'VOIDED';
 
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 export type ActorType = 'USER' | 'CUSTOMER' | 'SYSTEM';
@@ -109,6 +110,9 @@ export interface Organization {
   default_bank_details?: BankAccountDetails | null;
   default_upi_details?: UpiPaymentDetails | null;
   default_crypto_details?: CryptoPaymentDetails | null;
+  mode?: 'test' | 'live';
+  current_test_quotation_counter?: number;
+  current_test_invoice_counter?: number;
   created_at: string;
   updated_at: string;
 }
@@ -266,6 +270,7 @@ export interface Quotation {
   original_quotation_id?: string | null;
   title: string;
   status: QuotationStatus;
+  environment?: 'test' | 'live';
   issue_date: string;
   valid_until: string;
   currency: CurrencyCode;
@@ -300,6 +305,8 @@ export interface Quotation {
   paid_at?: string | null;
   payment_method?: PaymentMethod | string | null;
   payment_notes?: string | null;
+  advance_payment_notes?: string | null;
+  final_payment_notes?: string | null;
   paid_amount?: number;
   balance_amount?: number;
   advance_percentage?: number | null;
@@ -378,6 +385,11 @@ export interface Invoice {
   invoice_number: string;
   po_number?: string | null;
   status: InvoiceStatus;
+  environment?: 'test' | 'live';
+  cancellation_reason?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancelled_by_role?: string | null;
   issue_date: string;
   due_date: string;
   currency: CurrencyCode;
@@ -396,6 +408,8 @@ export interface Invoice {
   is_paid: boolean;
   paid_at?: string | null;
   payment_notes?: string | null;
+  advance_payment_notes?: string | null;
+  final_payment_notes?: string | null;
   paid_amount?: number;
   balance_amount?: number;
   advance_percentage?: number | null;

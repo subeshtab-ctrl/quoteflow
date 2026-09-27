@@ -7,7 +7,7 @@ export const revalidate = 0;
 import { DashboardLayout } from '@/components/dashboard/dashboard-layout';
 import { store } from '@/lib/supabase/data-store';
 import { formatCurrency } from '@/lib/quotations/calculations';
-import { formatDate } from '@/lib/utils';
+import { formatDate, cn } from '@/lib/utils';
 import { InvoiceStatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,16 +26,17 @@ interface InvoicesPageProps {
   searchParams: Promise<{
     status?: string;
     search?: string;
+    env?: string;
   }>;
 }
 
 export default async function InvoicesPage({ searchParams }: InvoicesPageProps) {
-  const { status, search } = await searchParams;
+  const { status, search, env } = await searchParams;
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
   const [invoices, organization] = await Promise.all([
-    store.getInvoices(orgId, { status, search }),
+    store.getInvoices(orgId, { status, search, environment: env }),
     store.getOrganization(orgId),
   ]);
 
@@ -64,8 +65,12 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
           </div>
         </div>
 
-        {/* Filter Tabs */}
-        <InvoicesFilterTabs currentStatus={status || 'ALL'} />
+        {/* Filter Tabs & Search */}
+        <InvoicesFilterTabs
+          currentStatus={status || 'ALL'}
+          currentSearch={search || ''}
+          currentEnvironment={env || 'ALL'}
+        />
 
         {/* Invoices Table */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 shadow-sm overflow-hidden">
@@ -88,33 +93,75 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
                     <td colSpan={7} className="text-center py-12 text-slate-400 dark:text-slate-500">
                       <div className="max-w-xs mx-auto space-y-3">
                         <Receipt className="h-10 w-10 text-slate-300 dark:text-slate-600 mx-auto" />
-                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">No invoices found</p>
-                        <p className="text-xs text-slate-400">
-                          Create an invoice directly without a quote or convert from an approved estimate.
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                          {search ? 'No matching invoices found' : 'No invoices found'}
                         </p>
-                        <Link href="/invoices/new" className="inline-block pt-1">
-                          <Button size="sm" variant="primary">
-                            + Create First Invoice
-                          </Button>
-                        </Link>
+                        <p className="text-xs text-slate-400">
+                          {search
+                            ? `No invoices matched "${search}". Try searching by customer, invoice #, or transaction reference.`
+                            : 'Create an invoice directly without a quote or convert from an approved estimate.'}
+                        </p>
+                        {!search && (
+                          <Link href="/invoices/new" className="inline-block pt-1">
+                            <Button size="sm" variant="primary">
+                              + Create First Invoice
+                            </Button>
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>
                 ) : (
                   invoices.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/50 transition-colors">
+                    <tr
+                      key={inv.id}
+                      className={cn(
+                        'hover:bg-slate-50/60 dark:hover:bg-slate-800/50 transition-colors',
+                        (inv.status === 'CANCELLED' || inv.status === 'VOIDED') && 'opacity-70 bg-slate-50/30 dark:bg-slate-900/30'
+                      )}
+                    >
                       <td className="py-4 px-4 font-bold text-slate-900 dark:text-slate-100">
-                        <Link
-                          href={`/invoices/${inv.id}`}
-                          className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline inline-flex items-center gap-1.5"
-                        >
-                          <span>{inv.invoice_number}</span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Link
+                            href={`/invoices/${inv.id}`}
+                            className={cn(
+                              'hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline inline-flex items-center gap-1.5',
+                              (inv.status === 'CANCELLED' || inv.status === 'VOIDED') && 'line-through text-slate-500 dark:text-slate-400'
+                            )}
+                          >
+                            <span>{inv.invoice_number}</span>
+                          </Link>
+                          {inv.environment === 'test' && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                              🧪 TEST
+                            </span>
+                          )}
                           {inv.quotation_id && (
                             <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded font-mono">
                               from quote
                             </span>
                           )}
-                        </Link>
+                        </div>
+                        {/* Transaction Reference Display */}
+                        {(inv.advance_payment_notes || inv.final_payment_notes || inv.payment_notes) && (
+                          <div className="mt-1 text-[11px] font-normal text-slate-500 font-mono flex flex-wrap items-center gap-1.5">
+                            {inv.advance_payment_notes && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
+                                Adv: {inv.advance_payment_notes}
+                              </span>
+                            )}
+                            {inv.final_payment_notes && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                                Final: {inv.final_payment_notes}
+                              </span>
+                            )}
+                            {!inv.advance_payment_notes && !inv.final_payment_notes && inv.payment_notes && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                Ref: {inv.payment_notes}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="py-4 px-4">
                         <p className="font-semibold text-slate-800 dark:text-slate-200">
