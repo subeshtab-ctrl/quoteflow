@@ -202,6 +202,29 @@
 
 ---
 
+## 6. Multi-Quotation Tab Switching & Stray "0" Fix
+
+### The Issues
+1. **Company Name & Logo Reset on Tab Switch**:
+   - When viewing a client portal with multiple quotations, clicking another quotation tab caused the company header to revert to "QuoteFlow" with a purple "Q" avatar instead of showing the company's name (`SUBESH M LLC`) and custom logo. Refreshing the page restored the normal name.
+   - **Root Cause**: `getQuotations` returns quotation records without `organization` populated. In `public-quote-view.tsx`, `allQuotations` contained quotes without `organization`. When switching tabs, `setQuotation(q)` replaced the active quotation with a quote having `organization: undefined`. The UI then fell back to `"QuoteFlow"`.
+2. **Stray "0" Rendered Under Quotation Tabs**:
+   - A literal `0` appeared on the screen below the customer portal tab bar and above the quotation document sheet.
+   - **Root Cause**: In React JSX, `{a && b && (<div />)}` evaluates to `0` if `b` is `0`. The advance payment banner condition was `{!isPaid && (quotation.payment_status === 'PARTIALLY_PAID' || (quotation.paid_amount && quotation.paid_amount > 0)) && (...)`. When `quotation.paid_amount` was `0`, the expression evaluated to `0`, causing React to render `0` directly into the DOM.
+
+### What Was Fixed
+1. **Organization Data Attachment (`lib/supabase/data-store.ts`)**:
+   - `getQuotations` and `getCustomerPortalQuotationsByToken` now eagerly attach the organization to every quotation returned in `allQuotations`.
+2. **Synchronous & Asynchronous Organization Preservation (`components/public-quote/public-quote-view.tsx`)**:
+   - Fallback `const org = quotation.organization || initialQuotation.organization;` ensures company branding is never lost.
+   - When a tab is clicked, `setQuotation` preserves `fullOrg` synchronously to prevent any flicker.
+   - `fetch(/api/public/quote?token=...)` now resolves and updates the active quotation state with full items and details while keeping `organization`.
+3. **Strict Boolean Cast for Payment Banner**:
+   - Created `isPartiallyPaid = Boolean(!isPaid && (quotation.payment_status === 'PARTIALLY_PAID' || ((quotation.paid_amount ?? 0) > 0)))`.
+   - Replaced condition with `{isPartiallyPaid && (...)`, preventing `0` from ever rendering into the DOM.
+
+---
+
 ## 🧪 Comprehensive Automated Test Results
 
 ```bash
