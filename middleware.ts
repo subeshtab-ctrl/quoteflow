@@ -15,29 +15,42 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({
-          request: {
-            headers: request.headers,
-          },
-        });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options)
-        );
-      },
-    },
-  });
+  let user: any = null;
 
-  // Verify authenticated user from Supabase
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  try {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
+          try {
+            cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+            response = NextResponse.next({
+              request: {
+                headers: request.headers,
+              },
+            });
+            cookiesToSet.forEach(({ name, value, options }) => {
+              try {
+                response.cookies.set(name, value, options);
+              } catch {
+                // Cookie may be too large — skip setting it
+              }
+            });
+          } catch {
+            // If cookie setting fails entirely, continue without setting
+          }
+        },
+      },
+    });
+
+    const result = await supabase.auth.getUser();
+    user = result.data?.user ?? null;
+  } catch {
+    // If Supabase auth check fails (e.g. network, oversized cookies), treat as unauthenticated
+    user = null;
+  }
 
   const pathname = request.nextUrl.pathname;
 
@@ -50,7 +63,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/products') ||
     pathname.startsWith('/reports') ||
     pathname.startsWith('/settings') ||
-    pathname.startsWith('/templates');
+    pathname.startsWith('/templates') ||
+    pathname.startsWith('/test');
 
   // Auth pages (login, register, forgot-password)
   const isAuthPage =
@@ -96,7 +110,6 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
   }
-
 
   return response;
 }
