@@ -158,8 +158,34 @@ export interface Customer {
   postal_code?: string;
   tax_number?: string;
   notes?: string;
+  environment?: 'test' | 'live';
+  is_demo?: boolean;
+  demo_pin?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TestUsageRecord {
+  organization_id: string;
+  usage_date: string; // YYYY-MM-DD in business timezone (UTC for now)
+  orders_created: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TestEmailRecord {
+  id: string;
+  organization_id: string;
+  document_type: 'QUOTE' | 'INVOICE' | 'APPROVAL' | 'REJECTION' | 'REMINDER' | 'PORTAL_INVITE';
+  document_number: string;
+  document_id: string;
+  to_email: string;
+  to_name?: string;
+  subject: string;
+  html_preview: string;
+  text_preview: string;
+  simulated_at: string;
+  created_at: string;
 }
 
 export interface Product {

@@ -62,6 +62,7 @@ interface QuotationBuilderProps {
   products: Product[];
   organization: Organization;
   initialQuotation?: any;
+  testMode?: boolean;
 }
 
 interface ItemState {
@@ -84,6 +85,7 @@ export function QuotationBuilder({
   products,
   organization,
   initialQuotation,
+  testMode = false,
 }: QuotationBuilderProps) {
   const router = useRouter();
 

@@ -11,8 +11,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') || undefined;
     const search = searchParams.get('search') || undefined;
+    // environment filter: 'live', 'test', or undefined (all)
+    const environment = searchParams.get('environment') || undefined;
 
-    const quotations = await store.getQuotations(orgId, { status, search });
+    const quotations = await store.getQuotations(orgId, { status, search, environment: environment as any });
     return NextResponse.json({ success: true, quotations });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -26,19 +28,38 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const validated = QuotationFormSchema.parse(body);
 
+    // Determine if this will be a test quotation
+    const org = await store.getOrganization(orgId);
+    const isTest = org?.mode !== 'live';
+
+    if (isTest) {
+      // Enforce 20 test orders/day quota
+      const usage = await store.checkAndIncrementTestUsage(orgId);
+      if (!usage.allowed) {
+        return NextResponse.json(
+          {
+            error: `Test mode daily limit reached (${usage.limit} orders/day). Limit resets at midnight. Used: ${usage.orders_created}/${usage.limit}`,
+            code: 'TEST_QUOTA_EXCEEDED',
+            usage,
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     const quotation = await store.createQuotation({
       ...validated,
       organization_id: orgId,
     });
 
-    // If quotation status was set to SENT, send email if customer has email (ONLY in LIVE mode)
-    if (quotation.status === 'SENT' && quotation.customer?.email && quotation.environment !== 'test') {
+    // Email handling
+    if (quotation.status === 'SENT' && quotation.customer?.email) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
-      const org = quotation.organization || (await store.getOrganization(orgId));
+      const quotOrg = quotation.organization || (await store.getOrganization(orgId));
       const emailPayload = generateQuotationSentEmail({
         customerName: quotation.customer.name,
-        companyName: org?.name || 'QuoteFlow',
-        replyTo: org?.email,
+        companyName: quotOrg?.name || 'QuoteFlow',
+        replyTo: quotOrg?.email,
         quotationNumber: quotation.quotation_number,
         amount: quotation.grand_total,
         currency: quotation.currency,
@@ -46,7 +67,25 @@ export async function POST(req: NextRequest) {
         publicUrl: `${appUrl}/q/${quotation.public_token}`,
       });
       emailPayload.to = quotation.customer.email;
-      sendEmail(emailPayload).catch(console.error);
+
+      if (quotation.environment === 'test') {
+        // Simulate email — log it, do NOT send
+        store.logTestEmail({
+          organization_id: orgId,
+          document_type: 'QUOTE',
+          document_number: quotation.quotation_number,
+          document_id: quotation.id,
+          to_email: quotation.customer.email,
+          to_name: quotation.customer.name,
+          subject: emailPayload.subject,
+          html_preview: emailPayload.html || '',
+          text_preview: emailPayload.text || '',
+          simulated_at: new Date().toISOString(),
+        }).catch(console.error);
+      } else {
+        // Live mode — send real email
+        sendEmail(emailPayload).catch(console.error);
+      }
     }
 
     return NextResponse.json({ success: true, quotation });

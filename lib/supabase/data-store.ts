@@ -21,6 +21,8 @@ import {
   UpiPaymentDetails,
   CryptoPaymentDetails,
   PaymentDisplayMode,
+  TestUsageRecord,
+  TestEmailRecord,
 } from '@/types/database';
 import { calculateQuotationTotals } from '@/lib/quotations/calculations';
 import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quotations/tokens';
@@ -176,6 +178,131 @@ class QuoteFlowStore {
     } catch {}
   }
 
+  // ---- TEST USAGE (quota: 20 orders/day per org) ----
+  private getTestUsageFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'test-usage.json');
+  }
+
+  private loadTestUsageFromFile(): Record<string, { usage_date: string; orders_created: number }> {
+    try {
+      const p = this.getTestUsageFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {}
+    return {};
+  }
+
+  private saveTestUsageToFile(data: Record<string, { usage_date: string; orders_created: number }>): void {
+    try {
+      fs.writeFileSync(this.getTestUsageFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  private getTodayDateString(): string {
+    return new Date().toISOString().split('T')[0]; // YYYY-MM-DD UTC
+  }
+
+  public async getTestUsageToday(orgId: string = DEFAULT_ORG_ID): Promise<{ usage_date: string; orders_created: number; limit: number; remaining: number }> {
+    const DAILY_LIMIT = 20;
+    const today = this.getTodayDateString();
+    const all = this.loadTestUsageFromFile();
+    const rec = all[orgId];
+    if (rec && rec.usage_date === today) {
+      return {
+        usage_date: today,
+        orders_created: rec.orders_created,
+        limit: DAILY_LIMIT,
+        remaining: Math.max(0, DAILY_LIMIT - rec.orders_created),
+      };
+    }
+    return { usage_date: today, orders_created: 0, limit: DAILY_LIMIT, remaining: DAILY_LIMIT };
+  }
+
+  public async checkAndIncrementTestUsage(orgId: string = DEFAULT_ORG_ID): Promise<{ allowed: boolean; orders_created: number; limit: number; remaining: number }> {
+    const DAILY_LIMIT = 20;
+    const today = this.getTodayDateString();
+    const all = this.loadTestUsageFromFile();
+    const rec = all[orgId];
+
+    let current = 0;
+    if (rec && rec.usage_date === today) {
+      current = rec.orders_created;
+    }
+    // Note: resets automatically each new day (different usage_date)
+
+    if (current >= DAILY_LIMIT) {
+      return { allowed: false, orders_created: current, limit: DAILY_LIMIT, remaining: 0 };
+    }
+
+    const next = current + 1;
+    all[orgId] = { usage_date: today, orders_created: next };
+    this.saveTestUsageToFile(all);
+
+    return { allowed: true, orders_created: next, limit: DAILY_LIMIT, remaining: Math.max(0, DAILY_LIMIT - next) };
+  }
+
+  // ---- TEST SIMULATED EMAILS ----
+  private getTestEmailsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'test-emails.json');
+  }
+
+  private loadTestEmailsFromFile(): TestEmailRecord[] {
+    try {
+      const p = this.getTestEmailsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || [];
+      }
+    } catch {}
+    return [];
+  }
+
+  private saveTestEmailsToFile(emails: TestEmailRecord[]): void {
+    try {
+      fs.writeFileSync(this.getTestEmailsFilePath(), JSON.stringify(emails, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async logTestEmail(email: Omit<TestEmailRecord, 'id' | 'created_at'>): Promise<TestEmailRecord> {
+    const all = this.loadTestEmailsFromFile();
+    const record: TestEmailRecord = {
+      ...email,
+      id: `testemail_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      created_at: new Date().toISOString(),
+    };
+    // Keep last 200 per org, most recent first
+    const filtered = all.filter(e => e.organization_id === email.organization_id);
+    const others = all.filter(e => e.organization_id !== email.organization_id);
+    const updated = [record, ...filtered].slice(0, 200);
+    this.saveTestEmailsToFile([...updated, ...others]);
+    return record;
+  }
+
+  public async getTestEmails(orgId: string = DEFAULT_ORG_ID, limit = 50): Promise<TestEmailRecord[]> {
+    const all = this.loadTestEmailsFromFile();
+    return all
+      .filter(e => e.organization_id === orgId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, limit);
+  }
+
+  public async clearTestEmails(orgId: string = DEFAULT_ORG_ID): Promise<void> {
+    const all = this.loadTestEmailsFromFile();
+    this.saveTestEmailsToFile(all.filter(e => e.organization_id !== orgId));
+  }
+
+
+
   private getPaymentSettingsFilePath(): string {
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
@@ -185,6 +312,7 @@ class QuoteFlowStore {
     }
     return path.join(dir, 'org-payment-settings.json');
   }
+
 
   private loadPaymentSettingsFromFile(): Record<string, Partial<Organization>> {
     try {
@@ -1824,7 +1952,7 @@ class QuoteFlowStore {
     };
   }
 
-  public async getCustomers(orgId: string = DEFAULT_ORG_ID): Promise<Customer[]> {
+  public async getCustomers(orgId: string = DEFAULT_ORG_ID, options?: { environment?: 'test' | 'live' | 'ALL'; includeDemo?: boolean }): Promise<Customer[]> {
     try {
       const supabase = createAdminClient();
       if (supabase) {
@@ -1847,17 +1975,113 @@ class QuoteFlowStore {
             this.customers.set(normalized.id, normalized);
             list.push(normalized);
           }
-          return list;
+          // Also merge in-memory demo customers (not in Supabase)
+          for (const [, c] of this.customers.entries()) {
+            if (c.organization_id === orgId && c.is_demo && !remoteIds.has(c.id)) {
+              list.push(c);
+            }
+          }
+          return this._filterCustomers(list, options);
         }
       }
     } catch (err) {
       console.warn('Could not fetch customers from Supabase, using local cache:', err);
     }
 
-    return Array.from(this.customers.values())
+    const all = Array.from(this.customers.values())
       .filter((c) => c.organization_id === orgId)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return this._filterCustomers(all, options);
   }
+
+  private _filterCustomers(list: Customer[], options?: { environment?: 'test' | 'live' | 'ALL'; includeDemo?: boolean }): Customer[] {
+    let result = list;
+    if (options?.environment && options.environment !== 'ALL') {
+      result = result.filter((c) => (c.environment || 'live') === options.environment);
+    }
+    return result;
+  }
+
+  public async seedTestDemoCustomers(orgId: string = DEFAULT_ORG_ID): Promise<void> {
+    const demoIds = [
+      'demo-cust-0000-0001',
+      'demo-cust-0000-0002',
+      'demo-cust-0000-0003',
+    ];
+    // Only seed if not already present
+    if (this.customers.has(demoIds[0])) return;
+    const now = new Date().toISOString();
+    const demoCusts: Customer[] = [
+      {
+        id: demoIds[0],
+        organization_id: orgId,
+        name: 'Demo Customer 1',
+        company_name: 'Demo Company Alpha',
+        email: 'demo.customer1@example.test',
+        auth_method: 'EMAIL',
+        phone: '9800000001',
+        phone_country_code: '+91',
+        billing_address: '1 Demo Street',
+        city: 'Test City',
+        state: 'Test State',
+        country: 'India',
+        postal_code: '000001',
+        environment: 'test',
+        is_demo: true,
+        demo_pin: '1234',
+        notes: '🧪 Demo customer for testing. PIN: 1234',
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: demoIds[1],
+        organization_id: orgId,
+        name: 'Demo Customer 2',
+        company_name: 'Demo Company Beta',
+        email: 'demo.customer2@example.test',
+        auth_method: 'EMAIL',
+        phone: '9800000002',
+        phone_country_code: '+91',
+        billing_address: '2 Demo Avenue',
+        city: 'Sample City',
+        state: 'Sample State',
+        country: 'India',
+        postal_code: '000002',
+        environment: 'test',
+        is_demo: true,
+        demo_pin: '1234',
+        notes: '🧪 Demo customer for testing. PIN: 1234',
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: demoIds[2],
+        organization_id: orgId,
+        name: 'Training Client',
+        company_name: 'Training Corp',
+        email: 'training@example.test',
+        auth_method: 'EMAIL',
+        phone: '9800000003',
+        phone_country_code: '+91',
+        billing_address: '3 Training Road',
+        city: 'Workshop City',
+        state: 'Learning State',
+        country: 'India',
+        postal_code: '000003',
+        environment: 'test',
+        is_demo: true,
+        demo_pin: '1234',
+        notes: '🧪 Training customer for staff onboarding. PIN: 1234',
+        created_at: now,
+        updated_at: now,
+      },
+    ];
+    for (const c of demoCusts) {
+      this.customers.set(c.id, c);
+    }
+  }
+
+
 
   public async getCustomerById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Customer | null> {
     const cust = this.customers.get(id);
@@ -2229,7 +2453,7 @@ class QuoteFlowStore {
   // --- QUOTATIONS ---
   public async getQuotations(
     orgId: string = DEFAULT_ORG_ID,
-    filters?: { status?: string; search?: string; customerId?: string }
+    filters?: { status?: string; search?: string; customerId?: string; environment?: string }
   ): Promise<Quotation[]> {
     try {
       const supabase = createAdminClient();
@@ -2410,6 +2634,9 @@ class QuoteFlowStore {
           if (filters?.status && filters.status !== 'ALL') {
             results = results.filter((item) => item.status === filters.status);
           }
+          if (filters?.environment && filters.environment !== 'ALL') {
+            results = results.filter((item) => (item.environment || 'live') === filters.environment);
+          }
           if (filters?.search) {
             const s = filters.search.toLowerCase();
             results = results.filter((item) => {
@@ -2432,6 +2659,10 @@ class QuoteFlowStore {
 
     if (filters?.status && filters.status !== 'ALL') {
       list = list.filter((q) => q.status === filters.status);
+    }
+
+    if (filters?.environment && filters.environment !== 'ALL') {
+      list = list.filter((q) => (q.environment || 'live') === filters.environment);
     }
 
     if (filters?.customerId) {

@@ -46,6 +46,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Determine if this will be a test invoice
+    const org = await store.getOrganization(orgId);
+    const isTest = org?.mode !== 'live';
+
+    if (isTest) {
+      // Enforce 20 test orders/day quota
+      const usage = await store.checkAndIncrementTestUsage(orgId);
+      if (!usage.allowed) {
+        return NextResponse.json(
+          {
+            error: `Test mode daily limit reached (${usage.limit} orders/day). Limit resets at midnight. Used: ${usage.orders_created}/${usage.limit}`,
+            code: 'TEST_QUOTA_EXCEEDED',
+            usage,
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     const invoice = await store.createInvoice({
       ...body,
       organization_id: orgId,
