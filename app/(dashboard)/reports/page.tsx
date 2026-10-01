@@ -30,12 +30,13 @@ export default async function ReportsPage() {
     updated_at: new Date().toISOString(),
   };
 
-  const activeEnv = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+  const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
 
-  const [quotations, invoices, customers, products] = await Promise.all([
-    store.getQuotations(orgId, { environment: activeEnv }),
-    store.getInvoices(orgId, { environment: activeEnv }),
-    store.getCustomers(orgId, { environment: activeEnv }),
+  const [analytics, quotations, invoices, customers, products] = await Promise.all([
+    store.getDashboardAnalytics(orgId, { environment: env }),
+    store.getQuotations(orgId, { environment: env }),
+    store.getInvoices(orgId, { environment: env }),
+    store.getCustomers(orgId, { environment: env }),
     store.getProducts(orgId),
   ]);
 
@@ -43,7 +44,7 @@ export default async function ReportsPage() {
     category: 'sales',
     reportType: 'sales-summary',
     preset: 'this_month',
-    environment: activeEnv,
+    environment: env,
   };
 
   const initialReportData = calculateReportData({
