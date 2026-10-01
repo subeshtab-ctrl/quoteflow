@@ -8,7 +8,6 @@ import { Search, X } from 'lucide-react';
 export function InvoicesFilterTabs({
   currentStatus = 'ALL',
   currentSearch = '',
-  currentEnvironment = 'ALL',
 }: {
   currentStatus: string;
   currentSearch?: string;
@@ -31,28 +30,12 @@ export function InvoicesFilterTabs({
     { label: 'Cancelled / Void', value: 'CANCELLED' },
   ];
 
-  const environments = [
-    { label: 'All', value: 'ALL' },
-    { label: 'Live', value: 'live' },
-    { label: '🧪 Test', value: 'test' },
-  ];
-
   const handleSelectStatus = (statusValue: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (statusValue === 'ALL') {
       params.delete('status');
     } else {
       params.set('status', statusValue);
-    }
-    router.push(`/invoices?${params.toString()}`);
-  };
-
-  const handleSelectEnvironment = (envValue: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (envValue === 'ALL') {
-      params.delete('env');
-    } else {
-      params.set('env', envValue);
     }
     router.push(`/invoices?${params.toString()}`);
   };
@@ -100,28 +83,6 @@ export function InvoicesFilterTabs({
         </div>
 
         <div className="flex items-center gap-2.5">
-          {/* Environment Filter Selector */}
-          <div className="flex items-center gap-1 p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-medium border border-slate-200/60 dark:border-slate-700/60">
-            {environments.map((env) => {
-              const isSelected = currentEnvironment === env.value;
-              return (
-                <button
-                  key={env.value}
-                  type="button"
-                  onClick={() => handleSelectEnvironment(env.value)}
-                  className={cn(
-                    'px-2.5 py-1 rounded-lg text-xs transition-all font-semibold',
-                    isSelected
-                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
-                  )}
-                >
-                  {env.label}
-                </button>
-              );
-            })}
-          </div>
-
           {/* Search Bar Input */}
           <form onSubmit={handleSearchSubmit} className="relative w-full md:w-72 shrink-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
