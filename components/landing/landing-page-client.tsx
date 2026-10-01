@@ -255,13 +255,16 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
             <span>Cloud-Based Quotation & Digital Approval SaaS</span>
           </div>
 
-          {/* High-Impact 3-Line Headline */}
-          <h1 className="text-4xl sm:text-6xl md:text-7xl font-black tracking-tight text-white leading-[1.08] max-w-4xl mx-auto mb-6">
-            <span className="block text-white">Create Quotations.</span>
-            <span className="block bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-              Get Approvals.
+          {/* High-Impact Headline */}
+          <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight text-white leading-[1.12] max-w-5xl mx-auto mb-6">
+            <span className="block sm:inline text-white">Create Estimates. </span>
+            <span className="block sm:inline text-slate-100">Send Quotes.</span>
+            <span className="block sm:mt-1">
+              <span className="block sm:inline bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
+                Invoice Smarter.{' '}
+              </span>
+              <span className="block sm:inline text-white">Win More Business.</span>
             </span>
-            <span className="block text-slate-100">Close Faster.</span>
           </h1>
 
           {/* Description */}
