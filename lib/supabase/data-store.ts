@@ -2118,19 +2118,35 @@ class QuoteFlowStore {
 
 
 
-  public async getCustomerById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Customer | null> {
+  public async getCustomerById(id: string, orgId?: string): Promise<Customer | null> {
     const cust = this.customers.get(id);
-    if (cust && cust.organization_id === orgId) return cust;
+    if (cust && (!orgId || orgId === DEFAULT_ORG_ID || cust.organization_id === orgId)) return cust;
 
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        const { data, error } = await supabase
+        let query = supabase
           .from('customers')
           .select('*')
-          .eq('id', id)
-          .eq('organization_id', orgId)
-          .maybeSingle();
+          .eq('id', id);
+
+        if (orgId && orgId !== DEFAULT_ORG_ID) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        let { data, error } = await query.maybeSingle();
+
+        if (!data && orgId) {
+          const fallbackRes = await supabase
+            .from('customers')
+            .select('*')
+            .eq('id', id)
+            .maybeSingle();
+          if (fallbackRes.data) {
+            data = fallbackRes.data;
+            error = null;
+          }
+        }
 
         if (!error && data) {
           const normalized = this.normalizeCustomer(data);
@@ -2145,7 +2161,7 @@ class QuoteFlowStore {
     return null;
   }
 
-  public async getCustomer(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Customer | null> {
+  public async getCustomer(id: string, orgId?: string): Promise<Customer | null> {
     return this.getCustomerById(id, orgId);
   }
 
@@ -2728,16 +2744,32 @@ class QuoteFlowStore {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
-  public async getQuotationById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Quotation | null> {
+  public async getQuotationById(id: string, orgId?: string): Promise<Quotation | null> {
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        const { data, error } = await supabase
+        let query = supabase
           .from('quotations')
           .select('*, customer:customers(*), items:quotation_items(*)')
-          .eq('id', id)
-          .eq('organization_id', orgId)
-          .maybeSingle();
+          .eq('id', id);
+
+        if (orgId && orgId !== DEFAULT_ORG_ID) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        let { data, error } = await query.maybeSingle();
+
+        if (!data && orgId) {
+          const fallbackRes = await supabase
+            .from('quotations')
+            .select('*, customer:customers(*), items:quotation_items(*)')
+            .eq('id', id)
+            .maybeSingle();
+          if (fallbackRes.data) {
+            data = fallbackRes.data;
+            error = null;
+          }
+        }
 
         if (!error && data) {
           const existing = this.quotations.get(data.id);
@@ -2906,7 +2938,8 @@ class QuoteFlowStore {
     }
 
     const quote = this.quotations.get(id);
-    if (!quote || (orgId && quote.organization_id !== orgId)) return null;
+    if (!quote) return null;
+    if (orgId && orgId !== DEFAULT_ORG_ID && quote.organization_id && quote.organization_id !== orgId) return null;
 
     if (
       ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(quote.status) &&
@@ -3963,7 +3996,12 @@ class QuoteFlowStore {
         throw new Error('This quotation does not have a registered customer mobile number. Please contact the company.');
       }
 
-      if (cleanInputPhone !== registeredPhone) {
+      const matchExact = cleanInputPhone === registeredPhone;
+      const matchSuffix =
+        (cleanInputPhone.length >= 7 && registeredPhone.endsWith(cleanInputPhone)) ||
+        (registeredPhone.length >= 7 && cleanInputPhone.endsWith(registeredPhone));
+
+      if (!matchExact && !matchSuffix) {
         throw new Error(`Mobile number does not match the registered client mobile on quotation ${quote.quotation_number}.`);
       }
 
@@ -4913,12 +4951,18 @@ class QuoteFlowStore {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
-  public async getInvoiceById(id: string, orgId: string = DEFAULT_ORG_ID): Promise<Invoice | null> {
+  public async getInvoiceById(id: string, orgId?: string): Promise<Invoice | null> {
     let inv = this.invoices.get(id);
 
     if (!inv) {
-      await this.loadInvoicesFromSupabase(orgId);
-      inv = this.invoices.get(id);
+      if (orgId && orgId !== DEFAULT_ORG_ID) {
+        await this.loadInvoicesFromSupabase(orgId);
+        inv = this.invoices.get(id);
+      }
+      if (!inv) {
+        await this.loadInvoicesFromSupabase();
+        inv = this.invoices.get(id);
+      }
     }
 
     if (!inv) {
@@ -4931,7 +4975,7 @@ class QuoteFlowStore {
     }
 
     if (!inv) return null;
-    if (inv.organization_id && inv.organization_id !== orgId) return null;
+    if (orgId && orgId !== DEFAULT_ORG_ID && inv.organization_id && inv.organization_id !== orgId) return null;
 
     return {
       ...inv,

@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
     let quote = null;
     if (token) {
       quote = await store.getQuotationByPublicToken(token);
-    } else if (quoteId) {
+    }
+    if (!quote && quoteId) {
       quote = await store.getQuotationById(quoteId);
     }
 
@@ -23,9 +24,7 @@ export async function GET(req: NextRequest) {
     if (!token && quoteId) {
       const auth = await getAuthenticatedUserContext();
       if (auth) {
-        const org = await store.getOrganization(auth.orgId);
-        const activeEnv = org?.mode === 'test' ? 'test' : 'live';
-        if ((quote.environment || 'live') !== activeEnv) {
+        if (quote.organization_id && auth.orgId && quote.organization_id !== auth.orgId) {
           return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
         }
       }

@@ -359,7 +359,9 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const handleDownloadPdf = async () => {
     try {
       setIsDownloadingPdf(true);
-      const res = await fetch(`/api/public/pdf?token=${encodeURIComponent(token)}`);
+      const res = await fetch(
+        `/api/public/pdf?token=${encodeURIComponent(currentToken || token || '')}&id=${encodeURIComponent(quotation.id)}`
+      );
       if (!res.ok) throw new Error('Failed to generate PDF');
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);

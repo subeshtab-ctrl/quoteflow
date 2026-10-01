@@ -191,7 +191,9 @@ export function QuotationActionButtons({
   const handleDownloadPdf = async () => {
     try {
       setIsDownloadingPdf(true);
-      const res = await fetch(`/api/public/pdf?id=${quotationId}`);
+      const res = await fetch(
+        `/api/public/pdf?id=${encodeURIComponent(quotationId)}${publicToken ? `&token=${encodeURIComponent(publicToken)}` : ''}`
+      );
       if (!res.ok) throw new Error('PDF generation failed');
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);

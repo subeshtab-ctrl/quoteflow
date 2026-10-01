@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
       let quote = null;
       if (token) {
         quote = await store.getQuotationByPublicToken(token);
-      } else if (quoteId) {
+      }
+      if (!quote && quoteId) {
         quote = await store.getQuotationById(quoteId);
       }
 
