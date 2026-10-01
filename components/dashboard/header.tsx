@@ -15,6 +15,7 @@ import {
   Loader2,
   FlaskConical,
   ShieldCheck,
+  GraduationCap,
 } from 'lucide-react';
 import { Notification } from '@/types/database';
 import { formatDateTime } from '@/lib/utils';
@@ -285,6 +286,15 @@ export function DashboardHeader({
               </div>
 
               <div className="py-1 space-y-0.5">
+                <Link
+                  href="/training"
+                  onClick={() => setIsProfileOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <GraduationCap className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Training & Guides</span>
+                </Link>
+
                 <Link
                   href="/settings"
                   onClick={() => setIsProfileOpen(false)}

@@ -13,6 +13,7 @@ import {
   BarChart3,
   Settings,
   Building2,
+  GraduationCap,
 } from 'lucide-react';
 import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } from '@/lib/utils/logo';
 
@@ -63,6 +64,7 @@ export function DashboardSidebar({
     { name: 'Customers', href: '/customers', icon: Users },
     { name: 'Products & Services', href: '/products', icon: Package },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
+    { name: 'Training & Guides', href: '/training', icon: GraduationCap },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
