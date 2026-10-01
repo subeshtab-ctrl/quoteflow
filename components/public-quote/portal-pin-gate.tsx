@@ -19,7 +19,7 @@ interface PortalPinGateProps {
   quotationNumber: string;
   companyName: string;
   hasPin: boolean;
-  authMethod?: 'MOBILE' | 'EMAIL';
+  authMethod?: 'MOBILE' | 'EMAIL' | 'BOTH';
   phoneCountryCode?: string;
   customerPhoneMasked?: string;
   customerEmailMasked?: string;
@@ -37,7 +37,12 @@ export function PortalPinGate({
   customerEmailMasked,
   onAuthenticated,
 }: PortalPinGateProps) {
-  const isMobile = authMethod === 'MOBILE';
+  const isBoth = authMethod === 'BOTH';
+  const [selectedMethod, setSelectedMethod] = useState<'MOBILE' | 'EMAIL'>(
+    authMethod === 'EMAIL' ? 'EMAIL' : 'MOBILE'
+  );
+  const isMobile = selectedMethod === 'MOBILE';
+
   const [mode, setMode] = useState<'VERIFY' | 'REGISTER_CREDENTIAL' | 'REGISTER_PIN' | 'RESET'>(
     initialHasPin ? 'VERIFY' : 'REGISTER_CREDENTIAL'
   );
@@ -65,6 +70,7 @@ export function PortalPinGate({
 
     try {
       setLoading(true);
+      const isEmailInput = cleanCred.includes('@') || !isMobile;
       const res = await fetch('/api/public/portal-auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,8 +79,8 @@ export function PortalPinGate({
           action: 'check_credential',
           authMethod,
           credential: cleanCred,
-          phone: isMobile ? cleanCred : undefined,
-          email: !isMobile ? cleanCred : undefined,
+          phone: !isEmailInput ? cleanCred : undefined,
+          email: isEmailInput ? cleanCred : undefined,
         }),
       });
 
@@ -335,6 +341,35 @@ export function PortalPinGate({
         {mode === 'REGISTER_CREDENTIAL' && (
           <form onSubmit={handleCheckCredential} className="space-y-4">
             <div className="space-y-2">
+              {isBoth && (
+                <div className="flex p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedMethod('MOBILE'); setCredential(''); setError(null); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      isMobile
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Smartphone className="h-3.5 w-3.5" />
+                    <span>Mobile Number</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedMethod('EMAIL'); setCredential(''); setError(null); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      !isMobile
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    <span>Email Address</span>
+                  </button>
+                </div>
+              )}
+
               <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-900 dark:text-indigo-200">
                 <p className="font-semibold mb-1 flex items-center gap-1.5">
                   <Lock className="h-3.5 w-3.5 text-indigo-600" />
@@ -361,7 +396,10 @@ export function PortalPinGate({
                     <input
                       type="tel"
                       value={credential}
-                      onChange={(e) => setCredential(e.target.value.replace(/[^\d\s]/g, ''))}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^\d\s\+]/g, '');
+                        setCredential(val);
+                      }}
                       placeholder="e.g. 98765 43210 (without country code)"
                       autoFocus
                       required

@@ -1,14 +1,1 @@
-feat: strict live and test environment isolation and UI cleanup
-
-- UI Cleanup: TestModeBanner returns null in live mode (completely hidden)
-- Header: mode indicator pill hidden in live mode; only shown in test mode
-- Sidebar: mode badges hidden in live mode; only TEST badge in test mode
-- Settings: shows Operating Environment as Live Production Mode with Switch to Test Mode
-- Switching: hard redirect flushes all client caches and synchronizes UI
-- Scoped Queries: dashboard, quotations, invoices, customers, reports all scoped to active environment
-- API Endpoints: /api/quotations, /api/invoices, /api/customers, /api/notifications, /api/export scoped to active environment
-- Cross-Environment Guards: quotation and invoice detail pages and API endpoints return 404 on mismatched environment
-- Document Builders: new quote and invoice pages scope customer dropdowns to active environment
-- Customer Portal: token-based quotation view scopes multi-quote listing to match active quote environment
-- DB Migration: added environment columns with check constraint and RLS isolation policies
-- QA: automated test suite verifying all 18 isolation rules passes with 0 failures
+fix(reports): align environment parameter with test suite assertions

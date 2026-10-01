@@ -47,9 +47,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Determine if this will be a test invoice
+    // Determine if this will be a test invoice (only if explicitly in test mode)
     const org = await store.getOrganization(orgId);
-    const isTest = org?.mode !== 'live';
+    const isTest = org?.mode === 'test';
 
     if (isTest) {
       // Enforce 20 test orders/day quota

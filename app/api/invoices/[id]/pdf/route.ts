@@ -42,7 +42,7 @@ export async function GET(
     // Cross-environment guard
     const org = await store.getOrganization(orgId);
     const activeEnv = org?.mode === 'test' ? 'test' : 'live';
-    if ((invoice.environment || 'live') !== activeEnv) {
+    if (activeEnv === 'test' && invoice.environment !== 'test') {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 

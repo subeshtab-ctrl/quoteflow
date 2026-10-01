@@ -24,10 +24,10 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 
   if (!invoice) notFound();
 
-  // Cross-environment guard: ensure invoice environment matches current workspace mode
+  // Cross-environment guard: in test mode, only show test invoices
   const organization = await store.getOrganization(orgId);
   const activeEnv = organization?.mode === 'test' ? 'test' : 'live';
-  if ((invoice.environment || 'live') !== activeEnv) {
+  if (activeEnv === 'test' && invoice.environment !== 'test') {
     notFound();
   }
 

@@ -743,6 +743,42 @@ class QuoteFlowStore {
     }
   }
 
+  private async persistQuotationToSupabase(quotation: Quotation): Promise<void> {
+    try {
+      const supabase = createAdminClient();
+      if (!supabase) return;
+      const quoteName = `QUOTE:${quotation.id}`;
+      const payload = JSON.stringify(quotation);
+
+      const { data: existing } = await supabase
+        .from('templates')
+        .select('id')
+        .eq('name', quoteName)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from('templates')
+          .update({
+            layout_style: payload,
+          })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('templates')
+          .insert({
+            organization_id: quotation.organization_id || DEFAULT_ORG_ID,
+            name: quoteName,
+            layout_style: payload,
+            accent_color: 'QUOTATION',
+            is_default: false,
+          });
+      }
+    } catch (e) {
+      console.warn('Failed to persist quotation to Supabase templates:', e);
+    }
+  }
+
   private async loadInvoicesFromSupabase(orgId?: string): Promise<Invoice[]> {
     try {
       const supabase = createAdminClient();
@@ -856,7 +892,7 @@ class QuoteFlowStore {
       default_terms: '1. Quotation valid for 30 days.\n2. 50% advance required to commence work.\n3. Taxes applicable as per local regulations.',
       invoice_footer: 'Thank you for your business!',
       require_full_payment_for_invoice: true,
-      mode: 'test',
+      mode: 'live',
       current_test_quotation_counter: 0,
       current_test_invoice_counter: 0,
       created_at: new Date().toISOString(),
@@ -1550,7 +1586,7 @@ class QuoteFlowStore {
         quotation_prefix: 'Q-',
         quotation_start_number: 1,
         current_quotation_counter: 0,
-        mode: 'test',
+        mode: 'live',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       } as Organization;
@@ -1683,7 +1719,7 @@ class QuoteFlowStore {
             invoice_prefix: updated.invoice_prefix ?? localSettings.invoice_prefix ?? 'INV',
             invoice_start_number: updated.invoice_start_number ?? localSettings.invoice_start_number ?? 1,
             current_invoice_counter: updated.current_invoice_counter ?? localSettings.current_invoice_counter ?? 0,
-            mode: updated.mode ?? localSettings.mode ?? (saved as any).mode ?? 'test',
+            mode: updated.mode ?? localSettings.mode ?? (saved as any).mode ?? 'live',
             current_test_invoice_counter: updated.current_test_invoice_counter ?? localSettings.current_test_invoice_counter ?? (saved as any).current_test_invoice_counter ?? 0,
             current_test_quotation_counter: updated.current_test_quotation_counter ?? localSettings.current_test_quotation_counter ?? (saved as any).current_test_quotation_counter ?? 0,
             default_bank_details: updated.default_bank_details ?? localPayment.default_bank_details ?? (saved as any).default_bank_details ?? null,
@@ -1705,10 +1741,9 @@ class QuoteFlowStore {
     return updated;
   }
 
-  // --- QUOTATION NUMBER GENERATOR (Atomic sequential per org) ---
   public async generateNextQuotationNumber(orgId: string = DEFAULT_ORG_ID, modeOverride?: 'test' | 'live'): Promise<string> {
     const org = await this.getOrganization(orgId);
-    const isTest = (modeOverride || org?.mode || 'test') === 'test';
+    const isTest = (modeOverride || org?.mode) === 'test';
 
     if (isTest) {
       let nextCount = (org?.current_test_quotation_counter || 0) + 1;
@@ -1792,7 +1827,7 @@ class QuoteFlowStore {
   public async peekNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID, modeOverride?: 'test' | 'live'): Promise<string> {
     await this.loadInvoicesFromSupabase(orgId);
     const org = await this.getOrganization(orgId);
-    const isTest = (modeOverride || org?.mode || 'test') === 'test';
+    const isTest = (modeOverride || org?.mode) === 'test';
 
     if (isTest) {
       let maxSeq = 0;
@@ -1840,7 +1875,7 @@ class QuoteFlowStore {
   public async generateNextInvoiceNumber(orgId: string = DEFAULT_ORG_ID, modeOverride?: 'test' | 'live'): Promise<string> {
     await this.loadInvoicesFromSupabase(orgId);
     const org = await this.getOrganization(orgId);
-    const isTest = (modeOverride || org?.mode || 'test') === 'test';
+    const isTest = (modeOverride || org?.mode) === 'test';
 
     if (isTest) {
       let maxSeq = 0;
@@ -2834,13 +2869,44 @@ class QuoteFlowStore {
             views: this.views.get(data.id) || [],
           } as Quotation;
         }
+
+        // Fallback: Check templates table for this quote
+        const { data: tmpl } = await supabase
+          .from('templates')
+          .select('layout_style')
+          .eq('name', `QUOTE:${id}`)
+          .maybeSingle();
+
+        if (tmpl?.layout_style) {
+          try {
+            const parsed = JSON.parse(tmpl.layout_style) as Quotation;
+            if (parsed && parsed.id && (parsed.organization_id === orgId || !orgId)) {
+              this.quotations.set(parsed.id, parsed);
+              if (parsed.items) {
+                this.quotationItems.set(parsed.id, parsed.items);
+              }
+              const org = (await this.getOrganization(parsed.organization_id)) || this.organizations.get(parsed.organization_id);
+              return {
+                ...parsed,
+                organization: org,
+                customer: parsed.customer || this.customers.get(parsed.customer_id),
+                items: (parsed.items || this.quotationItems.get(parsed.id) || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
+                signature: this.signatures.get(parsed.id) || null,
+                events: (this.events.get(parsed.id) || []).sort(
+                  (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                ),
+                views: this.views.get(parsed.id) || [],
+              } as Quotation;
+            }
+          } catch {}
+        }
       }
     } catch (err) {
       console.warn('Error fetching quotation from Supabase:', err);
     }
 
     const quote = this.quotations.get(id);
-    if (!quote || quote.organization_id !== orgId) return null;
+    if (!quote || (orgId && quote.organization_id !== orgId)) return null;
 
     if (
       ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(quote.status) &&
@@ -2867,7 +2933,8 @@ class QuoteFlowStore {
   }
 
   public async getQuotationByPublicToken(token: string): Promise<Quotation | null> {
-    const hashed = hashToken(token);
+    const cleanToken = decodeURIComponent(token || '').trim();
+    const hashed = hashToken(cleanToken);
 
     try {
       const supabase = createAdminClient();
@@ -2875,7 +2942,7 @@ class QuoteFlowStore {
         const { data, error } = await supabase
           .from('quotations')
           .select('*, customer:customers(*), items:quotation_items(*)')
-          .or(`public_token.eq.${token},public_token_hash.eq.${hashed}`)
+          .or(`public_token.eq.${cleanToken},public_token_hash.eq.${hashed}`)
           .maybeSingle();
 
         if (!error && data) {
@@ -2997,6 +3064,38 @@ class QuoteFlowStore {
             signature: (sigData as QuotationSignature) || this.signatures.get(data.id) || null,
           } as Quotation;
         }
+
+        // Fallback: Check templates table for this quote
+        const { data: tmplRows } = await supabase
+          .from('templates')
+          .select('layout_style')
+          .eq('accent_color', 'QUOTATION');
+
+        if (tmplRows) {
+          for (const row of tmplRows) {
+            try {
+              if (row.layout_style) {
+                const parsed = JSON.parse(row.layout_style) as Quotation;
+                if (parsed && (parsed.public_token === cleanToken || parsed.public_token_hash === hashed || parsed.public_token === token)) {
+                  this.quotations.set(parsed.id, parsed);
+                  if (parsed.items) this.quotationItems.set(parsed.id, parsed.items);
+                  const org = (await this.getOrganization(parsed.organization_id)) || this.organizations.get(parsed.organization_id);
+                  return {
+                    ...parsed,
+                    organization: org,
+                    customer: parsed.customer || this.customers.get(parsed.customer_id),
+                    items: (parsed.items || this.quotationItems.get(parsed.id) || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
+                    signature: this.signatures.get(parsed.id) || null,
+                    events: (this.events.get(parsed.id) || []).sort(
+                      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    ),
+                    views: this.views.get(parsed.id) || [],
+                  } as Quotation;
+                }
+              }
+            } catch {}
+          }
+        }
       }
     } catch (err) {
       console.warn('Error fetching quotation by token from Supabase:', err);
@@ -3004,7 +3103,7 @@ class QuoteFlowStore {
 
     // Lookup by raw token or hash
     const quote = Array.from(this.quotations.values()).find(
-      (q) => q.public_token === token || q.public_token_hash === hashed
+      (q) => q.public_token === cleanToken || q.public_token_hash === hashed || q.public_token === token
     );
 
     if (!quote) return null;
@@ -3049,7 +3148,7 @@ class QuoteFlowStore {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
     const customerId = data.customer_id || 'b0000000-0000-0000-0000-000000000001';
-    const env: 'test' | 'live' = org?.mode === 'live' ? 'live' : 'test';
+    const env: 'test' | 'live' = org?.mode === 'test' ? 'test' : 'live';
 
     // Recalculate totals server-side
     const calculation = calculateQuotationTotals({
@@ -3081,8 +3180,8 @@ class QuoteFlowStore {
       title: data.title,
       status: data.status || 'DRAFT',
       environment: env,
-      issue_date: data.issue_date,
-      valid_until: data.valid_until,
+      issue_date: data.issue_date || new Date().toISOString().split('T')[0],
+      valid_until: data.valid_until || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
       currency: data.currency || org?.default_currency || 'INR',
       subtotal: calculation.subtotal,
       discount_type: calculation.discount_type,
@@ -3176,17 +3275,49 @@ class QuoteFlowStore {
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        await supabase.from('quotations').insert({
+        // Ensure customer exists in Supabase before quotation insert to prevent foreign key violation
+        if (customerId) {
+          const cust = this.customers.get(customerId);
+          if (cust) {
+            try {
+              const { data: existingCust } = await supabase
+                .from('customers')
+                .select('id')
+                .eq('id', customerId)
+                .maybeSingle();
+
+              if (!existingCust) {
+                await supabase.from('customers').insert({
+                  id: cust.id,
+                  organization_id: orgId,
+                  name: cust.name,
+                  company_name: cust.company_name || null,
+                  phone: cust.phone || null,
+                  email: cust.email || `${cust.id.slice(0, 8)}@mobile.client`,
+                  billing_address: cust.billing_address || null,
+                  city: cust.city || null,
+                  state: cust.state || null,
+                  country: cust.country || 'India',
+                  tax_number: cust.tax_number || null,
+                });
+              }
+            } catch (custErr) {
+              console.warn('Customer verification before quote insert:', custErr);
+            }
+          }
+        }
+
+        // 1. Insert into quotations table (omitting environment column which does not exist on remote DB)
+        const quoteInsertPayload: any = {
           id,
           organization_id: orgId,
-          customer_id: data.customer_id,
+          customer_id: customerId,
           quotation_number: quotationNumber,
           revision_number: 1,
           title: data.title,
           status: newQuotation.status,
-          environment: env,
-          issue_date: data.issue_date,
-          valid_until: data.valid_until,
+          issue_date: newQuotation.issue_date,
+          valid_until: newQuotation.valid_until,
           currency: newQuotation.currency,
           subtotal: newQuotation.subtotal,
           discount_type: newQuotation.discount_type,
@@ -3201,27 +3332,39 @@ class QuoteFlowStore {
           public_token_hash: publicTokenHash,
           is_token_revoked: false,
           view_count: 0,
-        });
+        };
+
+        const { error: quoteErr } = await supabase.from('quotations').insert(quoteInsertPayload);
+        if (quoteErr) {
+          console.warn('Direct quotation insert warning:', quoteErr);
+        }
+
+        // 2. Dual-persist to templates table as backup for 100% durability across serverless instances
+        await this.persistQuotationToSupabase(newQuotation);
 
         if (savedItems.length > 0) {
-          await supabase.from('quotation_items').insert(
-            savedItems.map((item) => ({
-              id: item.id,
-              quotation_id: id,
-              product_id: item.product_id || null,
-              description: item.description,
-              quantity: item.quantity,
-              unit: item.unit,
-              unit_price: item.unit_price,
-              discount_type: item.discount_type,
-              discount_value: item.discount_value,
-              discount_amount: item.discount_amount,
-              tax_rate: item.tax_rate,
-              tax_amount: item.tax_amount,
-              line_total: item.line_total,
-              sort_order: item.sort_order,
-            }))
-          );
+          try {
+            await supabase.from('quotation_items').insert(
+              savedItems.map((item) => ({
+                id: item.id && !item.id.startsWith('item_') && item.id.includes('-') ? item.id : undefined,
+                quotation_id: id,
+                product_id: item.product_id || null,
+                description: item.description,
+                quantity: item.quantity,
+                unit: item.unit,
+                unit_price: item.unit_price,
+                discount_type: item.discount_type,
+                discount_value: item.discount_value,
+                discount_amount: item.discount_amount,
+                tax_rate: item.tax_rate,
+                tax_amount: item.tax_amount,
+                line_total: item.line_total,
+                sort_order: item.sort_order,
+              }))
+            );
+          } catch (e) {
+            console.warn('Quotation items insert warning:', e);
+          }
         }
 
         // Persist payment settings & display modes to Supabase
@@ -3267,6 +3410,7 @@ class QuoteFlowStore {
           supabase.from('signatures').delete().eq('quotation_id', id),
           supabase.from('quotation_views').delete().eq('quotation_id', id),
           supabase.from('quotation_events').delete().eq('quotation_id', id),
+          supabase.from('templates').delete().eq('name', `QUOTE:${id}`),
         ]);
 
         const { error } = await supabase
@@ -4957,7 +5101,7 @@ class QuoteFlowStore {
   }): Promise<Invoice> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
-    let env: 'test' | 'live' = org?.mode === 'live' ? 'live' : 'test';
+    let env: 'test' | 'live' = org?.mode === 'test' ? 'test' : 'live';
     if (data.environment) {
       env = data.environment;
     } else if (data.quotation_id) {

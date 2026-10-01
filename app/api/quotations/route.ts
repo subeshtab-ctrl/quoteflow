@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const validated = QuotationFormSchema.parse(body);
 
-    // Determine if this will be a test quotation
+    // Determine if this will be a test quotation (only if explicitly in test mode)
     const org = await store.getOrganization(orgId);
-    const isTest = org?.mode !== 'live';
+    const isTest = org?.mode === 'test';
 
     if (isTest) {
       // Enforce 20 test orders/day quota

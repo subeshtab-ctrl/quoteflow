@@ -22,7 +22,7 @@ export async function GET(
     const org = await store.getOrganization(orgId);
     const activeEnv = org?.mode === 'test' ? 'test' : 'live';
     const recordEnv = (invoice as any).environment ?? 'live';
-    if (recordEnv !== activeEnv) {
+    if (activeEnv === 'test' && recordEnv !== 'test') {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 

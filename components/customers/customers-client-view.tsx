@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   Pencil,
+  FileSpreadsheet,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -47,6 +48,23 @@ export function CustomersClientView({
   const [isLoading, setIsLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportExcel = () => {
+    try {
+      setIsExporting(true);
+      const link = document.createElement('a');
+      link.href = '/api/customers/export';
+      link.setAttribute('download', `customers_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) {
+      console.error('Export error:', e);
+    } finally {
+      setTimeout(() => setIsExporting(false), 1200);
+    }
+  };
 
   const defaultCountryCode = getDefaultCountryCode(organizationCountry);
 
@@ -259,10 +277,27 @@ export function CustomersClientView({
           </p>
         </div>
 
-        <Button onClick={() => setIsAddOpen(true)} className="gap-2 shadow-md">
-          <Plus className="h-4 w-4" />
-          <span>Add Customer</span>
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleExportExcel}
+            disabled={isExporting || customers.length === 0}
+            className="gap-2 border-slate-200 dark:border-slate-800 bg-white hover:bg-slate-50 text-slate-700 shadow-sm"
+          >
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+            ) : (
+              <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+            )}
+            <span>{isExporting ? 'Exporting...' : 'Export to Excel'}</span>
+          </Button>
+
+          <Button onClick={() => setIsAddOpen(true)} className="gap-2 shadow-md">
+            <Plus className="h-4 w-4" />
+            <span>Add Customer</span>
+          </Button>
+        </div>
       </div>
 
       {/* Search Bar */}

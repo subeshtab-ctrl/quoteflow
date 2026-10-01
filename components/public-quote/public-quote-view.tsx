@@ -56,7 +56,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasPin, setHasPin] = useState(false);
-  const [authMethod, setAuthMethod] = useState<'MOBILE' | 'EMAIL'>('MOBILE');
+  const [authMethod, setAuthMethod] = useState<'MOBILE' | 'EMAIL' | 'BOTH'>('MOBILE');
   const [phoneCountryCode, setPhoneCountryCode] = useState('+91');
   const [customerPhoneMasked, setCustomerPhoneMasked] = useState('');
   const [customerEmailMasked, setCustomerEmailMasked] = useState('');

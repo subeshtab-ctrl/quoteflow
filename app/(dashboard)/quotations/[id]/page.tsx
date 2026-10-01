@@ -59,10 +59,10 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
   if (!quotation) notFound();
 
-  // Cross-environment guard: ensure quotation environment matches current workspace mode
+  // Cross-environment guard: in test mode, only show test quotations
   const organization = await store.getOrganization(orgId);
   const activeEnv = organization?.mode === 'test' ? 'test' : 'live';
-  if ((quotation.environment || 'live') !== activeEnv) {
+  if (activeEnv === 'test' && quotation.environment !== 'test') {
     notFound();
   }
 

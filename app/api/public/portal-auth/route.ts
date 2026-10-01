@@ -22,7 +22,8 @@ function generateAuthSecret(quotationId: string, pinHash: string): string {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const token = searchParams.get('token');
+    const rawToken = searchParams.get('token');
+    const token = rawToken ? decodeURIComponent(rawToken).trim() : null;
 
     if (!token) {
       return NextResponse.json({ error: 'Token is required' }, { status: 400 });
@@ -89,7 +90,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token, action, email, phone, credential, pin } = body;
+    const { token: rawToken, action, email, phone, credential, pin } = body;
+    const token = rawToken ? decodeURIComponent(rawToken).trim() : '';
 
     if (!token) {
       return NextResponse.json({ error: 'Quotation token is required' }, { status: 400 });
@@ -118,35 +120,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'check_credential' || action === 'check_email' || action === 'check_phone') {
-      const isEmailInput = Boolean(email || (credential && credential.includes('@')) || action === 'check_email');
-      const isMobile = action === 'check_phone' || (!isEmailInput && (authMethod === 'MOBILE' || (credential && !credential.includes('@'))));
+      const inputVal = (credential || phone || email || '').trim();
+      const isEmailInput = Boolean(inputVal.includes('@') || action === 'check_email');
 
-      if (isMobile) {
-        const cleanInput = cleanPhoneNumber(phone || credential || '', phoneCountryCode);
-        if (!cleanInput) {
-          return NextResponse.json(
-            { error: 'Mobile number is required (without country code)' },
-            { status: 400 }
-          );
-        }
-        if (!customerPhone) {
-          return NextResponse.json(
-            { error: 'No customer mobile number registered on this quotation. Please contact the company.' },
-            { status: 400 }
-          );
-        }
-        if (cleanInput !== customerPhone) {
-          return NextResponse.json(
-            {
-              error: `Mobile number does not match the registered client mobile on quotation ${quotation.quotation_number}.`,
-              matches: false,
-            },
-            { status: 400 }
-          );
-        }
-        return NextResponse.json({ success: true, matches: true });
-      } else {
-        const cleanInput = (email || credential || '').toLowerCase().trim();
+      if (isEmailInput) {
+        const cleanInput = inputVal.toLowerCase().trim();
         if (!cleanInput) {
           return NextResponse.json({ error: 'Email address is required' }, { status: 400 });
         }
@@ -165,13 +143,43 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
-        return NextResponse.json({ success: true, matches: true });
+        return NextResponse.json({ success: true, matches: true, verifiedVia: 'EMAIL' });
+      } else {
+        const cleanInput = cleanPhoneNumber(inputVal, phoneCountryCode);
+        if (!cleanInput) {
+          return NextResponse.json(
+            { error: 'Mobile number is required' },
+            { status: 400 }
+          );
+        }
+        if (!customerPhone) {
+          return NextResponse.json(
+            { error: 'No customer mobile number registered on this quotation. Please contact the company.' },
+            { status: 400 }
+          );
+        }
+        const matchExact = cleanInput === customerPhone;
+        const matchSuffix = (cleanInput.length >= 7 && customerPhone.endsWith(cleanInput)) ||
+                            (customerPhone.length >= 7 && cleanInput.endsWith(customerPhone));
+        if (!matchExact && !matchSuffix) {
+          return NextResponse.json(
+            {
+              error: `Mobile number does not match the registered client mobile on quotation ${quotation.quotation_number}.`,
+              matches: false,
+            },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ success: true, matches: true, verifiedVia: 'MOBILE' });
       }
     }
 
     if (action === 'register') {
-      const isEmailInput = Boolean(email || (credential && credential.includes('@')));
-      const effectiveCredential = credential || (isEmailInput ? email : (phone || email));
+      const rawCred = (credential || email || phone || '').trim();
+      const isEmailInput = Boolean(rawCred.includes('@') || action === 'check_email');
+      const cleanPhoneCred = isEmailInput ? '' : cleanPhoneNumber(rawCred, phoneCountryCode);
+      const effectiveCredential = isEmailInput ? rawCred.toLowerCase() : (cleanPhoneCred || rawCred);
+
       if (!effectiveCredential || !pin) {
         return NextResponse.json(
           {
