@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { generateQuotationPdf } from '@/lib/pdf/generator';
+import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,6 +18,17 @@ export async function GET(req: NextRequest) {
 
     if (!quote) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
+    }
+
+    if (!token && quoteId) {
+      const auth = await getAuthenticatedUserContext();
+      if (auth) {
+        const org = await store.getOrganization(auth.orgId);
+        const activeEnv = org?.mode === 'test' ? 'test' : 'live';
+        if ((quote.environment || 'live') !== activeEnv) {
+          return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
+        }
+      }
     }
 
     const pdfBytes = await generateQuotationPdf(quote);

@@ -26,19 +26,18 @@ interface InvoicesPageProps {
   searchParams: Promise<{
     status?: string;
     search?: string;
-    env?: string;
   }>;
 }
 
 export default async function InvoicesPage({ searchParams }: InvoicesPageProps) {
-  const { status, search, env } = await searchParams;
+  const { status, search } = await searchParams;
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const [invoices, organization] = await Promise.all([
-    store.getInvoices(orgId, { status, search, environment: env }),
-    store.getOrganization(orgId),
-  ]);
+  const organization = await store.getOrganization(orgId);
+  const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const invoices = await store.getInvoices(orgId, { status, search, environment: env });
 
   return (
     <DashboardLayout>
@@ -69,7 +68,6 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
         <InvoicesFilterTabs
           currentStatus={status || 'ALL'}
           currentSearch={search || ''}
-          currentEnvironment={env || 'ALL'}
         />
 
         {/* Invoices Table */}
@@ -131,7 +129,7 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
                           >
                             <span>{inv.invoice_number}</span>
                           </Link>
-                          {inv.environment === 'test' && (
+                          {inv.environment === 'test' && env === 'test' && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
                               🧪 TEST
                             </span>

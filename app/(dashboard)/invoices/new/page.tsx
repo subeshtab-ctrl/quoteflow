@@ -22,18 +22,23 @@ export default async function NewInvoicePage({ searchParams }: NewInvoicePagePro
   const { from_quote_id } = await searchParams;
   const orgId = auth.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const [organization, customers, products, fromQuotation, nextInvoiceNumber, existingInvoices] = await Promise.all([
-    store.getOrganization(orgId),
-    store.getCustomers(orgId),
-    store.getProducts(orgId),
-    from_quote_id ? store.getQuotationById(from_quote_id, orgId) : Promise.resolve(null),
-    store.peekNextInvoiceNumber(orgId),
-    from_quote_id ? store.getInvoices(orgId) : Promise.resolve([]),
-  ]);
-
+  const organization = await store.getOrganization(orgId);
   if (!organization) {
     redirect('/onboarding');
   }
+
+  const activeEnv = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const [customers, products, rawFromQuote, nextInvoiceNumber, existingInvoices] = await Promise.all([
+    store.getCustomers(orgId, { environment: activeEnv }),
+    store.getProducts(orgId),
+    from_quote_id ? store.getQuotationById(from_quote_id, orgId) : Promise.resolve(null),
+    store.peekNextInvoiceNumber(orgId),
+    from_quote_id ? store.getInvoices(orgId, { environment: activeEnv }) : Promise.resolve([]),
+  ]);
+
+  // Security: only allow converting quotation if its environment matches current workspace
+  const fromQuotation = rawFromQuote && (rawFromQuote.environment || 'live') === activeEnv ? rawFromQuote : null;
 
   const existingInvoice = from_quote_id && existingInvoices
     ? existingInvoices.find((inv) => inv.quotation_id === from_quote_id)

@@ -1447,7 +1447,7 @@ class QuoteFlowStore {
             mode:
               localSettings.mode !== undefined
                 ? localSettings.mode
-                : ((data as any).mode || 'test'),
+                : ((data as any).mode || 'live'),
             current_test_invoice_counter:
               localSettings.current_test_invoice_counter !== undefined
                 ? localSettings.current_test_invoice_counter
@@ -1497,7 +1497,7 @@ class QuoteFlowStore {
           localSettings.current_invoice_counter !== undefined
             ? localSettings.current_invoice_counter
             : cached.current_invoice_counter ?? 0,
-        mode: localSettings.mode !== undefined ? localSettings.mode : (cached.mode ?? 'test'),
+        mode: localSettings.mode !== undefined ? localSettings.mode : (cached.mode ?? 'live'),
         current_test_invoice_counter:
           localSettings.current_test_invoice_counter !== undefined
             ? localSettings.current_test_invoice_counter
@@ -4651,11 +4651,12 @@ class QuoteFlowStore {
     const orgId = activeQuotation.organization_id;
     const customerId = activeQuotation.customer_id;
     const org = activeQuotation.organization || (await this.getOrganization(orgId)) || this.organizations.get(orgId);
-    const allOrgQuotes = await this.getQuotations(orgId, { customerId });
+    const activeEnv = (activeQuotation.environment || 'live') as 'live' | 'test';
+    const allOrgQuotes = await this.getQuotations(orgId, { customerId, environment: activeEnv });
 
-    // Filter quotes for this customer, excluding drafts
+    // Filter quotes for this customer, excluding drafts and mismatched environments
     const customerQuotes: Quotation[] = allOrgQuotes
-      .filter((q) => q.customer_id === customerId && q.status !== 'DRAFT' && q.status !== 'CANCELLED')
+      .filter((q) => q.customer_id === customerId && q.status !== 'DRAFT' && q.status !== 'CANCELLED' && (q.environment || 'live') === activeEnv)
       .map((q) => ({
         ...q,
         organization: org || activeQuotation.organization,
@@ -5499,9 +5500,17 @@ class QuoteFlowStore {
   }
 
   // --- NOTIFICATIONS ---
-  public async getNotifications(orgId: string = DEFAULT_ORG_ID): Promise<Notification[]> {
+  public async getNotifications(
+    orgId: string = DEFAULT_ORG_ID,
+    options?: { environment?: 'live' | 'test' }
+  ): Promise<Notification[]> {
+    const env = options?.environment ?? 'live';
     return Array.from(this.notifications.values())
-      .filter((n) => n.organization_id === orgId)
+      .filter((n) => {
+        if (n.organization_id !== orgId) return false;
+        const nEnv = (n as any).environment || (n.quotation_id ? this.quotations.get(n.quotation_id)?.environment : undefined) || 'live';
+        return nEnv === env;
+      })
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
@@ -5528,8 +5537,10 @@ class QuoteFlowStore {
     message: string,
     type: 'VIEWED' | 'APPROVED' | 'REJECTED' | 'EXPIRING'
   ) {
+    const q = this.quotations.get(quotationId);
+    const env = (q?.environment || 'live') as 'live' | 'test';
     const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const notif: Notification = {
+    const notif: Notification & { environment?: string } = {
       id,
       organization_id: orgId,
       quotation_id: quotationId,
@@ -5538,8 +5549,9 @@ class QuoteFlowStore {
       type,
       is_read: false,
       created_at: new Date().toISOString(),
+      environment: env,
     };
-    this.notifications.set(id, notif);
+    this.notifications.set(id, notif as Notification);
   }
 
   // --- VALIDITY DATE & CHAT HELPERS ---
@@ -5886,10 +5898,13 @@ class QuoteFlowStore {
   }
 
   // --- ANALYTICS ---
-  public async getDashboardAnalytics(orgId: string = DEFAULT_ORG_ID) {
-    const allQuotes = await this.getQuotations(orgId);
-    // CRITICAL: Test documents MUST NOT pollute live financial totals
-    const quotes = allQuotes.filter((q) => q.environment !== 'test');
+  public async getDashboardAnalytics(
+    orgId: string = DEFAULT_ORG_ID,
+    options?: { environment?: 'live' | 'test' }
+  ) {
+    // Default to live environment — analytics must NEVER mix live + test data
+    const env = options?.environment ?? 'live';
+    const quotes = await this.getQuotations(orgId, { environment: env });
 
     const totalCount = quotes.length;
     const draftCount = quotes.filter((q) => q.status === 'DRAFT').length;

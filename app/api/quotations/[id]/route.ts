@@ -17,6 +17,13 @@ export async function GET(req: NextRequest, { params }: RouteProps) {
   if (!quote) {
     return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
   }
+  // SECURITY: Cross-environment guard — never expose a record from the wrong environment
+  const org = await store.getOrganization(orgId);
+  const activeEnv = org?.mode === 'test' ? 'test' : 'live';
+  const recordEnv = (quote as any).environment ?? 'live';
+  if (recordEnv !== activeEnv) {
+    return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
+  }
   return NextResponse.json({ success: true, quotation: quote });
 }
 

@@ -23,7 +23,7 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
     initials = auth.email.slice(0, 2).toUpperCase();
   }
 
-  const isTestMode = (auth.organization.mode || 'test') === 'test';
+  const isTestMode = auth.organization.mode === 'test';
 
   const userProfile: UserProfileInfo = {
     id: auth.userId,

@@ -40,10 +40,10 @@ export default async function QuotationsPage({ searchParams }: QuotationsPagePro
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const [quotations, organization] = await Promise.all([
-    store.getQuotations(orgId, { status, search }),
-    store.getOrganization(orgId),
-  ]);
+  const organization = await store.getOrganization(orgId);
+  const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const quotations = await store.getQuotations(orgId, { status, search, environment: env });
 
   return (
     <DashboardLayout>

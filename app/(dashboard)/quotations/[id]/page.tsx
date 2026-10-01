@@ -59,6 +59,13 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
   if (!quotation) notFound();
 
+  // Cross-environment guard: ensure quotation environment matches current workspace mode
+  const organization = await store.getOrganization(orgId);
+  const activeEnv = organization?.mode === 'test' ? 'test' : 'live';
+  if ((quotation.environment || 'live') !== activeEnv) {
+    notFound();
+  }
+
   // Mark customer chat as read ONLY when this quotation is opened from the dashboard
   await store.markQuotationChatRead(id, quotation.organization_id, auth?.fullName || auth?.email || 'Staff');
 

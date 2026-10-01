@@ -11,9 +11,10 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') || undefined;
     const search = searchParams.get('search') || undefined;
     const customerId = searchParams.get('customerId') || undefined;
-    const environment = searchParams.get('environment') || searchParams.get('env') || undefined;
+    const org = await store.getOrganization(orgId);
+    const activeEnv = (org?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
 
-    const invoices = await store.getInvoices(orgId, { status, search, customerId, environment });
+    const invoices = await store.getInvoices(orgId, { status, search, customerId, environment: activeEnv });
 
     return NextResponse.json({ success: true, invoices });
   } catch (err: any) {

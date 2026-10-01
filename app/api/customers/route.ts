@@ -6,7 +6,9 @@ import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 export async function GET() {
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
-  const customers = await store.getCustomers(orgId);
+  const org = await store.getOrganization(orgId);
+  const env = (org?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+  const customers = await store.getCustomers(orgId, { environment: env });
   return NextResponse.json({ success: true, customers });
 }
 
@@ -16,6 +18,10 @@ export async function POST(req: NextRequest) {
     const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
     const body = await req.json();
     const validated = CustomerFormSchema.parse(body);
+
+    // Tag customer with current org environment so it's isolated from the start
+    const org = await store.getOrganization(orgId);
+    const env = org?.mode === 'test' ? 'test' : 'live';
 
     const customer = await store.createCustomer({
       organization_id: orgId,
@@ -34,6 +40,7 @@ export async function POST(req: NextRequest) {
       postal_code: validated.postal_code,
       tax_number: validated.tax_number,
       notes: validated.notes,
+      environment: env,
     });
 
     return NextResponse.json({ success: true, customer });

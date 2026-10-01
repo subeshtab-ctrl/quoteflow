@@ -18,6 +18,14 @@ export async function GET(
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
+    // SECURITY: Cross-environment guard — never expose a record from the wrong environment
+    const org = await store.getOrganization(orgId);
+    const activeEnv = org?.mode === 'test' ? 'test' : 'live';
+    const recordEnv = (invoice as any).environment ?? 'live';
+    if (recordEnv !== activeEnv) {
+      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+    }
+
     return NextResponse.json({ success: true, invoice });
   } catch (err: any) {
     console.error('Error fetching invoice:', err);

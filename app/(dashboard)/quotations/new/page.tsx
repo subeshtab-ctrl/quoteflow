@@ -10,10 +10,12 @@ export default async function NewQuotationPage() {
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const [customers, products, organization] = await Promise.all([
-    store.getCustomers(orgId),
+  const organization = await store.getOrganization(orgId);
+  const activeEnv = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const [customers, products] = await Promise.all([
+    store.getCustomers(orgId, { environment: activeEnv }),
     store.getProducts(orgId),
-    store.getOrganization(orgId),
   ]);
 
   return (

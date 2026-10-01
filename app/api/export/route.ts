@@ -74,10 +74,10 @@ async function handleExport(params: ExportParams) {
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const [allQuotations, organization] = await Promise.all([
-    store.getQuotations(orgId),
-    store.getOrganization(orgId),
-  ]);
+  const organization = await store.getOrganization(orgId);
+  const activeEnv = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const allQuotations = await store.getQuotations(orgId, { environment: activeEnv });
 
   const { start, end, label: dateRangeLabel } = computeDateRange(params);
 

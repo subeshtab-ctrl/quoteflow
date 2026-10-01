@@ -166,34 +166,18 @@ export function DashboardHeader({
 
       {/* Right Navigation & Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Operating Environment Mode Indicator */}
-        <Link
-          href="/settings"
-          className={
-            (userProfile?.mode || 'live') === 'test'
-              ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs'
-              : 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 transition-colors shadow-2xs'
-          }
-          title={
-            (userProfile?.mode || 'live') === 'test'
-              ? 'Workspace is in Test / Demo Mode. Click to manage in Settings.'
-              : 'Workspace is in Live Production Mode. Click to manage in Settings.'
-          }
-        >
-          {(userProfile?.mode || 'live') === 'test' ? (
-            <>
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              <FlaskConical className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden sm:inline">Test Mode</span>
-            </>
-          ) : (
-            <>
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden sm:inline">Live Mode</span>
-            </>
-          )}
-        </Link>
+        {/* Operating Environment Indicator — only shown in Test mode, never in Live */}
+        {(userProfile?.mode || 'live') === 'test' && (
+          <Link
+            href="/settings"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs"
+            title="Workspace is in Test / Demo Mode. Click to manage in Settings."
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <FlaskConical className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">Test Mode</span>
+          </Link>
+        )}
 
         {/* Soft Dark Mode Toggle */}
         <ThemeToggle />

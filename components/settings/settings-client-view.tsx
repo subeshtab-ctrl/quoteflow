@@ -136,13 +136,9 @@ export function SettingsClientView({
       }
       setOrg((prev) => ({ ...prev, mode: targetMode }));
       setIsSwitchModeModalOpen(false);
-      setSuccessMsg(
-        targetMode === 'live'
-          ? 'Switched to Live Production Mode successfully!'
-          : 'Switched to Test / Demo Mode successfully!'
-      );
-      router.refresh();
-      setTimeout(() => setSuccessMsg(null), 4000);
+      // Hard redirect to flush all cached data across tabs and synchronize UI to the new environment
+      window.location.href = targetMode === 'test' ? '/test/dashboard' : '/settings';
+      return;
     } catch (err: any) {
       setErrorMsg(err.message || 'Error updating operating mode');
     } finally {
@@ -712,17 +708,23 @@ export function SettingsClientView({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <FlaskConical className="h-5 w-5 text-amber-500" />
+                {org.mode === 'live' ? (
+                  <ShieldCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <FlaskConical className="h-5 w-5 text-amber-500" />
+                )}
                 <span>Operating Environment & Document Mode</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Toggle between Test / Demo mode for staff training and Live Production mode for legally binding commercial documents.
+                {org.mode === 'live'
+                  ? 'Your workspace is operating in Live Production Mode. All documents issued are legally binding commercial records.'
+                  : 'Your workspace is in isolated Test / Demo Mode for safe staff onboarding and sandbox testing.'}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {org.mode === 'live' ? (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   Live Production Mode
                 </span>
               ) : (
@@ -739,12 +741,12 @@ export function SettingsClientView({
               <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 {org.mode === 'live'
                   ? 'Currently issuing live, legally binding commercial documents'
-                  : 'Currently in safe demonstration mode (watermarked, zero financial impact)'}
+                  : 'Documents here are TEST documents'}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl leading-relaxed">
                 {org.mode === 'live'
                   ? 'All invoices and quotations issued are official commercial records. Live invoices cannot be permanently deleted once issued, only cancelled or voided with an immutable audit log.'
-                  : 'Test invoices and quotes are clearly labelled, generate watermarked PDFs, will not trigger customer emails or affect your dashboard analytics, and can be permanently deleted by owners or administrators.'}
+                  : 'Test invoices and quotes are clearly labelled, generate watermarked PDFs, will not trigger customer emails or affect your live dashboard analytics, and can be permanently deleted by owners or administrators.'}
               </p>
             </div>
 
@@ -756,9 +758,9 @@ export function SettingsClientView({
                   size="sm"
                   onClick={() => openSwitchModeModal('test')}
                   disabled={currentUserRole === 'STAFF'}
-                  className="gap-2 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                  className="gap-2 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  <FlaskConical className="h-4 w-4 text-amber-600" />
+                  <FlaskConical className="h-4 w-4 text-slate-600 dark:text-slate-400" />
                   <span>Switch to Test Mode</span>
                 </Button>
               ) : (
@@ -770,7 +772,7 @@ export function SettingsClientView({
                   className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  <span>Switch to Live Mode</span>
+                  <span>Switch to Live Production</span>
                 </Button>
               )}
             </div>
@@ -2328,7 +2330,7 @@ export function SettingsClientView({
                 }
               >
                 {isSwitchingMode && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                {targetMode === 'live' ? 'Switch to Live Mode' : 'Switch to Test Mode'}
+                {targetMode === 'live' ? 'Switch to Live Production' : 'Switch to Test Mode'}
               </Button>
             </div>
           </div>

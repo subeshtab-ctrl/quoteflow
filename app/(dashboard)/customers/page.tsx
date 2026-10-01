@@ -12,9 +12,11 @@ export default async function CustomersPage() {
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const customers = await store.getCustomers(orgId);
-  const quotations = await store.getQuotations(orgId);
   const organization = await store.getOrganization(orgId);
+  const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const customers = await store.getCustomers(orgId, { environment: env });
+  const quotations = await store.getQuotations(orgId, { environment: env });
 
   return (
     <DashboardLayout>

@@ -11,6 +11,11 @@ export async function TestLayout({ children }: { children: React.ReactNode }) {
     redirect('/login');
   }
 
+  // Strict isolation: if organization is in live production mode, redirect to live dashboard
+  if ((auth.organization.mode || 'live') === 'live') {
+    redirect('/dashboard');
+  }
+
   // Seed demo customers for this org if not already present
   await store.seedTestDemoCustomers(auth.orgId);
 

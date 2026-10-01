@@ -39,6 +39,13 @@ export async function GET(
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
+    // Cross-environment guard
+    const org = await store.getOrganization(orgId);
+    const activeEnv = org?.mode === 'test' ? 'test' : 'live';
+    if ((invoice.environment || 'live') !== activeEnv) {
+      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+    }
+
     const pdfBytes = await generateInvoicePdf(invoice);
 
     return new NextResponse(Buffer.from(pdfBytes), {

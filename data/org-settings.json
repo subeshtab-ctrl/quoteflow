@@ -4,7 +4,7 @@
     "invoice_prefix": "INV",
     "invoice_start_number": 1,
     "current_invoice_counter": 33,
-    "mode": "test",
+    "mode": "live",
     "current_test_invoice_counter": 29,
     "current_test_quotation_counter": 8
   },

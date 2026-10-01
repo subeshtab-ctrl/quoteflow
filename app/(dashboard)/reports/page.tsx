@@ -14,10 +14,12 @@ export default async function ReportsPage() {
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
-  const [analytics, quotations, organization] = await Promise.all([
-    store.getDashboardAnalytics(orgId),
-    store.getQuotations(orgId),
-    store.getOrganization(orgId),
+  const organization = await store.getOrganization(orgId);
+  const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
+
+  const [analytics, quotations] = await Promise.all([
+    store.getDashboardAnalytics(orgId, { environment: env }),
+    store.getQuotations(orgId, { environment: env }),
   ]);
   const currency = organization?.default_currency || 'USD';
 

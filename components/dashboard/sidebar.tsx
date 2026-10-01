@@ -44,7 +44,7 @@ export function DashboardSidebar({
           setOrgData({
             name: data.organization.name || organizationName,
             logoUrl: data.organization.logo_url,
-            mode: data.organization.mode || 'test',
+            mode: data.organization.mode || 'live',
           });
         }
       })
@@ -111,13 +111,9 @@ export function DashboardSidebar({
               <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none">
                 Workspace
               </p>
-              {orgData.mode === 'test' ? (
+              {orgData.mode === 'test' && (
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
                   TEST
-                </span>
-              ) : (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                  LIVE
                 </span>
               )}
             </div>

@@ -24,6 +24,13 @@ export default async function InvoiceDetailPage({ params }: InvoiceDetailPagePro
 
   if (!invoice) notFound();
 
+  // Cross-environment guard: ensure invoice environment matches current workspace mode
+  const organization = await store.getOrganization(orgId);
+  const activeEnv = organization?.mode === 'test' ? 'test' : 'live';
+  if ((invoice.environment || 'live') !== activeEnv) {
+    notFound();
+  }
+
   return (
     <DashboardLayout>
       <InvoiceDetailView invoice={invoice} currentUserRole={auth?.role || 'STAFF'} />

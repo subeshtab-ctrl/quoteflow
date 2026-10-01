@@ -11,10 +11,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') || undefined;
     const search = searchParams.get('search') || undefined;
-    // environment filter: 'live', 'test', or undefined (all)
-    const environment = searchParams.get('environment') || undefined;
+    const org = await store.getOrganization(orgId);
+    const activeEnv = (org?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
 
-    const quotations = await store.getQuotations(orgId, { status, search, environment: environment as any });
+    const quotations = await store.getQuotations(orgId, { status, search, environment: activeEnv });
     return NextResponse.json({ success: true, quotations });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
