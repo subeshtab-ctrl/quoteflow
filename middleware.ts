@@ -59,9 +59,11 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/onboarding') ||
     pathname.startsWith('/quotations') ||
+    pathname.startsWith('/invoices') ||
     pathname.startsWith('/customers') ||
     pathname.startsWith('/products') ||
     pathname.startsWith('/reports') ||
+    pathname.startsWith('/training') ||
     pathname.startsWith('/settings') ||
     pathname.startsWith('/templates') ||
     pathname.startsWith('/test');
