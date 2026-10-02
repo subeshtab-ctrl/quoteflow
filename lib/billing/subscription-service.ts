@@ -48,7 +48,7 @@ export const DEFAULT_PLANS = {
     trial_days: 0,
     is_active: true,
     is_public: false,
-    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
+    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   } as SubscriptionPlan,
@@ -64,7 +64,7 @@ export const DEFAULT_PLANS = {
     trial_days: 0,
     is_active: true,
     is_public: true,
-    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1vAzUPVDv51g',
+    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   } as SubscriptionPlan,
@@ -334,25 +334,38 @@ export class SubscriptionService {
       ? (cfg.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || targetPlan.razorpay_plan_id)
       : (cfg.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || targetPlan.razorpay_plan_id);
 
+    // If not configured, attempt auto-resolution from Razorpay account plans or create dynamically
     if (!rzpPlanId && razorpayService.isConfigured()) {
       try {
-        const rzpPlan = await razorpayService.createPlan({
-          name: targetPlan.name,
-          amount: targetPlan.amount,
-          currency: targetPlan.currency,
-          description: targetPlan.description || undefined,
-        });
-        rzpPlanId = rzpPlan.id;
-        if (isPromo) {
-          updateRazorpayPlansConfig(rzpPlan.id, undefined);
-        } else {
-          updateRazorpayPlansConfig(undefined, rzpPlan.id);
+        const testRes = await razorpayService.testConnection();
+        const autoMatch = testRes.availablePlans?.find((p) => p.amount === targetPlan.amount);
+        if (autoMatch) {
+          rzpPlanId = autoMatch.id;
+          if (isPromo) {
+            updateRazorpayPlansConfig(autoMatch.id, undefined);
+          } else {
+            updateRazorpayPlansConfig(undefined, autoMatch.id);
+          }
         }
-      } catch (err: any) {
-        console.warn('Razorpay dynamic plan creation error:', err);
-        throw new Error(
-          `Razorpay Plan ID not configured. Please create a ${targetPlan.name} plan (₹${targetPlan.amount / 100}/mo) in your Razorpay Dashboard (Subscriptions -> Plans) and enter its Plan ID in Developer Admin (/admin) or RAZORPAY_PLAN_ID_${isPromo ? 'PROMO_99' : 'STANDARD_199'} in Vercel. Razorpay message: ${err.message}`
-        );
+      } catch {}
+
+      if (!rzpPlanId) {
+        try {
+          const rzpPlan = await razorpayService.createPlan({
+            name: targetPlan.name,
+            amount: targetPlan.amount,
+            currency: targetPlan.currency,
+            description: targetPlan.description || undefined,
+          });
+          rzpPlanId = rzpPlan.id;
+          if (isPromo) {
+            updateRazorpayPlansConfig(rzpPlan.id, undefined);
+          } else {
+            updateRazorpayPlansConfig(undefined, rzpPlan.id);
+          }
+        } catch (err: any) {
+          console.warn('Razorpay dynamic plan creation error:', err);
+        }
       }
     }
 
@@ -373,20 +386,86 @@ export class SubscriptionService {
       startAtUnix = Math.floor(new Date(existing.trial_end_at).getTime() / 1000);
     }
 
-    // 3. Create subscription in Razorpay
-    const rzpSub = await razorpayService.createSubscription({
-      planId: rzpPlanId,
-      totalCount: 60,
-      customerNotify: 1,
-      startAt: startAtUnix,
-      notes: {
-        business_id: params.businessId,
-        plan_slug: targetPlan.slug,
-        is_promo: isPromo ? 'true' : 'false',
-        scheduled_after_trial: isCurrentlyTrialing ? 'true' : 'false',
-        trial_end_at: existing?.trial_end_at || '',
-      },
-    });
+    // 3. Create subscription in Razorpay (with automatic fallback/recovery if plan ID is stale or invalid)
+    let rzpSub: any;
+    try {
+      rzpSub = await razorpayService.createSubscription({
+        planId: rzpPlanId,
+        totalCount: 60,
+        customerNotify: 1,
+        startAt: startAtUnix,
+        notes: {
+          business_id: params.businessId,
+          plan_slug: targetPlan.slug,
+          is_promo: isPromo ? 'true' : 'false',
+          scheduled_after_trial: isCurrentlyTrialing ? 'true' : 'false',
+          trial_end_at: existing?.trial_end_at || '',
+        },
+      });
+    } catch (createErr: any) {
+      const errMsg = createErr?.message || '';
+      const isInvalidPlanError =
+        errMsg.includes('invalid or could not be found') ||
+        errMsg.includes('400') ||
+        errMsg.includes('BAD_REQUEST_ERROR');
+
+      if (razorpayService.isConfigured() && isInvalidPlanError) {
+        console.warn(`[QuoteFlow] Configured plan ID (${rzpPlanId}) was rejected by Razorpay. Auto-healing plan...`);
+
+        // A. Check if the account has an existing plan matching the amount
+        let replacementPlanId: string | null = null;
+        try {
+          const testRes = await razorpayService.testConnection();
+          const match = testRes.availablePlans?.find((p) => p.amount === targetPlan.amount);
+          if (match) {
+            replacementPlanId = match.id;
+          }
+        } catch {}
+
+        // B. If not found in account, auto-create a fresh plan directly via API
+        if (!replacementPlanId) {
+          try {
+            const created = await razorpayService.createPlan({
+              name: targetPlan.name,
+              amount: targetPlan.amount,
+              currency: targetPlan.currency,
+              description: targetPlan.description || undefined,
+            });
+            replacementPlanId = created.id;
+          } catch (createPlanErr: any) {
+            console.error('[QuoteFlow] Could not auto-create plan in Razorpay:', createPlanErr);
+          }
+        }
+
+        // C. Save the new plan ID and retry subscription creation
+        if (replacementPlanId) {
+          rzpPlanId = replacementPlanId;
+          if (isPromo) {
+            updateRazorpayPlansConfig(replacementPlanId, undefined);
+          } else {
+            updateRazorpayPlansConfig(undefined, replacementPlanId);
+          }
+
+          rzpSub = await razorpayService.createSubscription({
+            planId: rzpPlanId,
+            totalCount: 60,
+            customerNotify: 1,
+            startAt: startAtUnix,
+            notes: {
+              business_id: params.businessId,
+              plan_slug: targetPlan.slug,
+              is_promo: isPromo ? 'true' : 'false',
+              scheduled_after_trial: isCurrentlyTrialing ? 'true' : 'false',
+              trial_end_at: existing?.trial_end_at || '',
+            },
+          });
+        } else {
+          throw createErr;
+        }
+      } else {
+        throw createErr;
+      }
+    }
 
     // 4. Record pending/scheduled subscription in store
     const subRecord: BusinessSubscription = {

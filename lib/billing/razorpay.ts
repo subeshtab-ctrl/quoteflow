@@ -120,6 +120,14 @@ export class RazorpayService {
     apiMessage: string;
     promoPlanDetails?: any;
     standardPlanDetails?: any;
+    availablePlans?: Array<{
+      id: string;
+      name: string;
+      amount: number;
+      currency: string;
+      period?: string;
+      interval?: number;
+    }>;
   }> {
     const keyId = this.keyId;
     const hasSecret = Boolean(this.keySecret && !this.keySecret.includes('placeholder'));
@@ -139,7 +147,7 @@ export class RazorpayService {
 
     try {
       // Test fetching plans from Razorpay API
-      const res = await fetch(`${this.baseUrl}/plans?count=10`, {
+      const res = await fetch(`${this.baseUrl}/plans?count=20`, {
         method: 'GET',
         headers: {
           Authorization: this.getAuthHeader(),
@@ -160,45 +168,91 @@ export class RazorpayService {
       }
 
       const data = await res.json();
+      const rawPlans = (data.items || []).map((p: any) => ({
+        id: p.id,
+        name: p.item?.name || 'Unnamed Plan',
+        amount: p.item?.amount || 0,
+        currency: p.item?.currency || 'INR',
+        period: p.period || 'monthly',
+        interval: p.interval || 1,
+      }));
 
       let promoDetails: any = null;
       let standardDetails: any = null;
 
+      // 1. Resolve promo plan by ID if provided
       if (promoPlanId) {
-        try {
-          const pRes = await fetch(`${this.baseUrl}/plans/${promoPlanId}`, {
-            headers: { Authorization: this.getAuthHeader() },
-          });
-          if (pRes.ok) {
-            const pJson = await pRes.json();
-            promoDetails = {
-              id: pJson.id,
-              name: pJson.item?.name,
-              amount: pJson.item?.amount,
-              currency: pJson.item?.currency,
-            };
-          }
-        } catch {}
+        const matched = rawPlans.find((p: any) => p.id === promoPlanId);
+        if (matched) {
+          promoDetails = matched;
+        } else {
+          try {
+            const pRes = await fetch(`${this.baseUrl}/plans/${promoPlanId}`, {
+              headers: { Authorization: this.getAuthHeader() },
+            });
+            if (pRes.ok) {
+              const pJson = await pRes.json();
+              promoDetails = {
+                id: pJson.id,
+                name: pJson.item?.name,
+                amount: pJson.item?.amount,
+                currency: pJson.item?.currency,
+              };
+            }
+          } catch {}
+        }
       }
 
+      // If not resolved by ID, auto-detect from available plans (amount: 9900 = ₹99)
+      if (!promoDetails) {
+        const auto99 = rawPlans.find(
+          (p: any) => p.amount === 9900 || p.name?.toLowerCase().includes('99') || p.name?.toLowerCase().includes('promo')
+        );
+        if (auto99) {
+          promoDetails = {
+            ...auto99,
+            isAutoDetected: true,
+          };
+        }
+      }
+
+      // 2. Resolve standard plan by ID if provided
       if (standardPlanId) {
-        try {
-          const sRes = await fetch(`${this.baseUrl}/plans/${standardPlanId}`, {
-            headers: { Authorization: this.getAuthHeader() },
-          });
-          if (sRes.ok) {
-            const sJson = await sRes.json();
-            standardDetails = {
-              id: sJson.id,
-              name: sJson.item?.name,
-              amount: sJson.item?.amount,
-              currency: sJson.item?.currency,
-            };
-          }
-        } catch {}
+        const matched = rawPlans.find((p: any) => p.id === standardPlanId);
+        if (matched) {
+          standardDetails = matched;
+        } else {
+          try {
+            const sRes = await fetch(`${this.baseUrl}/plans/${standardPlanId}`, {
+              headers: { Authorization: this.getAuthHeader() },
+            });
+            if (sRes.ok) {
+              const sJson = await sRes.json();
+              standardDetails = {
+                id: sJson.id,
+                name: sJson.item?.name,
+                amount: sJson.item?.amount,
+                currency: sJson.item?.currency,
+              };
+            }
+          } catch {}
+        }
       }
 
-      const planCount = data.count || (data.items ? data.items.length : 0);
+      // If not resolved by ID, auto-detect from available plans (amount: 19900 = ₹199)
+      if (!standardDetails) {
+        const auto199 = rawPlans.find(
+          (p: any) => p.amount === 19900 || p.name?.toLowerCase().includes('199') || p.name?.toLowerCase().includes('standard')
+        );
+        if (auto199) {
+          standardDetails = {
+            ...auto199,
+            isAutoDetected: true,
+          };
+        }
+      }
+
+      const planCount = data.count || rawPlans.length;
       return {
         configured: true,
         mode: this.mode,
@@ -209,6 +263,7 @@ export class RazorpayService {
         apiMessage: `✓ Connected successfully to Razorpay API (${this.mode.toUpperCase()} mode). Found ${planCount} plans in account.`,
         promoPlanDetails: promoDetails,
         standardPlanDetails: standardDetails,
+        availablePlans: rawPlans,
       };
     } catch (err: any) {
       return {

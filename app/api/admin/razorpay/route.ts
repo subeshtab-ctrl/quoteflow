@@ -88,9 +88,92 @@ export async function POST(req: NextRequest) {
       const pId = promo_plan_id !== undefined ? promo_plan_id : cfg.razorpayPlanIdPromo99;
       const sId = standard_plan_id !== undefined ? standard_plan_id : cfg.razorpayPlanIdStandard199;
       const result = await razorpayService.testConnection(pId, sId);
+
+      // If matching plans were auto-detected from the account and not yet explicitly set, auto-save them
+      if (
+        (result.promoPlanDetails?.isAutoDetected && !cfg.razorpayPlanIdPromo99) ||
+        (result.standardPlanDetails?.isAutoDetected && !cfg.razorpayPlanIdStandard199)
+      ) {
+        updateRazorpayApiConfig({
+          promoPlanId: result.promoPlanDetails?.id,
+          standardPlanId: result.standardPlanDetails?.id,
+        });
+      }
+
       return NextResponse.json({
         success: true,
         testResult: result,
+      });
+    }
+
+    if (action === 'auto_create_plans') {
+      if (key_id || key_secret) {
+        updateRazorpayApiConfig({
+          keyId: key_id,
+          keySecret: key_secret,
+        });
+        razorpayService.reloadCredentials();
+      }
+
+      if (!razorpayService.isConfigured()) {
+        return NextResponse.json(
+          { error: 'Razorpay API credentials not configured.' },
+          { status: 400 }
+        );
+      }
+
+      // Create Promo ₹99 plan
+      const promoPlan = await razorpayService.createPlan({
+        name: 'QuoteFlow Special Offer',
+        amount: 9900,
+        currency: 'INR',
+        period: 'monthly',
+        interval: 1,
+        description: 'QuoteFlow ₹99/mo Introductory Plan (3 Cycles)',
+      });
+
+      // Create Standard ₹199 plan
+      const standardPlan = await razorpayService.createPlan({
+        name: 'QuoteFlow Standard',
+        amount: 19900,
+        currency: 'INR',
+        period: 'monthly',
+        interval: 1,
+        description: 'QuoteFlow Standard Monthly Subscription',
+      });
+
+      // Update config with the newly created plan IDs
+      const updated = updateRazorpayApiConfig({
+        promoPlanId: promoPlan.id,
+        standardPlanId: standardPlan.id,
+      });
+
+      const testResult = await razorpayService.testConnection(promoPlan.id, standardPlan.id);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Successfully created and linked ₹99 and ₹199 plans in your Razorpay account!',
+        promoPlanId: promoPlan.id,
+        standardPlanId: standardPlan.id,
+        testResult,
+      });
+    }
+
+    if (action === 'auto_link_plans') {
+      const updated = updateRazorpayApiConfig({
+        promoPlanId: promo_plan_id,
+        standardPlanId: standard_plan_id,
+      });
+      const testResult = await razorpayService.testConnection(
+        updated.razorpayPlanIdPromo99,
+        updated.razorpayPlanIdStandard199
+      );
+      return NextResponse.json({
+        success: true,
+        message: 'Selected plans linked successfully.',
+        promoPlanId: updated.razorpayPlanIdPromo99 || '',
+        standardPlanId: updated.razorpayPlanIdStandard199 || '',
+        testResult,
       });
     }
 

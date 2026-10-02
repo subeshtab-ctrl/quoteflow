@@ -38,6 +38,7 @@ import {
   Activity,
   PhoneCall,
   Paperclip,
+  Sparkles,
 } from 'lucide-react';
 
 export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark' } = {}) {
@@ -53,6 +54,8 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   const [razorpayStandardPlanId, setRazorpayStandardPlanId] = useState('');
   const [isSavingRazorpayPlans, setIsSavingRazorpayPlans] = useState(false);
   const [isTestingRazorpayConnection, setIsTestingRazorpayConnection] = useState(false);
+  const [isAutoCreatingPlans, setIsAutoCreatingPlans] = useState(false);
+  const [isLinkingPlans, setIsLinkingPlans] = useState(false);
   const [razorpayTestResult, setRazorpayTestResult] = useState<any>(null);
   const [razorpayFeedback, setRazorpayFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -223,6 +226,96 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
     } finally {
       setIsTestingRazorpayConnection(false);
     }
+  };
+
+  const handleAutoCreatePlans = async () => {
+    try {
+      setIsAutoCreatingPlans(true);
+      setRazorpayFeedback(null);
+      const res = await fetch('/api/admin/razorpay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'auto_create_plans',
+          key_id: razorpayKeyId.trim() || undefined,
+          key_secret: razorpayKeySecret.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setRazorpayFeedback({
+          type: 'success',
+          text: json.message || '✓ Successfully created and linked ₹99 (Promo) and ₹199 (Standard) plans in your Razorpay account!',
+        });
+        if (json.promoPlanId) setRazorpayPromoPlanId(json.promoPlanId);
+        if (json.standardPlanId) setRazorpayStandardPlanId(json.standardPlanId);
+        if (json.testResult) setRazorpayTestResult(json.testResult);
+        await fetchRazorpayConfig();
+      } else {
+        setRazorpayFeedback({
+          type: 'error',
+          text: json.error || 'Failed to auto-create plans in Razorpay',
+        });
+      }
+    } catch (err: any) {
+      setRazorpayFeedback({
+        type: 'error',
+        text: err.message || 'Error auto-creating plans in Razorpay',
+      });
+    } finally {
+      setIsAutoCreatingPlans(false);
+    }
+  };
+
+  const handleAutoLinkDetectedPlans = async (promoId?: string, standardId?: string) => {
+    try {
+      setIsLinkingPlans(true);
+      setRazorpayFeedback(null);
+      const res = await fetch('/api/admin/razorpay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'auto_link_plans',
+          promo_plan_id: promoId || razorpayPromoPlanId,
+          standard_plan_id: standardId || razorpayStandardPlanId,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setRazorpayFeedback({
+          type: 'success',
+          text: '✓ Selected plans linked successfully!',
+        });
+        if (json.promoPlanId) setRazorpayPromoPlanId(json.promoPlanId);
+        if (json.standardPlanId) setRazorpayStandardPlanId(json.standardPlanId);
+        if (json.testResult) setRazorpayTestResult(json.testResult);
+        await fetchRazorpayConfig();
+      } else {
+        setRazorpayFeedback({
+          type: 'error',
+          text: json.error || 'Failed to link plans',
+        });
+      }
+    } catch (err: any) {
+      setRazorpayFeedback({
+        type: 'error',
+        text: err.message || 'Error linking plans',
+      });
+    } finally {
+      setIsLinkingPlans(false);
+    }
+  };
+
+  const handleApplyDetectedPlan = (planId: string, target: 'promo' | 'standard') => {
+    if (target === 'promo') {
+      setRazorpayPromoPlanId(planId);
+    } else {
+      setRazorpayStandardPlanId(planId);
+    }
+    setRazorpayFeedback({
+      type: 'success',
+      text: `Selected ${planId} for ${target === 'promo' ? '₹99 Promotional' : '₹199 Standard'} plan. Click "Save Credentials & Plans" to apply.`,
+    });
   };
 
   const loadAll = async () => {
@@ -1010,23 +1103,144 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 )}
 
                 {razorpayTestResult.apiSuccess && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-slate-300 border-t border-emerald-500/20">
-                    <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Promo Plan (₹99):</span>
-                      <p className="font-mono text-white text-xs mt-0.5">
-                        {razorpayTestResult.promoPlanDetails
-                          ? `${razorpayTestResult.promoPlanDetails.name} (₹${razorpayTestResult.promoPlanDetails.amount / 100}) - ${razorpayTestResult.promoPlanDetails.id}`
-                          : 'Not linked or not found on Razorpay'}
-                      </p>
+                  <div className="space-y-3 pt-2 border-t border-emerald-500/20">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-slate-300">
+                      <div className={`p-3 rounded-lg border ${
+                        razorpayTestResult.promoPlanDetails
+                          ? 'bg-emerald-950/30 border-emerald-800'
+                          : 'bg-amber-950/30 border-amber-800'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold">Promo Plan (₹99):</span>
+                          {razorpayTestResult.promoPlanDetails ? (
+                            <Badge className="bg-emerald-600/30 text-emerald-300 border-emerald-700 text-[10px]">
+                              {razorpayTestResult.promoPlanDetails.isAutoDetected ? 'Auto-Detected' : 'Linked ✓'}
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-600/30 text-amber-300 border-amber-700 text-[10px]">
+                              Not Linked
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="font-mono text-white text-xs mt-1">
+                          {razorpayTestResult.promoPlanDetails
+                            ? `${razorpayTestResult.promoPlanDetails.name} (₹${razorpayTestResult.promoPlanDetails.amount / 100}) - ${razorpayTestResult.promoPlanDetails.id}`
+                            : 'No ₹99 plan linked or found on Razorpay'}
+                        </p>
+                      </div>
+
+                      <div className={`p-3 rounded-lg border ${
+                        razorpayTestResult.standardPlanDetails
+                          ? 'bg-emerald-950/30 border-emerald-800'
+                          : 'bg-amber-950/30 border-amber-800'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold">Standard Plan (₹199):</span>
+                          {razorpayTestResult.standardPlanDetails ? (
+                            <Badge className="bg-emerald-600/30 text-emerald-300 border-emerald-700 text-[10px]">
+                              {razorpayTestResult.standardPlanDetails.isAutoDetected ? 'Auto-Detected' : 'Linked ✓'}
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-600/30 text-amber-300 border-amber-700 text-[10px]">
+                              Not Linked
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="font-mono text-white text-xs mt-1">
+                          {razorpayTestResult.standardPlanDetails
+                            ? `${razorpayTestResult.standardPlanDetails.name} (₹${razorpayTestResult.standardPlanDetails.amount / 100}) - ${razorpayTestResult.standardPlanDetails.id}`
+                            : 'No ₹199 plan linked or found on Razorpay'}
+                        </p>
+                      </div>
                     </div>
-                    <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Standard Plan (₹199):</span>
-                      <p className="font-mono text-white text-xs mt-0.5">
-                        {razorpayTestResult.standardPlanDetails
-                          ? `${razorpayTestResult.standardPlanDetails.name} (₹${razorpayTestResult.standardPlanDetails.amount / 100}) - ${razorpayTestResult.standardPlanDetails.id}`
-                          : 'Not linked or not found on Razorpay'}
-                      </p>
-                    </div>
+
+                    {/* Auto-Match Quick Link Banner */}
+                    {(razorpayTestResult.promoPlanDetails?.isAutoDetected || razorpayTestResult.standardPlanDetails?.isAutoDetected) && (
+                      <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs text-emerald-200">
+                          <strong>✨ Matching plans detected in your Razorpay account!</strong> Click below to link them with 1 click.
+                        </div>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => handleAutoLinkDetectedPlans(razorpayTestResult.promoPlanDetails?.id, razorpayTestResult.standardPlanDetails?.id)}
+                          disabled={isLinkingPlans}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8"
+                        >
+                          {isLinkingPlans ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '⚡ Link Detected Plans Now'}
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* 1-Click Auto-Create Plans in Razorpay Button if not linked */}
+                    {(!razorpayTestResult.promoPlanDetails || !razorpayTestResult.standardPlanDetails) && (
+                      <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5 text-xs text-indigo-200">
+                          <p className="font-bold flex items-center gap-1.5 text-white">
+                            <Sparkles className="h-4 w-4 text-indigo-400" />
+                            <span>1-Click Solution: Auto-Create QuoteFlow Plans in Razorpay</span>
+                          </p>
+                          <p className="text-slate-300 text-[11px]">
+                            We will automatically call Razorpay's API to create the official ₹99/mo Promotional and ₹199/mo Standard recurring plans and link them instantly.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={handleAutoCreatePlans}
+                          disabled={isAutoCreatingPlans}
+                          className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shrink-0 h-9 gap-1.5 shadow-sm"
+                        >
+                          {isAutoCreatingPlans ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3.5 w-3.5" />
+                          )}
+                          <span>Auto-Create Plans in Razorpay</span>
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Available Plans list in Razorpay Account */}
+                    {razorpayTestResult.availablePlans && razorpayTestResult.availablePlans.length > 0 && (
+                      <div className="pt-2 border-t border-slate-800 space-y-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          All Plans Detected in Your Razorpay Account ({razorpayTestResult.availablePlans.length}):
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {razorpayTestResult.availablePlans.map((p: any) => (
+                            <div key={p.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs flex flex-col justify-between gap-2">
+                              <div>
+                                <div className="flex items-center justify-between font-bold text-white">
+                                  <span>{p.name}</span>
+                                  <span className="text-emerald-400">₹{p.amount / 100}/{p.period || 'month'}</span>
+                                </div>
+                                <p className="font-mono text-[11px] text-slate-400 mt-0.5">{p.id}</p>
+                              </div>
+                              <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800">
+                                <Button
+                                  size="sm"
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => handleApplyDetectedPlan(p.id, 'promo')}
+                                  className="h-6 text-[10px] px-2"
+                                >
+                                  Use for ₹99 Promo
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => handleApplyDetectedPlan(p.id, 'standard')}
+                                  className="h-6 text-[10px] px-2"
+                                >
+                                  Use for ₹199 Standard
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
