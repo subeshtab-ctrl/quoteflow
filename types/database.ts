@@ -588,6 +588,10 @@ export interface BusinessSubscription {
   last_payment_at: string | null;
   last_payment_id: string | null;
   payment_failure_count: number;
+  is_trial_prepaid?: boolean;
+  scheduled_plan_id?: string | null;
+  scheduled_subscription_id?: string | null;
+  paid_scheduled_start?: string | null;
   created_at: string;
   updated_at: string;
   // Hydrated references
@@ -717,6 +721,8 @@ export interface SupportTicket {
   updated_at: string;
   resolved_at: string | null;
   closed_at: string | null;
+  callback_requested?: boolean;
+  callback_phone?: string;
   // Hydrated references
   business_name?: string;
   creator_email?: string;

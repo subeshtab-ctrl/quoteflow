@@ -12,6 +12,7 @@ import {
   createAdminSessionToken,
   verifyAdminSessionToken,
   DEVELOPER_ADMIN_EMAIL,
+  DEFAULT_DEVELOPER_ADMIN_PASSWORD,
 } from '@/lib/billing/dev-admin-auth';
 import crypto from 'crypto';
 
@@ -322,6 +323,9 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
 
       // Verify incorrect password fails
       expect(verifyPassword('WrongPassword123', cfg.passwordHash!, cfg.salt!)).toBe(false);
+
+      // Restore default developer admin credentials
+      setDeveloperAdminPassword(DEFAULT_DEVELOPER_ADMIN_PASSWORD);
     });
 
     it('creates tamper-proof developer session token and rejects forged tokens', () => {
@@ -333,5 +337,76 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       expect(verifyAdminSessionToken('')).toBe(false);
       expect(verifyAdminSessionToken('invalid_token')).toBe(false);
     });
+
+    it('authenticates with default master password Subesh@123 out-of-the-box', () => {
+      const cfg = getDeveloperAdminConfig();
+      expect(cfg.email).toBe(DEVELOPER_ADMIN_EMAIL);
+      expect(verifyPassword(DEFAULT_DEVELOPER_ADMIN_PASSWORD, cfg.passwordHash!, cfg.salt!)).toBe(true);
+      expect(verifyPassword('WrongPassword!', cfg.passwordHash!, cfg.salt!)).toBe(false);
+    });
+
+    it('supports pre-paying subscription during free trial, keeping trial intact until end date', async () => {
+      const trialBizId = crypto.randomUUID();
+      await subscriptionService.startFreeTrial(trialBizId);
+
+      // Create checkout during trial
+      const checkout = await subscriptionService.createSubscriptionCheckout({
+        businessId: trialBizId,
+        planSlug: 'promo_99',
+      });
+      expect(checkout.isTrialScheduled).toBe(true);
+
+      // Confirm payment
+      const sub = await subscriptionService.handleSuccessfulPayment({
+        subscriptionId: checkout.subscriptionId,
+        paymentId: 'pay_test_trial_prepaid',
+        amount: 9900,
+        businessId: trialBizId,
+      });
+
+      expect(sub.is_trial_prepaid).toBe(true);
+      expect(sub.status).toBe('trialing'); // trial remains active!
+
+      // Access should still show trial with remaining days
+      const access = await subscriptionService.getBusinessSubscriptionAccess(trialBizId);
+      expect(access.isTrial).toBe(true);
+      expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(29);
+
+      // Simulate trial expiration
+      sub.trial_end_at = new Date(Date.now() - 1000).toISOString();
+      await store.saveBusinessSubscription(sub);
+
+      const expiredAccess = await subscriptionService.getBusinessSubscriptionAccess(trialBizId);
+      expect(expiredAccess.status).toBe('active'); // Converts to active automatically!
+    });
+
+    it('creates support ticket with callback request and marks as solved', async () => {
+      const bizId = crypto.randomUUID();
+      const ticket = await subscriptionService.createSupportTicket({
+        businessId: bizId,
+        userId: 'usr_test_1',
+        subject: 'Billing inquiry with callback',
+        category: 'Billing',
+        priority: 'High',
+        description: 'Please call me regarding promo pricing',
+        callbackRequested: true,
+        callbackPhone: '+91 9876543210',
+      });
+
+      expect(ticket.ticket_number).toMatch(/^QF-\d{4}-\d{6}$/);
+      expect(ticket.callback_requested).toBe(true);
+      expect(ticket.callback_phone).toBe('+91 9876543210');
+      expect(ticket.status).toBe('open');
+
+      // Update to resolved/solved
+      ticket.status = 'resolved';
+      ticket.resolved_at = new Date().toISOString();
+      await store.saveSupportTicket(ticket);
+
+      const retrieved = await store.getSupportTicket(ticket.id);
+      expect(retrieved?.status).toBe('resolved');
+      expect(retrieved?.resolved_at).toBeDefined();
+    });
   });
 });
+

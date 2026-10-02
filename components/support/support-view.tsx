@@ -27,6 +27,7 @@ import {
   Loader2,
   X,
   Download,
+  PhoneCall,
 } from 'lucide-react';
 
 export function SupportView({ initialTickets }: { initialTickets?: SupportTicket[] }) {
@@ -43,6 +44,8 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
   const [newPriority, setNewPriority] = useState<SupportTicketPriority>('Normal');
   const [newDescription, setNewDescription] = useState('');
   const [newAttachments, setNewAttachments] = useState<any[]>([]);
+  const [requestCallback, setRequestCallback] = useState(false);
+  const [callbackPhone, setCallbackPhone] = useState('');
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
 
@@ -137,6 +140,8 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
           priority: newPriority,
           description: newDescription,
           attachments: newAttachments,
+          callback_requested: requestCallback,
+          callback_phone: requestCallback ? callbackPhone.trim() : undefined,
         }),
       });
 
@@ -147,6 +152,8 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
       setNewSubject('');
       setNewDescription('');
       setNewAttachments([]);
+      setRequestCallback(false);
+      setCallbackPhone('');
       await fetchTickets();
       if (json.ticket) {
         loadTicketDetails(json.ticket.id);
@@ -452,6 +459,35 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
               )}
             </div>
 
+            {/* Call Back Option */}
+            <div className="p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/20 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={requestCallback}
+                  onChange={(e) => setRequestCallback(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+                  <PhoneCall className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Request a Phone Call Back</span>
+                </div>
+              </label>
+
+              {requestCallback && (
+                <div className="pt-1 space-y-1">
+                  <Input
+                    type="tel"
+                    value={callbackPhone}
+                    onChange={(e) => setCallbackPhone(e.target.value)}
+                    placeholder="+91 9876543210 (Phone Number)"
+                    required={requestCallback}
+                    className="text-xs bg-white dark:bg-slate-900"
+                  />
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" size="sm" onClick={() => setCreateModalOpen(false)}>
                 Cancel
@@ -491,8 +527,15 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
               <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[11px]">
                 <div className="flex items-center gap-2">
                   <span className="text-slate-500">Status:</span>
-                  <Badge variant="outline" className="font-bold uppercase text-[10px]">
-                    {activeTicket.status.replace(/_/g, ' ')}
+                  <Badge
+                    variant="outline"
+                    className={`font-bold uppercase text-[10px] ${
+                      activeTicket.status === 'resolved' || activeTicket.status === 'closed'
+                        ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                        : ''
+                    }`}
+                  >
+                    {activeTicket.status === 'resolved' ? 'Solved' : activeTicket.status.replace(/_/g, ' ')}
                   </Badge>
                 </div>
                 <div className="flex items-center gap-2">
@@ -503,7 +546,7 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
                       className="h-6 text-[10px] text-emerald-600 hover:text-emerald-700 border-emerald-300"
                       onClick={() => handleUpdateStatus('resolved')}
                     >
-                      Mark Resolved
+                      Mark Solved
                     </Button>
                   )}
                   {activeTicket.status !== 'closed' && (
@@ -518,6 +561,22 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
                   )}
                 </div>
               </div>
+
+              {activeTicket.callback_requested && (
+                <div className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                  <PhoneCall className="h-3.5 w-3.5 shrink-0" />
+                  <span>Call Back Requested: <strong>{activeTicket.callback_phone}</strong> (Support alerted)</span>
+                </div>
+              )}
+
+              {(activeTicket.status === 'resolved' || activeTicket.status === 'closed') && (
+                <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>
+                    <strong>Issue Solved:</strong> This ticket has been resolved by our developer support staff.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Conversation Thread */}

@@ -33,6 +33,8 @@ import {
   FileText,
   UserCheck,
   Activity,
+  PhoneCall,
+  Paperclip,
 } from 'lucide-react';
 
 export function AdminDashboardView() {
@@ -647,15 +649,30 @@ export function AdminDashboardView() {
                 className="p-5 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
               >
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-xs font-bold text-indigo-600">{t.ticket_number}</span>
                     <Badge variant="outline" className="text-[10px] uppercase font-semibold">{t.category}</Badge>
                     <span className="text-[10px] font-bold text-amber-700">{t.priority}</span>
+                    {t.callback_requested && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-bold">
+                        <PhoneCall className="h-3 w-3" />
+                        <span>Call Back: {t.callback_phone}</span>
+                      </span>
+                    )}
                   </div>
                   <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{t.subject}</h4>
                   <p className="text-xs text-slate-400">Business: {t.business_id}</p>
                 </div>
-                <Badge className="text-[10px] uppercase font-bold self-start md:self-center">{t.status}</Badge>
+                <div>
+                  {t.status === 'resolved' ? (
+                    <Badge className="bg-emerald-600 text-white text-[10px] uppercase font-bold gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>Solved</span>
+                    </Badge>
+                  ) : (
+                    <Badge className="text-[10px] uppercase font-bold self-start md:self-center">{t.status}</Badge>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -664,6 +681,36 @@ export function AdminDashboardView() {
           {activeAdminTicket && (
             <Modal isOpen={Boolean(activeAdminTicket)} onClose={() => setActiveAdminTicket(null)} title={`Developer Support: ${activeAdminTicket.ticket_number}`}>
               <div className="space-y-4 p-4 text-xs max-h-[85vh] flex flex-col">
+                {/* Call Back Banner if requested */}
+                {activeAdminTicket.callback_requested && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <PhoneCall className="h-4 w-4 shrink-0 text-amber-400" />
+                      <span>
+                        Customer requested call back: <strong className="text-white font-mono">{activeAdminTicket.callback_phone}</strong>
+                      </span>
+                    </div>
+                    {activeAdminTicket.callback_phone && (
+                      <a
+                        href={`tel:${activeAdminTicket.callback_phone}`}
+                        className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] shrink-0"
+                      >
+                        Call Number
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Solved Status Banner */}
+                {activeAdminTicket.status === 'resolved' && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                    <span>
+                      <strong>Issue Solved:</strong> This ticket is marked as solved and visible as solved to the customer.
+                    </span>
+                  </div>
+                )}
+
                 {/* Hydrated Business Context for Billing/Subscription/Payment tickets */}
                 {activeAdminTicket.subscription_context && (
                   <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 space-y-1">
@@ -680,12 +727,19 @@ export function AdminDashboardView() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between border-b pb-2">
+                <div className="flex items-center justify-between border-b pb-2 flex-wrap gap-2">
                   <span className="font-bold text-sm text-slate-900 dark:text-white">{activeAdminTicket.subject}</span>
                   <div className="flex items-center gap-1.5">
-                    <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => handleUpdateTicketStatus('in_progress')}>In Progress</Button>
-                    <Button size="sm" variant="outline" className="h-6 text-[10px] text-emerald-600" onClick={() => handleUpdateTicketStatus('resolved')}>Resolve</Button>
-                    <Button size="sm" variant="outline" className="h-6 text-[10px] text-slate-600" onClick={() => handleUpdateTicketStatus('closed')}>Close</Button>
+                    <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleUpdateTicketStatus('in_progress')}>In Progress</Button>
+                    <Button
+                      size="sm"
+                      className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white font-semibold gap-1"
+                      onClick={() => handleUpdateTicketStatus('resolved')}
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>{activeAdminTicket.status === 'resolved' ? 'Solved ✓' : 'Mark as Solved'}</span>
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-[10px] text-slate-600" onClick={() => handleUpdateTicketStatus('closed')}>Close</Button>
                   </div>
                 </div>
 

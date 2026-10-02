@@ -185,17 +185,31 @@ export class SubscriptionService {
 
     // Check if trial has expired
     if (effectiveStatus === 'trialing' && daysRemainingInTrial === 0) {
-      effectiveStatus = 'expired';
-      sub.status = 'expired';
-      sub.updated_at = new Date().toISOString();
-      await store.saveBusinessSubscription(sub);
+      if (sub.is_trial_prepaid) {
+        effectiveStatus = 'active';
+        sub.status = 'active';
+        sub.updated_at = new Date().toISOString();
+        await store.saveBusinessSubscription(sub);
 
-      await store.addNotification({
-        organizationId: businessId,
-        title: 'QuoteFlow Trial Expired',
-        message: 'Your 30-day free trial has concluded. Subscribe to continue sending quotes and invoices.',
-        type: 'EXPIRING',
-      });
+        await store.addNotification({
+          organizationId: businessId,
+          title: 'QuoteFlow Trial Ended — Paid Plan Active',
+          message: 'Your 30-day free trial has concluded and your pre-paid subscription is now active.',
+          type: 'APPROVED',
+        });
+      } else {
+        effectiveStatus = 'expired';
+        sub.status = 'expired';
+        sub.updated_at = new Date().toISOString();
+        await store.saveBusinessSubscription(sub);
+
+        await store.addNotification({
+          organizationId: businessId,
+          title: 'QuoteFlow Trial Expired',
+          message: 'Your 30-day free trial has concluded. Subscribe to continue sending quotes and invoices.',
+          type: 'EXPIRING',
+        });
+      }
     }
 
     // Check if grace period has expired
@@ -296,6 +310,8 @@ export class SubscriptionService {
     currency: string;
     planName: string;
     planSlug: string;
+    isTrialScheduled?: boolean;
+    trialEndAt?: string | null;
   }> {
     const isPromo = params.planSlug === 'promo_99';
     let targetPlan: SubscriptionPlan;
@@ -327,25 +343,40 @@ export class SubscriptionService {
       }
     }
 
-    // 2. Create subscription in Razorpay
+    // 2. Check if customer is in active free trial and schedule start if applicable
+    const existing = await store.getBusinessSubscription(params.businessId);
+    const now = Date.now();
+    const isCurrentlyTrialing =
+      existing?.status === 'trialing' &&
+      existing?.trial_end_at &&
+      new Date(existing.trial_end_at).getTime() > now;
+
+    let startAtUnix: number | undefined;
+    if (isCurrentlyTrialing && existing?.trial_end_at) {
+      startAtUnix = Math.floor(new Date(existing.trial_end_at).getTime() / 1000);
+    }
+
+    // 3. Create subscription in Razorpay
     const rzpSub = await razorpayService.createSubscription({
       planId: rzpPlanId,
       totalCount: 60,
       customerNotify: 1,
+      startAt: startAtUnix,
       notes: {
         business_id: params.businessId,
         plan_slug: targetPlan.slug,
         is_promo: isPromo ? 'true' : 'false',
+        scheduled_after_trial: isCurrentlyTrialing ? 'true' : 'false',
+        trial_end_at: existing?.trial_end_at || '',
       },
     });
 
-    // 3. Record pending subscription in store
-    const existing = await store.getBusinessSubscription(params.businessId);
+    // 4. Record pending/scheduled subscription in store
     const subRecord: BusinessSubscription = {
       id: existing?.id || crypto.randomUUID(),
       business_id: params.businessId,
       plan_id: targetPlan.id,
-      status: 'pending',
+      status: isCurrentlyTrialing ? 'trialing' : 'pending',
       provider: 'razorpay',
       razorpay_customer_id: existing?.razorpay_customer_id || null,
       razorpay_subscription_id: rzpSub.id,
@@ -356,7 +387,7 @@ export class SubscriptionService {
       trial_end_at: existing?.trial_end_at || null,
       current_period_start: existing?.current_period_start || null,
       current_period_end: existing?.current_period_end || null,
-      next_charge_at: existing?.next_charge_at || null,
+      next_charge_at: isCurrentlyTrialing ? existing?.trial_end_at : (existing?.next_charge_at || null),
       promo_id: isPromo ? DEFAULT_PROMOTION.id : null,
       promo_months_remaining: isPromo ? 3 : 0,
       promotional_cycles_completed: 0,
@@ -368,6 +399,10 @@ export class SubscriptionService {
       last_payment_at: existing?.last_payment_at || null,
       last_payment_id: existing?.last_payment_id || null,
       payment_failure_count: 0,
+      is_trial_prepaid: existing?.is_trial_prepaid || false,
+      scheduled_plan_id: isCurrentlyTrialing ? targetPlan.id : null,
+      scheduled_subscription_id: isCurrentlyTrialing ? rzpSub.id : null,
+      paid_scheduled_start: isCurrentlyTrialing ? existing?.trial_end_at : null,
       created_at: existing?.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
       plan: targetPlan,
@@ -382,6 +417,8 @@ export class SubscriptionService {
       currency: targetPlan.currency,
       planName: targetPlan.name,
       planSlug: targetPlan.slug,
+      isTrialScheduled: Boolean(isCurrentlyTrialing),
+      trialEndAt: existing?.trial_end_at || null,
     };
   }
 
@@ -464,14 +501,31 @@ export class SubscriptionService {
       }
     }
 
-    sub.status = 'active';
+    const isCurrentlyTrialing =
+      sub.status === 'trialing' &&
+      !!sub.trial_end_at &&
+      new Date(sub.trial_end_at).getTime() > now.getTime();
+
+    if (isCurrentlyTrialing && sub.trial_end_at) {
+      sub.is_trial_prepaid = true;
+      sub.paid_scheduled_start = sub.trial_end_at;
+      sub.last_payment_at = now.toISOString();
+      sub.last_payment_id = params.paymentId;
+      sub.current_period_start = sub.trial_end_at;
+      const trialEndTime = new Date(sub.trial_end_at).getTime();
+      sub.current_period_end = new Date(trialEndTime + 30 * 86400000).toISOString();
+      sub.next_charge_at = sub.trial_end_at;
+      sub.status = 'trialing'; // Full trial days preserved
+    } else {
+      sub.status = 'active';
+      sub.last_payment_at = now.toISOString();
+      sub.last_payment_id = params.paymentId;
+      sub.current_period_start = now.toISOString();
+      sub.current_period_end = cycleEnd.toISOString();
+      sub.next_charge_at = cycleEnd.toISOString();
+    }
     sub.promotional_cycles_completed = newCompletedCycles;
     sub.promo_months_remaining = newMonthsRemaining;
-    sub.last_payment_at = now.toISOString();
-    sub.last_payment_id = params.paymentId;
-    sub.current_period_start = now.toISOString();
-    sub.current_period_end = cycleEnd.toISOString();
-    sub.next_charge_at = cycleEnd.toISOString();
     sub.payment_failure_count = 0;
     sub.grace_period_start_at = null;
     sub.grace_period_end_at = null;
@@ -659,6 +713,8 @@ export class SubscriptionService {
       mime_type: string;
       storage_path: string;
     }>;
+    callbackRequested?: boolean;
+    callbackPhone?: string;
   }): Promise<SupportTicket> {
     const counter = await store.getNextTicketNumber();
     const year = new Date().getFullYear();
@@ -682,6 +738,8 @@ export class SubscriptionService {
       updated_at: now,
       resolved_at: null,
       closed_at: null,
+      callback_requested: Boolean(params.callbackRequested),
+      callback_phone: params.callbackPhone || undefined,
       creator_email: params.creatorEmail,
       creator_name: params.creatorName,
     };

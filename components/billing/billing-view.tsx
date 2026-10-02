@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
 import {
   BusinessSubscription,
   SubscriptionAccess,
@@ -9,9 +8,9 @@ import {
   SubscriptionPlan,
 } from '@/types/database';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
+import { SupportHelpModal } from '@/components/support/support-help-modal';
 import {
   CheckCircle2,
   AlertCircle,
@@ -19,14 +18,14 @@ import {
   Clock,
   Sparkles,
   ShieldCheck,
-  ShieldAlert,
-  ArrowRight,
   RotateCcw,
   X,
   Loader2,
   Calendar,
   Receipt,
   Headphones,
+  Check,
+  ShieldAlert,
 } from 'lucide-react';
 
 declare global {
@@ -56,6 +55,12 @@ export function BillingView({ initialData }: BillingViewProps) {
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(true);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Selected Plan state for interactive selection
+  const [selectedPlanSlug, setSelectedPlanSlug] = useState<string>('promo_99');
+
+  // Support & Help Modal state
+  const [supportModalOpen, setSupportModalOpen] = useState(false);
+
   const fetchBillingData = async () => {
     try {
       setIsLoading(true);
@@ -63,6 +68,11 @@ export function BillingView({ initialData }: BillingViewProps) {
       const json = await res.json();
       if (res.ok) {
         setData(json);
+        if (json.isEligibleForPromo) {
+          setSelectedPlanSlug('promo_99');
+        } else {
+          setSelectedPlanSlug('monthly_199');
+        }
       } else {
         setFeedbackMsg({ type: 'error', text: json.error || 'Failed to load billing details' });
       }
@@ -116,16 +126,33 @@ export function BillingView({ initialData }: BillingViewProps) {
       // 2. Load Razorpay SDK
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
-        throw new Error('Could not load Razorpay checkout script. Please check your connection.');
+        throw new Error('Could not load Razorpay checkout script. Please check your network connection.');
       }
 
-      // 3. Open Razorpay Standard Web Checkout
+      // 3. Open Razorpay Standard In-Page Modal (No external redirect)
       const options = {
         key: checkout.keyId,
         subscription_id: checkout.subscriptionId,
         name: 'QuoteFlow',
         description: checkout.planName,
         image: '/uploads/logo-1790062784938.jpg',
+        modal: {
+          backdropclose: false,
+          escape: true,
+          handleback: true,
+          confirm_close: true,
+          ondismiss: () => {
+            setIsProcessingCheckout(false);
+          },
+        },
+        prefill: {
+          name: checkout.customerName || '',
+          email: checkout.customerEmail || '',
+          contact: checkout.customerPhone || '',
+        },
+        theme: {
+          color: '#4f46e5',
+        },
         handler: async function (response: any) {
           // 4. Verify payment signature on backend
           try {
@@ -142,7 +169,9 @@ export function BillingView({ initialData }: BillingViewProps) {
             if (verifyRes.ok) {
               setFeedbackMsg({
                 type: 'success',
-                text: 'Subscription successfully activated! Welcome to QuoteFlow Premium.',
+                text: checkout.isTrialScheduled
+                  ? 'Payment confirmed & promotional rate locked in! Your full 30-day free trial continues uninterrupted, and your ₹99 plan begins automatically when trial ends.'
+                  : 'Subscription successfully activated! Welcome to QuoteFlow Premium.',
               });
               await fetchBillingData();
             } else {
@@ -156,10 +185,9 @@ export function BillingView({ initialData }: BillingViewProps) {
               type: 'error',
               text: 'Error verifying payment signature with server',
             });
+          } finally {
+            setIsProcessingCheckout(false);
           }
-        },
-        theme: {
-          color: '#4f46e5',
         },
       };
 
@@ -169,11 +197,13 @@ export function BillingView({ initialData }: BillingViewProps) {
           type: 'error',
           text: `Payment failed: ${resp.error?.description || 'Authorization declined'}`,
         });
+        setIsProcessingCheckout(false);
       });
+
+      // Open in-page modal popup
       rzp.open();
     } catch (err: any) {
-      setFeedbackMsg({ type: 'error', text: err.message || 'Error launching payment' });
-    } finally {
+      setFeedbackMsg({ type: 'error', text: err.message || 'Error launching payment modal' });
       setIsProcessingCheckout(false);
     }
   };
@@ -229,9 +259,9 @@ export function BillingView({ initialData }: BillingViewProps) {
 
   if (isLoading && !data) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 space-y-4">
+      <div className="flex flex-col items-center justify-center p-16 space-y-4">
         <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
-        <p className="text-sm text-slate-500">Loading subscription details...</p>
+        <p className="text-sm text-slate-500 font-medium">Loading subscription details...</p>
       </div>
     );
   }
@@ -243,8 +273,10 @@ export function BillingView({ initialData }: BillingViewProps) {
   const currentPriceFormatted =
     sub?.amount === 9900 ? '₹99.00' : sub?.amount === 19900 ? '₹199.00' : '₹0.00';
 
+  const isPrepaidTrial = sub?.is_trial_prepaid && access?.isTrial;
+
   return (
-    <div className="space-y-8">
+    <div className="max-w-5xl mx-auto space-y-8 pb-12 selection:bg-indigo-500 selection:text-white">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -252,29 +284,39 @@ export function BillingView({ initialData }: BillingViewProps) {
             Subscription & Billing
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Manage your QuoteFlow plans, promotional cycles, payment history, and invoices.
+            Manage your plans, promotional pricing, payment schedules, and verified invoices.
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/support">
-            <Button variant="outline" size="sm" className="gap-2">
-              <Headphones className="h-4 w-4 text-slate-600" />
-              <span>Billing Support</span>
-            </Button>
-          </Link>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSupportModalOpen(true)}
+            className="gap-2 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 shadow-xs"
+          >
+            <Headphones className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Support & Help</span>
+          </Button>
         </div>
       </div>
 
       {/* Feedback Alert */}
       {feedbackMsg && (
         <div
-          className={`p-4 rounded-xl text-sm flex items-center justify-between border ${
+          className={`p-4 rounded-2xl text-sm flex items-center justify-between border shadow-sm ${
             feedbackMsg.type === 'success'
               ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
               : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
           }`}
         >
-          <span>{feedbackMsg.text}</span>
+          <div className="flex items-center gap-2.5">
+            {feedbackMsg.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+            )}
+            <span>{feedbackMsg.text}</span>
+          </div>
           <button
             onClick={() => setFeedbackMsg(null)}
             className="text-slate-400 hover:text-slate-600 ml-3"
@@ -284,11 +326,55 @@ export function BillingView({ initialData }: BillingViewProps) {
         </div>
       )}
 
+      {/* Free Trial Early Payment Reassurance Banner */}
+      {access?.isTrial && (
+        <div className="p-4 rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/80 to-purple-50/50 dark:from-indigo-950/30 dark:to-purple-950/20 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <Clock className="h-5 w-5" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 uppercase tracking-wider">
+                    Free Trial Active
+                  </span>
+                  <Badge variant="outline" className="text-[11px] border-indigo-400 text-indigo-600">
+                    {access.daysRemainingInTrial} Days Left
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  {isPrepaidTrial
+                    ? `✓ Paid & Secured! Your first ₹99 cycle will apply only when your trial concludes on ${new Date(sub?.trial_end_at || Date.now()).toLocaleDateString()}.`
+                    : `You can pay now to lock in your ₹99 promotional offer. Your billing cycle will ONLY begin after your trial ends on ${new Date(sub?.trial_end_at || Date.now()).toLocaleDateString()}.`}
+                </p>
+              </div>
+            </div>
+
+            {isPrepaidTrial ? (
+              <Badge className="bg-emerald-600 text-white text-xs px-3 py-1 gap-1">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Cycle Scheduled</span>
+              </Badge>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => handleSubscribe('promo_99')}
+                disabled={isProcessingCheckout}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs shrink-0 shadow-xs"
+              >
+                Lock In ₹99 Rate
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Current Plan Overview Card */}
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2.5">
               <span className="text-xs uppercase font-bold tracking-wider text-slate-400">Current Plan</span>
               <Badge
                 className={
@@ -316,11 +402,11 @@ export function BillingView({ initialData }: BillingViewProps) {
                 </span>
               )}
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {access?.isTrial
                 ? `30-Day Free Trial. Zero charge. Ends on ${new Date(sub?.trial_end_at || Date.now()).toLocaleDateString()}.`
                 : access?.isPaid
-                ? `Recurring monthly billing via Razorpay.`
+                ? `Recurring monthly billing verified via Razorpay.`
                 : 'Account needs reactivation.'}
             </p>
           </div>
@@ -331,7 +417,7 @@ export function BillingView({ initialData }: BillingViewProps) {
                 {currentPriceFormatted}
                 <span className="text-sm font-normal text-slate-400">/mo</span>
               </p>
-              <p className="text-xs text-slate-500">Billed monthly in INR</p>
+              <p className="text-[11px] text-slate-400">Billed monthly in INR</p>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -340,9 +426,9 @@ export function BillingView({ initialData }: BillingViewProps) {
                   size="sm"
                   onClick={handleReactivate}
                   disabled={isProcessingCheckout}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs"
                 >
-                  <RotateCcw className="h-4 w-4 mr-2" />
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
                   <span>Resume Subscription</span>
                 </Button>
               ) : access?.isPaid ? (
@@ -350,7 +436,7 @@ export function BillingView({ initialData }: BillingViewProps) {
                   size="sm"
                   variant="outline"
                   onClick={() => setCancelModalOpen(true)}
-                  className="text-rose-600 hover:text-rose-700 border-rose-200 hover:bg-rose-50"
+                  className="text-rose-600 hover:text-rose-700 border-rose-200 hover:bg-rose-50 text-xs"
                 >
                   Cancel Plan
                 </Button>
@@ -361,18 +447,18 @@ export function BillingView({ initialData }: BillingViewProps) {
 
         {/* Detailed Metrics Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-6">
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800">
             <span className="text-xs text-slate-400 font-medium">Trial Countdown</span>
-            <p className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
+            <p className="text-base font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
               <Clock className="h-4 w-4 text-indigo-500" />
               <span>{access?.daysRemainingInTrial ?? 0} Days Left</span>
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">30-day initial trial</p>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800">
             <span className="text-xs text-slate-400 font-medium">Promotional Cycles</span>
-            <p className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
+            <p className="text-base font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-violet-500" />
               <span>{sub?.promotional_cycles_completed ?? 0} of 3 Completed</span>
             </p>
@@ -381,204 +467,274 @@ export function BillingView({ initialData }: BillingViewProps) {
             </p>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
-            <span className="text-xs text-slate-400 font-medium">Current Billing Cycle</span>
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800">
+            <span className="text-xs text-slate-400 font-medium">Next Renewal</span>
             <p className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
               <Calendar className="h-4 w-4 text-emerald-500" />
               <span>
                 {sub?.current_period_end
                   ? new Date(sub.current_period_end).toLocaleDateString()
+                  : sub?.trial_end_at
+                  ? new Date(sub.trial_end_at).toLocaleDateString()
                   : 'N/A'}
               </span>
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Next renewal date</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Renewal / start date</p>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
-            <span className="text-xs text-slate-400 font-medium">Payment State</span>
-            <p className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800">
+            <span className="text-xs text-slate-400 font-medium">Account Status</span>
+            <p className="text-base font-bold text-slate-900 dark:text-slate-100 mt-1 flex items-center gap-1.5">
               <ShieldCheck className="h-4 w-4 text-emerald-500" />
-              <span>{access?.isPastDue ? 'Past Due' : access?.isGracePeriod ? 'Grace Period' : 'Verified'}</span>
+              <span>{isPrepaidTrial ? 'Pre-Paid' : access?.isPaid ? 'Active Paid' : 'Active Trial'}</span>
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Razorpay server confirmed</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Razorpay authorized</p>
           </div>
         </div>
       </div>
 
-      {/* Available Plans Selection */}
+      {/* Available Plans Selection (Compact, Centered, Selectable) */}
       <div className="space-y-4">
-        <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-          Choose Your Plan
-        </h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Subscribe securely through Razorpay. Automatic server transitions guarantee your promotional pricing.
-        </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+              Select Your Subscription Plan
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Click any card to select. Checkout opens directly in-page without external redirection.
+            </p>
+          </div>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-          {/* Plan 1: Free Trial */}
-          <div className="relative rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 flex flex-col justify-between shadow-xs">
-            <div className="space-y-4">
+        {/* 3 Compact, Refined Cards with Selection Option */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-1">
+          {/* CARD 1: Free Trial */}
+          <div
+            onClick={() => setSelectedPlanSlug('free_trial')}
+            className={`relative rounded-2xl cursor-pointer transition-all duration-200 p-5 flex flex-col justify-between ${
+              selectedPlanSlug === 'free_trial'
+                ? 'border-2 border-indigo-600 dark:border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-lg'
+                : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs'
+            }`}
+          >
+            <div className="space-y-3.5">
+              {/* Card Header & Radio */}
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Plan 1</span>
-                {access?.isTrial && (
-                  <Badge variant="outline" className="border-indigo-400 text-indigo-600 text-xs">
-                    Current Plan
-                  </Badge>
-                )}
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Plan 1
+                </span>
+                <div
+                  className={`h-5 w-5 rounded-full border flex items-center justify-center transition-all ${
+                    selectedPlanSlug === 'free_trial'
+                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                      : 'border-slate-300 dark:border-slate-700 bg-transparent'
+                  }`}
+                >
+                  {selectedPlanSlug === 'free_trial' && <Check className="h-3 w-3 stroke-[3]" />}
+                </div>
               </div>
+
               <div>
-                <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                   QuoteFlow Free Trial
                 </h4>
-                <p className="text-xs text-slate-500 mt-1">30 days full feature access</p>
+                <p className="text-xs text-slate-500 mt-0.5">30 days zero-cost exploration</p>
               </div>
-              <div className="pt-2">
-                <span className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">₹0</span>
-                <span className="text-xs text-slate-400 ml-1">/30 days</span>
+
+              <div className="pt-1">
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">₹0</span>
+                <span className="text-xs text-slate-400 ml-1">/ 30 days</span>
               </div>
-              <ul className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300 pt-2 border-t border-slate-100 dark:border-slate-800">
+
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Unlimited Quotations & Invoices</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Unlimited Quotes & Invoices</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Client PIN Approval Portal</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Client PIN Portal Approval</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                   <span>One trial per business</span>
                 </li>
               </ul>
             </div>
 
-            <div className="pt-6">
+            <div className="pt-5">
               <Button
                 variant="outline"
                 disabled
                 className="w-full text-xs font-medium border-slate-200 text-slate-400"
               >
-                {access?.isTrial ? 'Trial Active' : 'Trial Used'}
+                {access?.isTrial ? 'Current Active Trial' : 'Trial Used'}
               </Button>
             </div>
           </div>
 
-          {/* Plan 2: ₹99 Special Offer (Featured) */}
-          <div className={`relative rounded-2xl border-2 ${isEligible ? 'border-indigo-500 dark:border-indigo-500 shadow-md ring-2 ring-indigo-500/10' : 'border-slate-200 dark:border-slate-800 opacity-70'} bg-white dark:bg-slate-900 p-6 flex flex-col justify-between`}>
+          {/* CARD 2: ₹99 Promotional Special Offer (Featured) */}
+          <div
+            onClick={() => isEligible && setSelectedPlanSlug('promo_99')}
+            className={`relative rounded-2xl cursor-pointer transition-all duration-200 p-5 flex flex-col justify-between ${
+              selectedPlanSlug === 'promo_99'
+                ? 'border-2 border-indigo-600 dark:border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-xl'
+                : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs'
+            }`}
+          >
+            {/* Top Badge */}
             {isEligible && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold uppercase tracking-wider shadow-xs">
-                Special Offer
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-[10px] font-bold uppercase tracking-wider shadow-md">
+                50% Promotional Offer
               </div>
             )}
-            <div className="space-y-4">
+
+            <div className="space-y-3.5">
+              {/* Header & Radio */}
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                  Introductory Offer
+                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                  Plan 2 • Special Offer
                 </span>
-                {sub?.amount === 9900 && (
-                  <Badge className="bg-indigo-600 text-white text-xs">Active Plan</Badge>
-                )}
+                <div
+                  className={`h-5 w-5 rounded-full border flex items-center justify-center transition-all ${
+                    selectedPlanSlug === 'promo_99'
+                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                      : 'border-slate-300 dark:border-slate-700 bg-transparent'
+                  }`}
+                >
+                  {selectedPlanSlug === 'promo_99' && <Check className="h-3 w-3 stroke-[3]" />}
+                </div>
               </div>
+
               <div>
-                <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                   QuoteFlow Special Offer
                 </h4>
-                <p className="text-xs text-slate-500 mt-1">₹99/mo for first 3 successful billing cycles</p>
+                <p className="text-xs text-slate-500 mt-0.5">₹99/mo for 3 billing cycles</p>
               </div>
-              <div className="pt-2">
-                <span className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400">₹99</span>
-                <span className="text-xs text-slate-400 ml-1">/month</span>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Then automatically ₹199/month thereafter
+
+              <div className="pt-1">
+                <span className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">₹99</span>
+                <span className="text-xs text-slate-400 ml-1">/ month</span>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Then automatically ₹199/month
                 </p>
               </div>
-              <ul className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300 pt-2 border-t border-slate-100 dark:border-slate-800">
+
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>3 Months at 50% discount</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>3 Cycles at 50% discount</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Automatic server-side plan transition</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Automatic transition to ₹199</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>No need to re-subscribe manually</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Applies after trial ends</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Cancel anytime at period end</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Cancel anytime at cycle end</span>
                 </li>
               </ul>
             </div>
 
-            <div className="pt-6">
+            <div className="pt-5">
               {isEligible ? (
                 <Button
-                  onClick={() => handleSubscribe('promo_99')}
-                  disabled={isProcessingCheckout || sub?.amount === 9900}
-                  className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-semibold text-xs shadow-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSubscribe('promo_99');
+                  }}
+                  disabled={isProcessingCheckout || (sub?.amount === 9900 && !access?.isTrial) || isPrepaidTrial}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-xs"
                 >
                   {isProcessingCheckout ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : sub?.amount === 9900 ? (
+                  ) : isPrepaidTrial ? (
+                    'Scheduled After Trial'
+                  ) : sub?.amount === 9900 && !access?.isTrial ? (
                     'Active Plan'
                   ) : (
-                    'Claim ₹99 Offer'
+                    'Pay & Lock In ₹99'
                   )}
                 </Button>
               ) : (
                 <Button disabled variant="outline" className="w-full text-xs text-slate-400">
-                  Offer Already Redeemed
+                  Already Redeemed
                 </Button>
               )}
             </div>
           </div>
 
-          {/* Plan 3: ₹199 Standard */}
-          <div className="relative rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 flex flex-col justify-between shadow-xs">
-            <div className="space-y-4">
+          {/* CARD 3: ₹199 Standard Plan */}
+          <div
+            onClick={() => setSelectedPlanSlug('monthly_199')}
+            className={`relative rounded-2xl cursor-pointer transition-all duration-200 p-5 flex flex-col justify-between ${
+              selectedPlanSlug === 'monthly_199'
+                ? 'border-2 border-indigo-600 dark:border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-xl'
+                : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 shadow-xs'
+            }`}
+          >
+            <div className="space-y-3.5">
+              {/* Header & Radio */}
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Standard Plan</span>
-                {sub?.amount === 19900 && (
-                  <Badge className="bg-emerald-600 text-white text-xs">Active Plan</Badge>
-                )}
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Plan 3 • Standard
+                </span>
+                <div
+                  className={`h-5 w-5 rounded-full border flex items-center justify-center transition-all ${
+                    selectedPlanSlug === 'monthly_199'
+                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                      : 'border-slate-300 dark:border-slate-700 bg-transparent'
+                  }`}
+                >
+                  {selectedPlanSlug === 'monthly_199' && <Check className="h-3 w-3 stroke-[3]" />}
+                </div>
               </div>
+
               <div>
-                <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                   QuoteFlow Standard
                 </h4>
-                <p className="text-xs text-slate-500 mt-1">Recurring monthly subscription</p>
+                <p className="text-xs text-slate-500 mt-0.5">Recurring monthly subscription</p>
               </div>
-              <div className="pt-2">
-                <span className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">₹199</span>
-                <span className="text-xs text-slate-400 ml-1">/month</span>
-                <p className="text-[11px] text-slate-500 mt-1">Recurring indefinitely until cancelled</p>
+
+              <div className="pt-1">
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">₹199</span>
+                <span className="text-xs text-slate-400 ml-1">/ month</span>
+                <p className="text-[11px] text-slate-400 mt-0.5">Recurring indefinitely</p>
               </div>
-              <ul className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300 pt-2 border-t border-slate-100 dark:border-slate-800">
+
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Unlimited Quotations & Revisions</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Full Commercial Tax Invoices</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Tax Invoice Sequential Numbering</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Sequential Invoice Numbering</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>Interactive Client PIN Gate Portal</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                   <span>7-Day Payment Grace Period</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Dedicated Developer Support</span>
                 </li>
               </ul>
             </div>
 
-            <div className="pt-6">
+            <div className="pt-5">
               <Button
                 variant={sub?.amount === 19900 ? 'outline' : 'primary'}
-                onClick={() => handleSubscribe('monthly_199')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSubscribe('monthly_199');
+                }}
                 disabled={isProcessingCheckout || sub?.amount === 19900}
                 className="w-full text-xs font-semibold"
               >
@@ -604,7 +760,7 @@ export function BillingView({ initialData }: BillingViewProps) {
               <span>Payment History</span>
             </h4>
             <p className="text-xs text-slate-500">
-              Verified recurring transactions recorded via Razorpay webhooks.
+              Verified transactions and subscription charges recorded via Razorpay.
             </p>
           </div>
         </div>
@@ -650,9 +806,20 @@ export function BillingView({ initialData }: BillingViewProps) {
           </div>
         ) : (
           <div className="p-8 text-center text-slate-400 text-xs">
-            No payments recorded yet. Active payments will show here after confirmed Razorpay billing cycles.
+            No payments recorded yet. Confirmed transactions will appear here automatically.
           </div>
         )}
+      </div>
+
+      {/* Floating Need Help Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <Button
+          onClick={() => setSupportModalOpen(true)}
+          className="rounded-full shadow-2xl bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 flex items-center gap-2 text-xs font-semibold ring-4 ring-indigo-500/20"
+        >
+          <Headphones className="h-4 w-4" />
+          <span>Support & Help</span>
+        </Button>
       </div>
 
       {/* Cancellation Modal */}
@@ -708,6 +875,15 @@ export function BillingView({ initialData }: BillingViewProps) {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Support & Help Popup Modal */}
+      {supportModalOpen && (
+        <SupportHelpModal
+          isOpen={supportModalOpen}
+          onClose={() => setSupportModalOpen(false)}
+          defaultCategory="Billing"
+        />
       )}
     </div>
   );

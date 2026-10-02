@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { subject, category, priority, description, attachments } = body;
+    const { subject, category, priority, description, attachments, callback_requested, callback_phone } = body;
 
     if (!subject?.trim() || !description?.trim()) {
       return NextResponse.json(
@@ -78,6 +78,8 @@ export async function POST(req: NextRequest) {
       priority: prio,
       description: description.trim(),
       attachments: attachments || [],
+      callbackRequested: Boolean(callback_requested),
+      callbackPhone: callback_phone ? String(callback_phone).trim() : undefined,
     });
 
     return NextResponse.json({ success: true, ticket });

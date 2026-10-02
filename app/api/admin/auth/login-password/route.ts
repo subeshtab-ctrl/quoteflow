@@ -4,6 +4,7 @@ import {
   verifyPassword,
   createAdminSessionToken,
   hasDeveloperAdminPassword,
+  DEVELOPER_ADMIN_EMAIL,
   DEV_ADMIN_COOKIE_NAME,
 } from '@/lib/billing/dev-admin-auth';
 
@@ -12,27 +13,29 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const email = (body.email || '').trim().toLowerCase();
     const password = body.password || '';
 
-    if (!hasDeveloperAdminPassword()) {
+    // Verify email against authorized developer admin
+    if (!email || email !== DEVELOPER_ADMIN_EMAIL.toLowerCase()) {
       return NextResponse.json(
-        { error: 'No Developer Admin password has been set yet. Please verify via email code to set your password.' },
+        { error: 'Invalid credentials. Access restricted to authorized developer admin.' },
+        { status: 401 }
+      );
+    }
+
+    if (!password) {
+      return NextResponse.json(
+        { error: 'Please enter your Developer Admin password.' },
         { status: 400 }
       );
     }
 
     const cfg = getDeveloperAdminConfig();
-    if (!cfg.passwordHash || !cfg.salt) {
-      return NextResponse.json(
-        { error: 'Password configuration missing. Please verify via email code.' },
-        { status: 400 }
-      );
-    }
-
-    const isValid = verifyPassword(password, cfg.passwordHash, cfg.salt);
+    const isValid = verifyPassword(password, cfg.passwordHash || '', cfg.salt || '');
     if (!isValid) {
       return NextResponse.json(
-        { error: 'Incorrect Developer Admin password. Try again or verify via email code.' },
+        { error: 'Invalid email or password. Please try again.' },
         { status: 401 }
       );
     }
@@ -57,6 +60,6 @@ export async function POST(req: NextRequest) {
     return response;
   } catch (err: any) {
     console.error('Developer admin password login error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Authentication error' }, { status: 500 });
   }
 }

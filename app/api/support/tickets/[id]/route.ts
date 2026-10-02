@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService } from '@/lib/billing/subscription-service';
+import { isAuthorizedDeveloperAdmin, DEVELOPER_ADMIN_EMAIL } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 
 export async function GET(
@@ -8,8 +9,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const isDevAdmin = await isAuthorizedDeveloperAdmin(req);
     const auth = await getAuthenticatedUserContext();
-    if (!auth) {
+    if (!auth && !isDevAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -20,9 +22,12 @@ export async function GET(
     }
 
     // Tenant isolation check
-    const isOwnerOrAdmin = auth.role === 'OWNER' || auth.role === 'ADMIN';
-    const isDeveloper = auth.email?.toLowerCase() === 'subeshtab@gmail.com';
-    if (ticket.business_id !== auth.orgId && !isDeveloper) {
+    const isDeveloper =
+      isDevAdmin ||
+      auth?.email?.toLowerCase() === DEVELOPER_ADMIN_EMAIL.toLowerCase() ||
+      auth?.email?.toLowerCase() === 'subeshtab@gmail.com';
+
+    if (ticket.business_id !== auth?.orgId && !isDeveloper) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -54,8 +59,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const isDevAdmin = await isAuthorizedDeveloperAdmin(req);
     const auth = await getAuthenticatedUserContext();
-    if (!auth) {
+    if (!auth && !isDevAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -65,8 +71,12 @@ export async function POST(
       return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
     }
 
-    const isDeveloper = auth.email?.toLowerCase() === 'subeshtab@gmail.com';
-    if (ticket.business_id !== auth.orgId && !isDeveloper) {
+    const isDeveloper =
+      isDevAdmin ||
+      auth?.email?.toLowerCase() === DEVELOPER_ADMIN_EMAIL.toLowerCase() ||
+      auth?.email?.toLowerCase() === 'subeshtab@gmail.com';
+
+    if (ticket.business_id !== auth?.orgId && !isDeveloper) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -78,11 +88,11 @@ export async function POST(
     }
 
     const senderType = isDeveloper ? 'developer' : 'business';
-    const senderName = isDeveloper ? 'QuoteFlow Support Engineer' : auth.fullName;
+    const senderName = isDeveloper ? 'QuoteFlow Support Engineer' : (auth?.fullName || 'Customer');
 
     const newMsg = await subscriptionService.addTicketMessage({
       ticketId: id,
-      senderUserId: auth.userId,
+      senderUserId: auth?.userId || 'dev_admin_root',
       senderType,
       senderName,
       message: message.trim(),
@@ -101,8 +111,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const isDevAdmin = await isAuthorizedDeveloperAdmin(req);
     const auth = await getAuthenticatedUserContext();
-    if (!auth) {
+    if (!auth && !isDevAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -112,8 +123,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
     }
 
-    const isDeveloper = auth.email?.toLowerCase() === 'subeshtab@gmail.com';
-    if (ticket.business_id !== auth.orgId && !isDeveloper) {
+    const isDeveloper =
+      isDevAdmin ||
+      auth?.email?.toLowerCase() === DEVELOPER_ADMIN_EMAIL.toLowerCase() ||
+      auth?.email?.toLowerCase() === 'subeshtab@gmail.com';
+
+    if (ticket.business_id !== auth?.orgId && !isDeveloper) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -121,9 +136,15 @@ export async function PATCH(
     const { status, priority, assigned_to } = body;
 
     if (status) {
-      ticket.status = status;
-      if (status === 'resolved') ticket.resolved_at = new Date().toISOString();
-      if (status === 'closed') ticket.closed_at = new Date().toISOString();
+      if (status === 'resolved' || status === 'solved') {
+        ticket.status = 'resolved';
+        ticket.resolved_at = new Date().toISOString();
+      } else if (status === 'closed') {
+        ticket.status = 'closed';
+        ticket.closed_at = new Date().toISOString();
+      } else {
+        ticket.status = status;
+      }
     }
     if (priority) ticket.priority = priority;
     if (assigned_to !== undefined) ticket.assigned_to = assigned_to;
