@@ -28,7 +28,6 @@ import {
   ChevronDown,
   ChevronUp,
   BookOpen,
-  X,
   PlusCircle,
   TrendingUp,
   Clock,
@@ -466,7 +465,6 @@ export function TrainingView() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [stepProgress, setStepProgress] = useState<number>(0);
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
-  const [showFullScriptModal, setShowFullScriptModal] = useState<boolean>(false);
   const [expandedAccordionId, setExpandedAccordionId] = useState<number | null>(1);
 
   const activeChapter = chapters.find((c) => c.id === selectedChapterId) || chapters[0];
@@ -614,15 +612,6 @@ export function TrainingView() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFullScriptModal(true)}
-            className="gap-1.5 text-xs font-semibold h-8"
-          >
-            <BookOpen className="h-3.5 w-3.5 text-indigo-600" />
-            <span>Recording Script</span>
-          </Button>
           <Link href={activeChapter.ctaHref}>
             <Button size="sm" className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-8 shadow-xs">
               <span>{activeChapter.cta}</span>
@@ -1271,58 +1260,6 @@ export function TrainingView() {
           })}
         </div>
       </div>
-
-      {/* Full Video Production Script Modal */}
-      {showFullScriptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden text-xs">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850/50">
-              <div className="flex items-center gap-2.5">
-                <Video className="h-4 w-4 text-indigo-600" />
-                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                  QuoteFlow Video Production Guide (Word-for-Word Script)
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFullScriptModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto space-y-4">
-              {chapters.map((ch) => (
-                <div key={ch.id} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5 font-bold">
-                    <span>{ch.title} ({ch.duration})</span>
-                    <span className="text-[10px] uppercase text-indigo-600">{ch.category}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {ch.steps.map((st, sIdx) => (
-                      <div key={sIdx} className="space-y-0.5">
-                        <p className="font-semibold text-slate-800 dark:text-slate-200">
-                          Step {sIdx + 1}: {st.title} (~{st.durationSec}s) — [Cue: {st.actionSummary}]
-                        </p>
-                        <p className="text-slate-600 dark:text-slate-300 italic">
-                          &ldquo;{st.narration}&rdquo;
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850/50">
-              <Button size="sm" onClick={() => setShowFullScriptModal(false)} className="bg-indigo-600 text-white font-bold h-7 text-xs">
-                Close
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
