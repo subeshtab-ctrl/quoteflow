@@ -255,7 +255,7 @@ export function DashboardHeader({
                 {displayName}
               </p>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
-                {displayEmail || displayCompany}
+                {userProfile?.role ? `${userProfile.role.toUpperCase()} • Workspace` : displayCompany}
               </p>
             </div>
             <ChevronDown className="h-3.5 w-3.5 text-slate-400 hidden lg:block" />
@@ -279,8 +279,9 @@ export function DashboardHeader({
                   {displayName}
                 </p>
                 {displayEmail && (
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                    {displayEmail}
+                  <p className="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate mt-0.5 flex items-center gap-1">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                    <span>{displayEmail.replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => `${a}***${c}`)}</span>
                   </p>
                 )}
               </div>

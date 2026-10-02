@@ -1112,8 +1112,8 @@ export function InvoiceBuilder({
                         onChange={(e) => updateItem(idx, { tax_rate: parseFloat(e.target.value) || 0 })}
                         className="h-7 rounded border border-slate-200 px-2 text-xs font-semibold bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200"
                       >
-                        {countryProfile.taxRates.map((tr) => (
-                          <option key={tr.rate} value={tr.rate}>
+                        {countryProfile.taxRates.map((tr, tIdx) => (
+                          <option key={`${tr.rate}-${tr.label}-${tIdx}`} value={tr.rate}>
                             {tr.label}
                           </option>
                         ))}
