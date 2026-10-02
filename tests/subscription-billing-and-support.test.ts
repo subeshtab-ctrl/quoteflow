@@ -247,7 +247,7 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
     it('validates authentic signatures and rejects forged signatures', () => {
       const orderId = 'order_test_123456';
       const paymentId = 'pay_test_987654';
-      const secret = process.env.RAZORPAY_KEY_SECRET || 'mock_secret_for_tests';
+      const secret = razorpayService.getKeySecret();
 
       const validSignature = crypto
         .createHmac('sha256', secret)

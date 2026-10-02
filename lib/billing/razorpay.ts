@@ -52,8 +52,11 @@ export class RazorpayService {
   private baseUrl = 'https://api.razorpay.com/v1';
 
   constructor() {
-    this.keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || '';
-    this.keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    this.keyId =
+      process.env.RAZORPAY_KEY_ID ||
+      process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+      'rzp_test_Tj1rwkFR1rYnbz';
+    this.keySecret = process.env.RAZORPAY_KEY_SECRET || 'mypvV0zCt7tVPIzxRov72AUG';
     this.webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
     this.mode = (process.env.RAZORPAY_MODE || 'test').toLowerCase();
   }
@@ -64,6 +67,10 @@ export class RazorpayService {
 
   public getKeyId(): string {
     return this.keyId;
+  }
+
+  public getKeySecret(): string {
+    return this.keySecret;
   }
 
   public getGracePeriodDays(): number {
