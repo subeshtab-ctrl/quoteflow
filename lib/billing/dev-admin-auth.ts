@@ -20,6 +20,8 @@ export interface DeveloperAdminConfig {
   passwordHash: string | null;
   salt: string | null;
   updatedAt: string | null;
+  razorpayKeyId?: string | null;
+  razorpayKeySecret?: string | null;
   razorpayPlanIdPromo99?: string | null;
   razorpayPlanIdStandard199?: string | null;
 }
@@ -98,6 +100,8 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
           passwordHash: parsed.passwordHash,
           salt: parsed.salt,
           updatedAt: parsed.updatedAt || null,
+          razorpayKeyId: parsed.razorpayKeyId || process.env.RAZORPAY_KEY_ID || null,
+          razorpayKeySecret: parsed.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || null,
           razorpayPlanIdPromo99: parsed.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
           razorpayPlanIdStandard199: parsed.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || null,
         };
@@ -183,9 +187,26 @@ export function updateRazorpayPlansConfig(
   promoPlanId?: string | null,
   standardPlanId?: string | null
 ): DeveloperAdminConfig {
+  return updateRazorpayApiConfig({
+    promoPlanId,
+    standardPlanId,
+  });
+}
+
+/**
+ * Update Razorpay API Keys & Plan IDs configuration dynamically
+ */
+export function updateRazorpayApiConfig(params: {
+  keyId?: string | null;
+  keySecret?: string | null;
+  promoPlanId?: string | null;
+  standardPlanId?: string | null;
+}): DeveloperAdminConfig {
   const current = getDeveloperAdminConfig();
-  if (promoPlanId !== undefined) current.razorpayPlanIdPromo99 = promoPlanId?.trim() || null;
-  if (standardPlanId !== undefined) current.razorpayPlanIdStandard199 = standardPlanId?.trim() || null;
+  if (params.keyId !== undefined) current.razorpayKeyId = params.keyId?.trim() || null;
+  if (params.keySecret !== undefined) current.razorpayKeySecret = params.keySecret?.trim() || null;
+  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || null;
+  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || null;
   current.updatedAt = new Date().toISOString();
   globalThis.__devAdminConfig__ = current;
 
@@ -195,6 +216,30 @@ export function updateRazorpayPlansConfig(
   } catch (err) {
     console.warn('Could not write admin config to disk (in-memory config preserved):', err);
   }
+
+  try {
+    const envPath = path.join(process.cwd(), '.env.local');
+    if (fs.existsSync(envPath)) {
+      let content = fs.readFileSync(envPath, 'utf-8');
+      if (params.keyId && params.keyId.trim()) {
+        content = content.replace(/^RAZORPAY_KEY_ID=.*/m, `RAZORPAY_KEY_ID=${params.keyId.trim()}`);
+        content = content.replace(/^NEXT_PUBLIC_RAZORPAY_KEY_ID=.*/m, `NEXT_PUBLIC_RAZORPAY_KEY_ID=${params.keyId.trim()}`);
+      }
+      if (params.keySecret && params.keySecret.trim()) {
+        content = content.replace(/^RAZORPAY_KEY_SECRET=.*/m, `RAZORPAY_KEY_SECRET=${params.keySecret.trim()}`);
+      }
+      if (params.promoPlanId && params.promoPlanId.trim()) {
+        content = content.replace(/^RAZORPAY_PLAN_ID_PROMO_99=.*/m, `RAZORPAY_PLAN_ID_PROMO_99=${params.promoPlanId.trim()}`);
+      }
+      if (params.standardPlanId && params.standardPlanId.trim()) {
+        content = content.replace(/^RAZORPAY_PLAN_ID_STANDARD_199=.*/m, `RAZORPAY_PLAN_ID_STANDARD_199=${params.standardPlanId.trim()}`);
+      }
+      fs.writeFileSync(envPath, content, 'utf-8');
+    }
+  } catch {
+    // Non-fatal if filesystem is read-only (e.g. serverless)
+  }
+
   return current;
 }
 

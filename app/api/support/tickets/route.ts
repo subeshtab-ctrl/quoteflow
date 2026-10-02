@@ -19,6 +19,8 @@ export async function GET(req: NextRequest) {
 
     const tickets = await store.getSupportTickets({
       businessId: auth.orgId,
+      userId: auth.userId,
+      creatorEmail: auth.email,
       status,
       category,
       priority,

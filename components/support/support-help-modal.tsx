@@ -265,31 +265,58 @@ export function SupportHelpModal({
               </p>
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2">
-            {view !== 'form' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setView('form')}
-                className="text-xs gap-1.5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>New Ticket</span>
-              </Button>
-            )}
-            {recentTickets.length > 0 && view !== 'list' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setView('list')}
-                className="text-xs gap-1.5"
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                <span>My Tickets ({recentTickets.length})</span>
-              </Button>
-            )}
-          </div>
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-2 pt-3 pb-2 border-b border-slate-100 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => setView('form')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              view === 'form'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Create New Ticket</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setView('list');
+              loadRecentTickets();
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              view === 'list'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            <span>Support History & Chat</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                view === 'list'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+              }`}
+            >
+              {recentTickets.length}
+            </span>
+          </button>
+
+          {view === 'chat' && activeTicket && (
+            <button
+              type="button"
+              onClick={() => setView('list')}
+              className="ml-auto flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              <ArrowLeft className="h-3 w-3" />
+              <span>Back to Tickets</span>
+            </button>
+          )}
         </div>
 
         {/* VIEW 1: TICKET CREATION FORM */}

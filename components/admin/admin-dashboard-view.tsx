@@ -30,6 +30,9 @@ import {
   Loader2,
   RefreshCw,
   Eye,
+  EyeOff,
+  Key,
+  Lock,
   FileText,
   UserCheck,
   Activity,
@@ -37,12 +40,15 @@ import {
   Paperclip,
 } from 'lucide-react';
 
-export function AdminDashboardView() {
+export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark' } = {}) {
   const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'razorpay' | 'audit'>('overview');
   const [isLoading, setIsLoading] = useState(true);
 
   // Razorpay Configuration State
   const [razorpayConfig, setRazorpayConfig] = useState<any>(null);
+  const [razorpayKeyId, setRazorpayKeyId] = useState('');
+  const [razorpayKeySecret, setRazorpayKeySecret] = useState('');
+  const [showKeySecret, setShowKeySecret] = useState(false);
   const [razorpayPromoPlanId, setRazorpayPromoPlanId] = useState('');
   const [razorpayStandardPlanId, setRazorpayStandardPlanId] = useState('');
   const [isSavingRazorpayPlans, setIsSavingRazorpayPlans] = useState(false);
@@ -149,6 +155,7 @@ export function AdminDashboardView() {
       const json = await res.json();
       if (res.ok && json.razorpay) {
         setRazorpayConfig(json.razorpay);
+        setRazorpayKeyId(json.razorpay.keyId || '');
         setRazorpayPromoPlanId(json.razorpay.promoPlanId || '');
         setRazorpayStandardPlanId(json.razorpay.standardPlanId || '');
       }
@@ -164,20 +171,23 @@ export function AdminDashboardView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'save_plans',
-          promo_plan_id: razorpayPromoPlanId,
-          standard_plan_id: razorpayStandardPlanId,
+          action: 'save_credentials',
+          key_id: razorpayKeyId.trim(),
+          key_secret: razorpayKeySecret.trim() || undefined,
+          promo_plan_id: razorpayPromoPlanId.trim(),
+          standard_plan_id: razorpayStandardPlanId.trim(),
         }),
       });
       const json = await res.json();
       if (res.ok) {
-        setRazorpayFeedback({ type: 'success', text: 'Razorpay Plan IDs saved successfully!' });
+        setRazorpayFeedback({ type: 'success', text: 'Razorpay API credentials and Plan IDs updated successfully! Ready for live payments.' });
+        setRazorpayKeySecret('');
         await fetchRazorpayConfig();
       } else {
-        setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to save plan IDs' });
+        setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to save Razorpay configuration' });
       }
     } catch (err: any) {
-      setRazorpayFeedback({ type: 'error', text: err.message || 'Error saving plan IDs' });
+      setRazorpayFeedback({ type: 'error', text: err.message || 'Error saving Razorpay configuration' });
     } finally {
       setIsSavingRazorpayPlans(false);
     }
@@ -193,13 +203,18 @@ export function AdminDashboardView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'test_connection',
-          promo_plan_id: razorpayPromoPlanId,
-          standard_plan_id: razorpayStandardPlanId,
+          key_id: razorpayKeyId.trim() || undefined,
+          key_secret: razorpayKeySecret.trim() || undefined,
+          promo_plan_id: razorpayPromoPlanId.trim(),
+          standard_plan_id: razorpayStandardPlanId.trim(),
         }),
       });
       const json = await res.json();
       if (res.ok && json.testResult) {
         setRazorpayTestResult(json.testResult);
+        if (json.testResult.apiSuccess) {
+          await fetchRazorpayConfig();
+        }
       } else {
         setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to execute connection test' });
       }
@@ -966,7 +981,7 @@ export function AdminDashboardView() {
 
             {razorpayTestResult && (
               <div
-                className={`p-4 rounded-xl border text-xs space-y-2 ${
+                className={`p-4 rounded-xl border text-xs space-y-3 ${
                   razorpayTestResult.apiSuccess
                     ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
                     : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
@@ -980,6 +995,19 @@ export function AdminDashboardView() {
                   )}
                   <span>{razorpayTestResult.apiMessage}</span>
                 </div>
+
+                {!razorpayTestResult.apiSuccess && (
+                  <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-900/60 text-rose-200 text-xs space-y-1">
+                    <p className="font-semibold text-rose-100 flex items-center gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                      <span>Razorpay Authentication Failed or Key Expired</span>
+                    </p>
+                    <p className="text-[11px] text-rose-300/90 leading-relaxed">
+                      If you recently regenerated your Razorpay keys in the Razorpay Dashboard, the old keys are expired.
+                      Please paste your newly generated <strong>Key ID</strong> and <strong>Key Secret</strong> below and click <strong>Save Credentials &amp; Plans</strong>.
+                    </p>
+                  </div>
+                )}
 
                 {razorpayTestResult.apiSuccess && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-slate-300 border-t border-emerald-500/20">
@@ -1005,18 +1033,77 @@ export function AdminDashboardView() {
             )}
           </div>
 
-          {/* Form to configure Razorpay Plan IDs */}
-          <div className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
+          {/* Form to configure Razorpay API Keys & Plan IDs */}
+          <div className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Razorpay Subscription Plan IDs
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Key className="h-4 w-4 text-indigo-500" />
+                <span>Razorpay API Credentials &amp; Subscription Plans</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Link your created Razorpay Subscription Plans directly so QuoteFlow initiates authentic recurring subscriptions.
+                Update your live or test credentials and linked plans. Changes are applied dynamically to checkout sessions.
               </p>
             </div>
 
             <form onSubmit={handleSaveRazorpayPlans} className="space-y-4 max-w-2xl">
+              {/* Key ID Field */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>Razorpay Key ID</span>
+                  <span className="text-[10px] font-normal text-slate-400">Public (used in checkout modal)</span>
+                </label>
+                <div className="relative">
+                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input
+                    type="text"
+                    placeholder="rzp_test_... or rzp_live_..."
+                    value={razorpayKeyId}
+                    onChange={(e) => setRazorpayKeyId(e.target.value)}
+                    className="pl-9 font-mono text-xs"
+                    required
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  From Razorpay Dashboard &rarr; Account &amp; Settings &rarr; API Keys.
+                </p>
+              </div>
+
+              {/* Key Secret Field */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>Razorpay Key Secret</span>
+                  {razorpayConfig?.hasSecret && (
+                    <span className="text-[10px] font-semibold text-emerald-500">✓ Secret already saved on server</span>
+                  )}
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input
+                    type={showKeySecret ? 'text' : 'password'}
+                    placeholder={razorpayConfig?.hasSecret ? '•••••••••••••••••••••••••••• (leave blank to keep unchanged)' : 'Enter Razorpay Key Secret'}
+                    value={razorpayKeySecret}
+                    onChange={(e) => setRazorpayKeySecret(e.target.value)}
+                    className="pl-9 pr-10 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeySecret(!showKeySecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                    aria-label={showKeySecret ? 'Hide key secret' : 'Show key secret'}
+                  >
+                    {showKeySecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Kept strictly on your server. Only enter a value if you wish to set or update the secret.
+                </p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-2">Linked Recurring Plan IDs</h4>
+              </div>
+
+              {/* Promo Plan ID */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Promotional Plan ID (₹99/mo for first 3 cycles)
@@ -1029,10 +1116,11 @@ export function AdminDashboardView() {
                   className="font-mono text-xs"
                 />
                 <p className="text-[11px] text-slate-400">
-                  Plan created in Razorpay Dashboard with frequency: Monthly (1), Amount: ₹99.
+                  Monthly recurring plan created in Razorpay with amount ₹99.
                 </p>
               </div>
 
+              {/* Standard Plan ID */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Standard Plan ID (₹199/mo recurring)
@@ -1045,11 +1133,11 @@ export function AdminDashboardView() {
                   className="font-mono text-xs"
                 />
                 <p className="text-[11px] text-slate-400">
-                  Plan created in Razorpay Dashboard with frequency: Monthly (1), Amount: ₹199.
+                  Monthly recurring plan created in Razorpay with amount ₹199.
                 </p>
               </div>
 
-              <div className="pt-2 flex items-center gap-3">
+              <div className="pt-3 flex items-center gap-3">
                 <Button
                   type="submit"
                   disabled={isSavingRazorpayPlans}
@@ -1060,7 +1148,22 @@ export function AdminDashboardView() {
                   ) : (
                     <CheckCircle2 className="h-3.5 w-3.5" />
                   )}
-                  <span>Save Plan IDs</span>
+                  <span>Save Credentials &amp; Plans</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTestRazorpayConnection}
+                  disabled={isTestingRazorpayConnection}
+                  className="text-xs flex items-center gap-2"
+                >
+                  {isTestingRazorpayConnection ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Activity className="h-3.5 w-3.5 text-indigo-500" />
+                  )}
+                  <span>Test Live Connection</span>
                 </Button>
               </div>
             </form>

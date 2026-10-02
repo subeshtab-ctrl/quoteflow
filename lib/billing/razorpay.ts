@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { getDeveloperAdminConfig } from '@/lib/billing/dev-admin-auth';
 
 export interface RazorpayPlanResponse {
   id: string;
@@ -52,13 +53,30 @@ export class RazorpayService {
   private baseUrl = 'https://api.razorpay.com/v1';
 
   constructor() {
+    this.keyId = '';
+    this.keySecret = '';
+    this.webhookSecret = '';
+    this.mode = 'test';
+    this.reloadCredentials();
+  }
+
+  public reloadCredentials(): void {
+    let cfgKeyId: string | null = null;
+    let cfgKeySecret: string | null = null;
+    try {
+      const cfg = getDeveloperAdminConfig();
+      cfgKeyId = cfg.razorpayKeyId || null;
+      cfgKeySecret = cfg.razorpayKeySecret || null;
+    } catch {}
+
     this.keyId =
+      cfgKeyId ||
       process.env.RAZORPAY_KEY_ID ||
       process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
       'rzp_test_Tj1rwkFR1rYnbz';
-    this.keySecret = process.env.RAZORPAY_KEY_SECRET || 'mypvV0zCt7tVPIzxRov72AUG';
+    this.keySecret = cfgKeySecret || process.env.RAZORPAY_KEY_SECRET || 'mypvV0zCt7tVPIzxRov72AUG';
     this.webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
-    this.mode = (process.env.RAZORPAY_MODE || 'test').toLowerCase();
+    this.mode = (process.env.RAZORPAY_MODE || (this.keyId.startsWith('rzp_test_') ? 'test' : 'live')).toLowerCase();
   }
 
   public getMode(): string {
@@ -66,10 +84,12 @@ export class RazorpayService {
   }
 
   public getKeyId(): string {
+    this.reloadCredentials();
     return this.keyId;
   }
 
   public getKeySecret(): string {
+    this.reloadCredentials();
     return this.keySecret;
   }
 
@@ -223,7 +243,7 @@ export class RazorpayService {
     const period = params.period || 'monthly';
     const interval = params.interval || 1;
 
-    if (!this.isConfigured()) {
+    if (process.env.VITEST || process.env.NODE_ENV === 'test' || !this.isConfigured()) {
       return {
         id: `plan_mock_${params.amount}_${Date.now()}`,
         entity: 'plan',
@@ -278,7 +298,7 @@ export class RazorpayService {
     const totalCount = params.totalCount || 60; // 5 years monthly default
     const customerNotify = params.customerNotify !== undefined ? params.customerNotify : 1;
 
-    if (!this.isConfigured()) {
+    if (process.env.VITEST || process.env.NODE_ENV === 'test' || !this.isConfigured()) {
       const subId = `sub_mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       return {
         id: subId,

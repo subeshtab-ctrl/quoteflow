@@ -3,6 +3,7 @@ import {
   isAuthorizedDeveloperAdmin,
   getDeveloperAdminConfig,
   updateRazorpayPlansConfig,
+  updateRazorpayApiConfig,
 } from '@/lib/billing/dev-admin-auth';
 import { razorpayService } from '@/lib/billing/razorpay';
 
@@ -28,8 +29,10 @@ export async function GET(req: NextRequest) {
       razorpay: {
         isConfigured,
         mode,
-        keyId: keyId ? `${keyId.substring(0, 8)}...` : 'Not Set',
+        keyId: keyId || '',
+        maskedKeyId: keyId ? `${keyId.substring(0, 8)}...` : 'Not Set',
         hasSecret: isConfigured,
+        hasCustomKey: Boolean(cfg.razorpayKeyId),
         promoPlanId: cfg.razorpayPlanIdPromo99 || '',
         standardPlanId: cfg.razorpayPlanIdStandard199 || '',
       },
@@ -51,19 +54,36 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { action, promo_plan_id, standard_plan_id } = body;
+    const { action, key_id, key_secret, promo_plan_id, standard_plan_id } = body;
 
-    if (action === 'save_plans') {
-      const updated = updateRazorpayPlansConfig(promo_plan_id, standard_plan_id);
+    if (action === 'save_credentials' || action === 'save_plans') {
+      const updated = updateRazorpayApiConfig({
+        keyId: key_id,
+        keySecret: key_secret,
+        promoPlanId: promo_plan_id,
+        standardPlanId: standard_plan_id,
+      });
+      razorpayService.reloadCredentials();
+
       return NextResponse.json({
         success: true,
-        message: 'Razorpay Plan IDs saved successfully.',
+        message: 'Razorpay configuration updated successfully.',
+        keyId: razorpayService.getKeyId() || '',
         promoPlanId: updated.razorpayPlanIdPromo99 || '',
         standardPlanId: updated.razorpayPlanIdStandard199 || '',
       });
     }
 
     if (action === 'test_connection') {
+      if (key_id || key_secret || promo_plan_id !== undefined || standard_plan_id !== undefined) {
+        updateRazorpayApiConfig({
+          keyId: key_id,
+          keySecret: key_secret,
+          promoPlanId: promo_plan_id,
+          standardPlanId: standard_plan_id,
+        });
+        razorpayService.reloadCredentials();
+      }
       const cfg = getDeveloperAdminConfig();
       const pId = promo_plan_id !== undefined ? promo_plan_id : cfg.razorpayPlanIdPromo99;
       const sId = standard_plan_id !== undefined ? standard_plan_id : cfg.razorpayPlanIdStandard199;

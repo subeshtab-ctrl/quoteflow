@@ -156,7 +156,7 @@ export function BillingView({ initialData }: BillingViewProps) {
         subscription_id: checkout.subscriptionId,
         name: 'QuoteFlow',
         description: checkout.planName,
-        image: typeof window !== 'undefined' ? `${window.location.origin}/uploads/logo-1790062784938.jpg` : undefined,
+        image: typeof window !== 'undefined' ? `${window.location.origin}/quoteflow-logo.png` : undefined,
         modal: {
           backdropclose: false,
           escape: true,
@@ -420,21 +420,6 @@ export function BillingView({ initialData }: BillingViewProps) {
                 Lock In ₹99 Rate
               </Button>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Razorpay Test Mode Guidance Banner */}
-      {data?.isTestMode && (
-        <div className="p-4 rounded-2xl border border-amber-200/80 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/30 flex items-start gap-3 text-xs text-amber-900 dark:text-amber-200 shadow-xs">
-          <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-semibold text-amber-900 dark:text-amber-100">
-              Razorpay Test Environment Active
-            </p>
-            <p className="text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
-              To test recurring subscription mandates, Razorpay provides recurring domestic test card <span className="font-mono font-bold bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">4718 6091 0820 4366</span> (any future MM/YY & CVV), or select <span className="font-semibold">UPI</span> with test ID <span className="font-mono font-bold bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">success@razorpay</span>, or test <span className="font-semibold">Netbanking</span>.
-            </p>
           </div>
         </div>
       )}

@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +24,20 @@ import Link from 'next/link';
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [hasPassword, setHasPassword] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    const saved = localStorage.getItem('quoteflow_admin_theme') as 'dark' | 'light';
+    if (saved) {
+      setTheme(saved);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('quoteflow_admin_theme', next);
+  };
 
   // Password Modal State
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -123,9 +139,19 @@ export default function AdminPage() {
 
   // Authenticated Developer Admin Console
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
+    <div
+      className={`min-h-screen transition-colors duration-200 ${
+        theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+      } flex flex-col selection:bg-indigo-500 selection:text-white`}
+    >
       {/* Developer Admin Header Bar */}
-      <header className="sticky top-0 z-50 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md px-4 sm:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <header
+        className={`sticky top-0 z-50 border-b backdrop-blur-md px-4 sm:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4 transition-colors ${
+          theme === 'dark'
+            ? 'border-slate-800 bg-slate-900/90 text-white'
+            : 'border-slate-200 bg-white/90 text-slate-900 shadow-xs'
+        }`}
+      >
         {/* Brand & Badge */}
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center h-9 w-9 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 shadow-md">
@@ -133,23 +159,54 @@ export default function AdminPage() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-sm tracking-tight text-white">
+              <span
+                className={`font-bold text-sm tracking-tight ${
+                  theme === 'dark' ? 'text-white' : 'text-slate-900'
+                }`}
+              >
                 QuoteFlow Developer Console
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30">
                 www.blendandbold.com/admin
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Lock className="h-3 w-3 text-emerald-400" />
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <Lock className="h-3 w-3 text-emerald-500 dark:text-emerald-400" />
               <span>Developer Account:</span>
-              <span className="font-semibold text-emerald-400">m.subesh@outlook.com</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                m.subesh@outlook.com
+              </span>
             </div>
           </div>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
+          {/* Light / Dark Mode Toggle */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleTheme}
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+            className={`text-xs gap-1.5 transition-colors ${
+              theme === 'dark'
+                ? 'border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200'
+                : 'border-slate-200 bg-white hover:bg-slate-100 text-slate-700 shadow-xs'
+            }`}
+          >
+            {theme === 'dark' ? (
+              <>
+                <Sun className="h-3.5 w-3.5 text-amber-400" />
+                <span>Light Mode</span>
+              </>
+            ) : (
+              <>
+                <Moon className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Dark Mode</span>
+              </>
+            )}
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -158,9 +215,13 @@ export default function AdminPage() {
               setPasswordError(null);
               setPasswordSuccess(null);
             }}
-            className="border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs gap-1.5"
+            className={`text-xs gap-1.5 ${
+              theme === 'dark'
+                ? 'border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200'
+                : 'border-slate-200 bg-white hover:bg-slate-100 text-slate-700 shadow-xs'
+            }`}
           >
-            <KeyRound className="h-3.5 w-3.5 text-indigo-400" />
+            <KeyRound className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
             <span>{hasPassword ? 'Change Password' : 'Set Password'}</span>
           </Button>
 
@@ -168,7 +229,11 @@ export default function AdminPage() {
             <Button
               variant="outline"
               size="sm"
-              className="border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs gap-1.5"
+              className={`text-xs gap-1.5 ${
+                theme === 'dark'
+                  ? 'border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200'
+                  : 'border-slate-200 bg-white hover:bg-slate-100 text-slate-700 shadow-xs'
+              }`}
             >
               <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
               <span>Customer App</span>
@@ -179,7 +244,7 @@ export default function AdminPage() {
             variant="destructive"
             size="sm"
             onClick={handleLock}
-            className="bg-rose-600/90 hover:bg-rose-600 text-white text-xs gap-1.5"
+            className="bg-rose-600 hover:bg-rose-500 text-white text-xs gap-1.5 shadow-xs"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span>Lock Console</span>
@@ -189,7 +254,7 @@ export default function AdminPage() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-8">
-        <AdminDashboardView />
+        <AdminDashboardView theme={theme} />
       </main>
 
       {/* Modal: Set / Change Password */}

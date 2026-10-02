@@ -6984,6 +6984,8 @@ class QuoteFlowStore {
 
   public async getSupportTickets(params?: {
     businessId?: string;
+    userId?: string;
+    creatorEmail?: string;
     status?: string;
     category?: string;
     priority?: string;
@@ -7005,7 +7007,12 @@ class QuoteFlowStore {
     const fileData = this.loadSupportTicketsFromFile();
     let all = Object.values(fileData);
     if (params?.businessId) {
-      all = all.filter((t) => t.business_id === params.businessId);
+      all = all.filter(
+        (t) =>
+          t.business_id === params.businessId ||
+          (params?.userId && t.created_by_user_id === params.userId) ||
+          (params?.creatorEmail && t.creator_email?.toLowerCase() === params.creatorEmail.toLowerCase())
+      );
     }
     if (params?.status && params.status !== 'all') {
       all = all.filter((t) => t.status === params.status);
@@ -7044,8 +7051,21 @@ class QuoteFlowStore {
     const fileData = this.loadSupportTicketsFromFile();
     const ticket = fileData[ticketId] || null;
     if (ticket) {
-      ticket.messages = this.supportTicketMessages.get(ticketId) || [];
-      ticket.attachments = this.supportTicketAttachments.get(ticketId) || [];
+      const inMemMsgs = this.supportTicketMessages.get(ticketId) || [];
+      const fileMsgs = ticket.messages || [];
+      const msgMap = new Map<string, SupportTicketMessage>();
+      fileMsgs.forEach((m) => msgMap.set(m.id, m));
+      inMemMsgs.forEach((m) => msgMap.set(m.id, m));
+      ticket.messages = Array.from(msgMap.values()).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+
+      const inMemAtts = this.supportTicketAttachments.get(ticketId) || [];
+      const fileAtts = ticket.attachments || [];
+      const attMap = new Map<string, SupportTicketAttachment>();
+      fileAtts.forEach((a) => attMap.set(a.id, a));
+      inMemAtts.forEach((a) => attMap.set(a.id, a));
+      ticket.attachments = Array.from(attMap.values());
     }
     return ticket;
   }
@@ -7082,8 +7102,22 @@ class QuoteFlowStore {
 
   public async saveSupportTicketMessage(message: SupportTicketMessage): Promise<SupportTicketMessage> {
     const list = this.supportTicketMessages.get(message.ticket_id) || [];
-    list.push(message);
+    if (!list.some((m) => m.id === message.id)) {
+      list.push(message);
+    }
     this.supportTicketMessages.set(message.ticket_id, list);
+
+    // Persist to file
+    const fileData = this.loadSupportTicketsFromFile();
+    if (fileData[message.ticket_id]) {
+      const t = fileData[message.ticket_id];
+      t.messages = t.messages || [];
+      if (!t.messages.some((m) => m.id === message.id)) {
+        t.messages.push(message);
+      }
+      t.updated_at = new Date().toISOString();
+      this.saveSupportTicketsToFile(fileData);
+    }
 
     const admin = createAdminClient();
     if (admin) {
@@ -7104,8 +7138,22 @@ class QuoteFlowStore {
 
   public async saveSupportTicketAttachment(attachment: SupportTicketAttachment): Promise<SupportTicketAttachment> {
     const list = this.supportTicketAttachments.get(attachment.ticket_id) || [];
-    list.push(attachment);
+    if (!list.some((a) => a.id === attachment.id)) {
+      list.push(attachment);
+    }
     this.supportTicketAttachments.set(attachment.ticket_id, list);
+
+    // Persist to file
+    const fileData = this.loadSupportTicketsFromFile();
+    if (fileData[attachment.ticket_id]) {
+      const t = fileData[attachment.ticket_id];
+      t.attachments = t.attachments || [];
+      if (!t.attachments.some((a) => a.id === attachment.id)) {
+        t.attachments.push(attachment);
+      }
+      t.updated_at = new Date().toISOString();
+      this.saveSupportTicketsToFile(fileData);
+    }
 
     const admin = createAdminClient();
     if (admin) {
