@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { isAuthorizedDeveloperAdmin, DEVELOPER_ADMIN_EMAIL } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 import { Promotion } from '@/types/database';
+import crypto from 'crypto';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthenticatedUserContext();
-    if (!auth || (auth.role !== 'OWNER' && auth.email.toLowerCase() !== 'subeshtab@gmail.com')) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    const isAuth = await isAuthorizedDeveloperAdmin(req);
+    if (!isAuth) {
+      return NextResponse.json(
+        { error: 'Forbidden: Strict developer admin access required.' },
+        { status: 403 }
+      );
     }
 
     const promotions = await store.getPromotions();
@@ -20,9 +26,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthenticatedUserContext();
-    if (!auth || (auth.role !== 'OWNER' && auth.email.toLowerCase() !== 'subeshtab@gmail.com')) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    const isAuth = await isAuthorizedDeveloperAdmin(req);
+    if (!isAuth) {
+      return NextResponse.json(
+        { error: 'Forbidden: Strict developer admin access required.' },
+        { status: 403 }
+      );
     }
 
     const body = await req.json().catch(() => ({}));
@@ -51,11 +60,10 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    // Save and log admin audit
     await store.logAdminAudit({
       id: crypto.randomUUID(),
-      admin_user_id: auth.userId,
-      admin_email: auth.email,
+      admin_user_id: 'dev_admin_root',
+      admin_email: DEVELOPER_ADMIN_EMAIL,
       action: 'CREATE_PROMOTION',
       target_type: 'promotion',
       target_id: newPromo.id,

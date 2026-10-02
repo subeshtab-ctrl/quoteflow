@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { isAuthorizedDeveloperAdmin } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthenticatedUserContext();
-    if (!auth || (auth.role !== 'OWNER' && auth.email.toLowerCase() !== 'subeshtab@gmail.com')) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    const isAuth = await isAuthorizedDeveloperAdmin(req);
+    if (!isAuth) {
+      return NextResponse.json(
+        { error: 'Forbidden: Strict developer admin access required.' },
+        { status: 403 }
+      );
     }
 
     const [stats, mrrData] = await Promise.all([

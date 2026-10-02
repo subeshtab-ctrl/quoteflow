@@ -73,7 +73,7 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
       const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
       const activeMember =
         (members || []).find((m) => m.organization_id !== DEFAULT_ORG_ID) ||
-        (user.email?.toLowerCase() === 'subeshtab@gmail.com' ? members?.[0] : null);
+        (user.email?.toLowerCase() === 'subeshtab@gmail.com' || user.email?.toLowerCase() === 'm.subesh@outlook.com' ? members?.[0] : null);
 
       if (activeMember?.organization_id) {
         orgId = activeMember.organization_id;
@@ -99,7 +99,7 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
 
   // 3. If user is Subesh M, link to primary org with OWNER role
   const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
-  if (user.email?.toLowerCase() === 'subeshtab@gmail.com') {
+  if (user.email?.toLowerCase() === 'subeshtab@gmail.com' || user.email?.toLowerCase() === 'm.subesh@outlook.com') {
     if (!orgId) orgId = DEFAULT_ORG_ID;
     role = 'OWNER';
   }

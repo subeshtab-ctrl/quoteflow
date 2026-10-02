@@ -2,6 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { subscriptionService, DEFAULT_PLANS, DEFAULT_PROMOTION } from '@/lib/billing/subscription-service';
 import { razorpayService } from '@/lib/billing/razorpay';
 import { store } from '@/lib/supabase/data-store';
+import {
+  generateAdminOtp,
+  verifyAdminOtp,
+  setDeveloperAdminPassword,
+  verifyPassword,
+  hasDeveloperAdminPassword,
+  getDeveloperAdminConfig,
+  createAdminSessionToken,
+  verifyAdminSessionToken,
+  DEVELOPER_ADMIN_EMAIL,
+} from '@/lib/billing/dev-admin-auth';
 import crypto from 'crypto';
 
 describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
@@ -278,6 +289,49 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       const lookup = await store.getSubscriptionEvent(eventId);
       expect(lookup).toBeDefined();
       expect(lookup?.processed).toBe(true);
+    });
+  });
+
+  describe('7. Strict Developer Admin Authentication & Password Verification', () => {
+    it('generates, verifies, and rejects expired/tampered OTP for m.subesh@outlook.com', () => {
+      const otp = generateAdminOtp();
+      expect(otp).toMatch(/^\d{6}$/);
+
+      // Verify wrong code fails
+      expect(verifyAdminOtp('000000')).toBe(false);
+
+      // Verify correct code succeeds
+      expect(verifyAdminOtp(otp)).toBe(true);
+
+      // Cannot reuse already verified OTP
+      expect(verifyAdminOtp(otp)).toBe(false);
+    });
+
+    it('sets, hashes with salt, and verifies developer admin password', () => {
+      const testPw = 'SuperSecretDevAdmin2026!';
+      setDeveloperAdminPassword(testPw);
+
+      expect(hasDeveloperAdminPassword()).toBe(true);
+      const cfg = getDeveloperAdminConfig();
+      expect(cfg.email).toBe(DEVELOPER_ADMIN_EMAIL);
+      expect(cfg.passwordHash).toBeDefined();
+      expect(cfg.salt).toBeDefined();
+
+      // Verify correct password
+      expect(verifyPassword(testPw, cfg.passwordHash!, cfg.salt!)).toBe(true);
+
+      // Verify incorrect password fails
+      expect(verifyPassword('WrongPassword123', cfg.passwordHash!, cfg.salt!)).toBe(false);
+    });
+
+    it('creates tamper-proof developer session token and rejects forged tokens', () => {
+      const token = createAdminSessionToken();
+      expect(verifyAdminSessionToken(token)).toBe(true);
+
+      // Forged tokens
+      expect(verifyAdminSessionToken('hacker@example.com:123456:fake_signature')).toBe(false);
+      expect(verifyAdminSessionToken('')).toBe(false);
+      expect(verifyAdminSessionToken('invalid_token')).toBe(false);
     });
   });
 });

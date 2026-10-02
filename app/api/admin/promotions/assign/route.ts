@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { isAuthorizedDeveloperAdmin, DEVELOPER_ADMIN_EMAIL } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
+import crypto from 'crypto';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthenticatedUserContext();
-    if (!auth || (auth.role !== 'OWNER' && auth.email.toLowerCase() !== 'subeshtab@gmail.com')) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    const isAuth = await isAuthorizedDeveloperAdmin(req);
+    if (!isAuth) {
+      return NextResponse.json(
+        { error: 'Forbidden: Strict developer admin access required.' },
+        { status: 403 }
+      );
     }
 
     const body = await req.json().catch(() => ({}));
@@ -23,8 +29,8 @@ export async function POST(req: NextRequest) {
       await store.updatePromotionAssignmentStatus(business_id, promotion_id, 'revoked');
       await store.logAdminAudit({
         id: crypto.randomUUID(),
-        admin_user_id: auth.userId,
-        admin_email: auth.email,
+        admin_user_id: 'dev_admin_root',
+        admin_email: DEVELOPER_ADMIN_EMAIL,
         action: 'REVOKE_PROMOTION',
         target_type: 'promotion_assignment',
         target_id: `${business_id}:${promotion_id}`,
@@ -42,17 +48,17 @@ export async function POST(req: NextRequest) {
       assigned_at: new Date().toISOString(),
       redeemed_at: null,
       expires_at: null,
-      created_by: auth.userId,
+      created_by: 'dev_admin_root',
     });
 
     await store.logAdminAudit({
       id: crypto.randomUUID(),
-      admin_user_id: auth.userId,
-      admin_email: auth.email,
+      admin_user_id: 'dev_admin_root',
+      admin_email: DEVELOPER_ADMIN_EMAIL,
       action: 'ASSIGN_PROMOTION',
       target_type: 'promotion_assignment',
       target_id: assignment.id,
-      metadata: { business_id, promotion_id },
+      metadata: { business_id, promotion_id, assignment_id: assignment.id },
       created_at: new Date().toISOString(),
     });
 

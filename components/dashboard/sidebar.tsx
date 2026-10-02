@@ -16,7 +16,6 @@ import {
   GraduationCap,
   CreditCard,
   LifeBuoy,
-  ShieldCheck,
 } from 'lucide-react';
 import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } from '@/lib/utils/logo';
 
@@ -73,9 +72,6 @@ export function DashboardSidebar({
     { name: 'Support', href: '/support', icon: LifeBuoy },
     { name: 'Training & Guides', href: '/training', icon: GraduationCap },
     { name: 'Settings', href: '/settings', icon: Settings },
-    ...(userRole === 'OWNER' || userRole === 'ADMIN'
-      ? [{ name: 'Developer Admin', href: '/admin', icon: ShieldCheck }]
-      : []),
   ];
 
   return (
