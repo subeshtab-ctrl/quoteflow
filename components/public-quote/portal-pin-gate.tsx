@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
+  Sparkles,
 } from 'lucide-react';
 
 interface PortalPinGateProps {
@@ -40,6 +41,7 @@ export function PortalPinGate({
   onAuthenticated,
 }: PortalPinGateProps) {
   const isBoth = authMethod === 'BOTH';
+  const isDemo = token === 'sec_8f92m1k4092b' || quotationNumber === 'Q-000042';
   const [selectedMethod, setSelectedMethod] = useState<'MOBILE' | 'EMAIL'>(
     authMethod === 'EMAIL' ? 'EMAIL' : 'MOBILE'
   );
@@ -311,6 +313,41 @@ export function PortalPinGate({
         {/* MODE 1: Enter 6-Digit PIN (Returning Customer) */}
         {mode === 'VERIFY' && (
           <form onSubmit={handleVerifyPin} className="space-y-4">
+            {isDemo && (
+              <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-indigo-900 dark:text-indigo-200">
+                    <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <span>Demo Client Approval Gate</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                    DEMO PIN
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Experience the client-side approval security gate. Enter the demo PIN below or click the auto-fill button to unlock.
+                </p>
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-slate-500">Access PIN:</span>
+                    <span className="font-mono font-bold text-xs bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-300">
+                      123456
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPin('123456');
+                      setError(null);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] transition-all cursor-pointer shadow-xs active:scale-95"
+                  >
+                    Auto-Fill 123456
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                 Enter 6-Digit Access PIN

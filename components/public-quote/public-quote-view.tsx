@@ -29,6 +29,7 @@ import {
   Bitcoin,
   Copy,
   Check,
+  Sparkles,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -126,6 +127,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const org = quotation.organization || initialQuotation.organization;
   const customer = quotation.customer;
   const grandTotalFormatted = formatCurrency(quotation.grand_total, quotation.currency);
+  const isDemo = token === 'sec_8f92m1k4092b' || quotation.quotation_number === 'Q-000042';
 
   const getValidityEndTime = (validUntil?: string | null) => {
     if (!validUntil) return Infinity;
@@ -543,6 +545,42 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   return (
     <div className="min-h-screen bg-slate-100/70 pb-16 pt-4 sm:pt-8 px-3 sm:px-6">
       <div className="mx-auto max-w-4xl space-y-4">
+        {/* Demo Portal Status Banner */}
+        {isDemo && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-indigo-900 text-white text-xs shadow-md border border-indigo-700 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <span className="p-1.5 rounded-xl bg-indigo-700 text-indigo-200">
+                <Sparkles className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="font-bold">✨ Live Client Demo Portal (Approval & Signatures)</p>
+                <p className="text-[11px] text-indigo-200">
+                  Unlocked via Demo PIN <strong className="text-white font-mono">123456</strong>. You can review items, send live chat messages, digitally sign, or download the commercial PDF.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.removeItem('quoteflow_portal_device_token');
+                    if (quotation.customer_id) {
+                      localStorage.removeItem(`quoteflow_portal_cust_${quotation.customer_id}`);
+                    }
+                    document.cookie = `portal_auth_${quotation.id}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+                    document.cookie = 'portal_device_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                  } catch {}
+                  window.location.reload();
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs transition-all cursor-pointer border border-white/20 shadow-xs"
+            >
+              Re-test PIN Gate
+            </button>
+          </div>
+        )}
+
         {/* Sticky Action Banner for Mobile & Desktop */}
         <div className="sticky top-4 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/95 p-3.5 sm:p-4 shadow-lg backdrop-blur-md border border-slate-200/80">
           <div className="flex items-center gap-2">

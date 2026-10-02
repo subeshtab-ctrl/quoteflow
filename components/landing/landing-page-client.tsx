@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   ShieldCheck,
@@ -43,13 +43,20 @@ interface LandingPageProps {
 export function LandingPageClient({ isAuthenticated, userEmail }: LandingPageProps) {
   const [activeFeatureTab, setActiveFeatureTab] = useState(0);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [demoUrl, setDemoUrl] = useState('https://blendandbold.com/q/sec_8f92m1k4092b');
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
   const [demoStep, setDemoStep] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [signatureType, setSignatureType] = useState<'draw' | 'type' | 'upload'>('draw');
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setDemoUrl(`${window.location.origin}/q/sec_8f92m1k4092b`);
+    }
+  }, []);
+
   const handleCopyLink = () => {
-    navigator.clipboard?.writeText('https://blendandbold.com/q/sec_8f92m1k4092b');
+    navigator.clipboard?.writeText(demoUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2200);
   };
@@ -651,40 +658,73 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                   </ul>
                 </div>
 
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner space-y-5">
+                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner space-y-4">
                   <div>
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
-                      Customer Public Approval Link
-                    </label>
-                    <div className="flex items-center gap-2 rounded-xl bg-slate-900 border border-white/[0.1] p-1.5 pr-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Customer Public Approval Link
+                      </label>
+                      <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <Lock className="h-3 w-3" /> Demo PIN: <strong>123456</strong>
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 rounded-xl bg-slate-900 border border-white/[0.1] p-1.5 sm:pr-2">
                       <div className="flex-1 px-3 py-2 text-xs font-mono text-indigo-300 truncate">
-                        https://blendandbold.com/q/sec_8f92m1k4092b
+                        {demoUrl}
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleCopyLink}
-                        className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        {copiedLink ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                        <span>{copiedLink ? 'Copied!' : 'Copy'}</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleCopyLink}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-white/[0.08]"
+                        >
+                          {copiedLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                          <span>{copiedLink ? 'Copied!' : 'Copy'}</span>
+                        </button>
+                        <Link
+                          href="/q/sec_8f92m1k4092b"
+                          target="_blank"
+                          className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-500/20 whitespace-nowrap"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>Open Demo Portal</span>
+                        </Link>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-300">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-indigo-400 shrink-0" />
+                      <span>
+                        <strong>Interactive Demo Portal:</strong> Try unlocking with Demo PIN <code className="bg-slate-900 px-1.5 py-0.5 rounded text-white font-mono font-bold">123456</code>
+                      </span>
+                    </div>
+                    <Link
+                      href="/q/sec_8f92m1k4092b"
+                      target="_blank"
+                      className="font-semibold text-white hover:text-indigo-200 flex items-center gap-1 text-[11px] underline underline-offset-2"
+                    >
+                      <span>Launch Portal</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1">
                     <div className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] text-xs">
                       <p className="font-bold text-emerald-300 flex items-center gap-1.5">
                         <ShieldCheck className="h-4 w-4" /> PIN Gate Security
                       </p>
-                      <p className="text-slate-400 text-[11px] mt-1">
-                        Requires customer phone or email verification before viewing financial figures.
+                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
+                        Protected with Demo PIN <strong className="text-slate-200 font-mono">123456</strong>. Enter or auto-fill PIN to unlock financial breakdown & digital sign-off.
                       </p>
                     </div>
                     <div className="p-3.5 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.05] text-xs">
                       <p className="font-bold text-indigo-300 flex items-center gap-1.5">
                         <Share2 className="h-4 w-4" /> Instant Delivery
                       </p>
-                      <p className="text-slate-400 text-[11px] mt-1">
+                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
                         Send formatted messages directly to client WhatsApp without saving contacts.
                       </p>
                     </div>

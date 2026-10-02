@@ -121,4 +121,49 @@ describe('Client Portal PIN Security & Invoice Audit History', () => {
     expect(statusAudit.action).toBe('STATUS_CHANGED');
     expect(statusAudit.details).toContain('PAID');
   });
+
+  it('provides a fully functional Live Demo Approval Portal via token sec_8f92m1k4092b with Demo PIN 123456', async () => {
+    // 1. Fetch demo quotation by public token sec_8f92m1k4092b
+    const demoQuote = await store.getQuotationByPublicToken('sec_8f92m1k4092b');
+    expect(demoQuote).toBeDefined();
+    expect(demoQuote?.quotation_number).toBe('Q-000042');
+    expect(demoQuote?.currency).toBe('USD');
+    expect(demoQuote?.grand_total).toBe(9676);
+    expect(demoQuote?.customer?.name).toBe('Sarah Jenkins');
+    expect(demoQuote?.customer?.company_name).toBe('Apex Global Tech');
+    expect(demoQuote?.items?.length).toBeGreaterThanOrEqual(2);
+
+    // 2. Fetch multi-quote customer portal resolver
+    const portal = await store.getCustomerPortalQuotationsByToken('sec_8f92m1k4092b');
+    expect(portal.activeQuotation).toBeDefined();
+    expect(portal.activeQuotation?.quotation_number).toBe('Q-000042');
+    expect(portal.allQuotations.length).toBeGreaterThanOrEqual(1);
+
+    // 3. Verify Demo PIN Gate security
+    const pinReg = await store.getPortalPin(demoQuote!.id);
+    expect(pinReg).toBeDefined();
+    expect(pinReg?.pin_hash).toBeDefined();
+
+    // 4. Entering Demo PIN 123456 must succeed
+    const isDemoPinValid = await store.verifyPortalPin(demoQuote!.id, '123456');
+    expect(isDemoPinValid).toBe(true);
+
+    // 5. Entering incorrect PIN must fail
+    const isWrongPinValid = await store.verifyPortalPin(demoQuote!.id, '999999');
+    expect(isWrongPinValid).toBe(false);
+
+    // 6. Approving demo quote digitally
+    const approved = await store.approveQuotation({
+      token: 'sec_8f92m1k4092b',
+      signer_name: 'Sarah Jenkins',
+      signer_company: 'Apex Global Tech',
+      signature_data_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      signature_type: 'DRAWN',
+    });
+    expect(approved.status).toBe('APPROVED');
+    expect(approved.approved_at).toBeDefined();
+
+    // Reset demo state for subsequent tests
+    store.resetDemoQuotation();
+  });
 });

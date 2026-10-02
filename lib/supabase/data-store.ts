@@ -79,6 +79,11 @@ export function buildInvoiceNotesWithPaymentRefs(
   return `${prefix}Payment References:\n${lines.join('\n')}`;
 }
 
+export const DEMO_PORTAL_TOKEN = 'sec_8f92m1k4092b';
+export const DEMO_PORTAL_QUOTE_ID = 'd0000000-0000-0000-0000-000000000042';
+export const DEMO_PORTAL_CUSTOMER_ID = 'b0000000-0000-0000-0000-000000000042';
+export const DEMO_PORTAL_PIN = '123456';
+
 class QuoteFlowStore {
   private organizations: Map<string, Organization> = new Map();
   private customers: Map<string, Customer> = new Map();
@@ -92,6 +97,210 @@ class QuoteFlowStore {
   private invoices: Map<string, Invoice> = new Map();
   private invoiceItems: Map<string, InvoiceItem[]> = new Map();
   private portalPins: Map<string, PortalPinRegistration> = new Map();
+
+  public getDemoQuotation(): Quotation {
+    const existing = this.quotations.get(DEMO_PORTAL_QUOTE_ID);
+    if (existing) {
+      return {
+        ...existing,
+        signature: this.signatures.get(DEMO_PORTAL_QUOTE_ID) || existing.signature || null,
+        customer: existing.customer || this.customers.get(existing.customer_id),
+        items: this.quotationItems.get(DEMO_PORTAL_QUOTE_ID) || existing.items || [],
+        organization: existing.organization || this.organizations.get(DEFAULT_ORG_ID),
+      };
+    }
+    const existingSig = this.signatures.get(DEMO_PORTAL_QUOTE_ID);
+
+    const demoOrg: Organization = this.organizations.get(DEFAULT_ORG_ID) || {
+      id: DEFAULT_ORG_ID,
+      name: 'BlendAndBold / QuoteFlow',
+      logo_url: '/uploads/logo-1790062784938.jpg',
+      slug: 'quoteflow-demo',
+      business_type: 'Cloud SaaS & Enterprise Solutions',
+      email: 'billing@quoteflow.app',
+      phone: '+1 (800) 555-0199',
+      website: 'https://blendandbold.com',
+      gst_vat_number: 'US-EIN-98-7654321',
+      address_line1: '100 Silicon Boulevard, Suite 500',
+      address_line2: null,
+      city: 'San Francisco',
+      state: 'California',
+      country: 'United States',
+      postal_code: '94107',
+      brand_color: '#4f46e5',
+      default_currency: 'USD',
+      default_tax_rate: 18,
+      default_validity_days: 30,
+      quotation_prefix: 'Q-',
+      quotation_start_number: 42,
+      current_quotation_counter: 42,
+      default_terms: '1. Quotation valid for 30 days from issue.\n2. 50% advance required upon signature to commence onboarding.\n3. Taxes and SLA calculated according to regional standards.',
+      invoice_footer: 'Thank you for choosing QuoteFlow!',
+      require_full_payment_for_invoice: false,
+      mode: 'live',
+      current_test_quotation_counter: 0,
+      current_test_invoice_counter: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const demoCustomer: Customer = {
+      id: DEMO_PORTAL_CUSTOMER_ID,
+      organization_id: DEFAULT_ORG_ID,
+      name: 'Sarah Jenkins',
+      company_name: 'Apex Global Tech',
+      email: 'client@apextech.demo',
+      auth_method: 'BOTH',
+      phone_country_code: '+1',
+      phone: '5552345678',
+      billing_address: '450 Innovation Parkway, Floor 12',
+      city: 'Austin',
+      state: 'Texas',
+      country: 'United States',
+      postal_code: '78701',
+      tax_number: 'TX-8829103-A',
+      notes: 'Premier Enterprise Client (Demo Portal)',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const demoItems: QuotationItem[] = [
+      {
+        id: 'e0000000-0000-0000-0000-000000000042',
+        quotation_id: DEMO_PORTAL_QUOTE_ID,
+        product_id: 'c0000000-0000-0000-0000-000000000001',
+        description: 'Enterprise Cloud Hosting & Migration Architecture\nMulti-region cluster with automated failover & backup',
+        quantity: 1,
+        unit: 'unit',
+        unit_price: 4500,
+        discount_type: 'PERCENTAGE',
+        discount_value: 0,
+        discount_amount: 0,
+        tax_rate: 18,
+        tax_amount: 810,
+        line_total: 4500,
+        sort_order: 0,
+      },
+      {
+        id: 'e0000000-0000-0000-0000-000000000043',
+        quotation_id: DEMO_PORTAL_QUOTE_ID,
+        product_id: 'c0000000-0000-0000-0000-000000000004',
+        description: 'Annual 24/7 Priority SLA & DevOps Support\nDedicated Slack bridge & sub-15min response guarantee',
+        quantity: 12,
+        unit: 'mos',
+        unit_price: 350,
+        discount_type: 'PERCENTAGE',
+        discount_value: 0,
+        discount_amount: 0,
+        tax_rate: 18,
+        tax_amount: 666,
+        line_total: 4200,
+        sort_order: 1,
+      },
+    ];
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const expiryDateStr = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+
+    const demoQuote: Quotation = {
+      id: DEMO_PORTAL_QUOTE_ID,
+      organization_id: DEFAULT_ORG_ID,
+      customer_id: DEMO_PORTAL_CUSTOMER_ID,
+      quotation_number: 'Q-000042',
+      revision_number: 1,
+      title: 'Enterprise Cloud Hosting & DevOps Suite',
+      status: 'SENT',
+      issue_date: todayStr,
+      valid_until: expiryDateStr,
+      currency: 'USD',
+      subtotal: 8700,
+      discount_type: 'FIXED',
+      discount_value: 500,
+      discount_amount: 500,
+      tax_rate: 18,
+      tax_amount: 1476,
+      grand_total: 9676,
+      notes: 'Special introductory bundle with multi-region failover and dedicated Slack bridge.',
+      terms_conditions: '1. Quotation valid for 30 days from issue.\n2. 50% advance required upon signature to commence onboarding.\n3. SLA response guarantee: Critical < 15 mins, High < 1 hour.',
+      public_token: DEMO_PORTAL_TOKEN,
+      public_token_hash: hashToken(DEMO_PORTAL_TOKEN),
+      is_token_revoked: false,
+      view_count: 1,
+      first_viewed_at: new Date().toISOString(),
+      last_viewed_at: new Date().toISOString(),
+      advance_percentage: 50,
+      accepted_payment_methods: ['BANK_TRANSFER', 'CARD'],
+      payment_terms_instructions: '50% advance upon digital agreement, balance within 30 days of delivery.',
+      payment_display_mode: 'BOTH',
+      show_bank_details: true,
+      show_upi_details: false,
+      show_crypto_details: false,
+      bank_details: {
+        account_name: 'QuoteFlow Cloud Operations',
+        account_number: '9876543210',
+        iban: 'US0210000219876543210',
+        bank_name: 'Silicon Valley Commercial Bank',
+        branch_name: 'San Francisco Tech Center',
+        swift_bic: 'SVCBUS33',
+      },
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      updated_at: new Date().toISOString(),
+      organization: demoOrg,
+      customer: demoCustomer,
+      items: demoItems,
+      signature: existingSig || null,
+      approved_at: null,
+      approved_document_hash: null,
+    };
+
+    this.quotations.set(DEMO_PORTAL_QUOTE_ID, demoQuote);
+    this.customers.set(demoCustomer.id, demoCustomer);
+    this.quotationItems.set(DEMO_PORTAL_QUOTE_ID, demoItems);
+
+    if (!this.portalPins.has(DEMO_PORTAL_QUOTE_ID)) {
+      this.portalPins.set(DEMO_PORTAL_QUOTE_ID, {
+        id: 'p0000000-0000-0000-0000-000000000042',
+        quotation_id: DEMO_PORTAL_QUOTE_ID,
+        customer_id: DEMO_PORTAL_CUSTOMER_ID,
+        customer_email: 'client@apextech.demo',
+        customer_phone: '5552345678',
+        phone_country_code: '+1',
+        auth_method: 'BOTH',
+        pin_hash: this.hashPin(DEMO_PORTAL_PIN),
+        registered_at: new Date().toISOString(),
+      });
+    }
+
+    if (!this.events.has(DEMO_PORTAL_QUOTE_ID)) {
+      this.events.set(DEMO_PORTAL_QUOTE_ID, [
+        {
+          id: 'chat_demo_1',
+          organization_id: DEFAULT_ORG_ID,
+          quotation_id: DEMO_PORTAL_QUOTE_ID,
+          actor_type: 'USER',
+          actor_name: 'QuoteFlow Concierge',
+          event_type: 'CHAT_MESSAGE',
+          metadata: {
+            senderRole: 'STAFF',
+            senderName: 'QuoteFlow Concierge',
+            message: 'Hello Sarah! Welcome to the interactive Client Approval Portal. Please review your custom proposal, itemized pricing, and SLA terms. Feel free to message here or sign below.',
+            is_payment_proof: false,
+          },
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+      ]);
+    }
+
+    return demoQuote;
+  }
+
+  public resetDemoQuotation(): Quotation {
+    this.quotations.delete(DEMO_PORTAL_QUOTE_ID);
+    this.signatures.delete(DEMO_PORTAL_QUOTE_ID);
+    this.portalPins.delete(DEMO_PORTAL_QUOTE_ID);
+    this.events.delete(DEMO_PORTAL_QUOTE_ID);
+    return this.getDemoQuotation();
+  }
 
   private getOrgSettingsFilePath(): string {
     const dir = path.join(process.cwd(), 'data');
@@ -1414,6 +1623,9 @@ class QuoteFlowStore {
         },
       ]);
     }
+
+    // Seed Demo Approval Portal Quotation & Portal PIN
+    this.getDemoQuotation();
   }
 
   // --- ORGANIZATIONS ---
@@ -2524,6 +2736,7 @@ class QuoteFlowStore {
           // Synchronize memory cache with Supabase quotations for this org
           const remoteIds = new Set(data.map((q) => q.id));
           for (const [id, q] of this.quotations.entries()) {
+            if (id === DEMO_PORTAL_QUOTE_ID) continue;
             if (q.organization_id === orgId && !remoteIds.has(id)) {
               this.quotations.delete(id);
               this.quotationItems.delete(id);
@@ -2706,7 +2919,9 @@ class QuoteFlowStore {
       console.warn('Could not fetch quotations from Supabase, using local cache:', err);
     }
 
-    let list = Array.from(this.quotations.values()).filter((q) => q.organization_id === orgId);
+    let list = Array.from(this.quotations.values()).filter(
+      (q) => q.organization_id === orgId && q.id !== DEMO_PORTAL_QUOTE_ID
+    );
 
     if (filters?.status && filters.status !== 'ALL') {
       list = list.filter((q) => q.status === filters.status);
@@ -2745,6 +2960,9 @@ class QuoteFlowStore {
   }
 
   public async getQuotationById(id: string, orgId?: string): Promise<Quotation | null> {
+    if (id === DEMO_PORTAL_QUOTE_ID) {
+      return this.getDemoQuotation();
+    }
     try {
       const supabase = createAdminClient();
       if (supabase) {
@@ -2967,6 +3185,9 @@ class QuoteFlowStore {
 
   public async getQuotationByPublicToken(token: string): Promise<Quotation | null> {
     const cleanToken = decodeURIComponent(token || '').trim();
+    if (cleanToken === DEMO_PORTAL_TOKEN || cleanToken === hashToken(DEMO_PORTAL_TOKEN)) {
+      return this.getDemoQuotation();
+    }
     const hashed = hashToken(cleanToken);
 
     try {
@@ -3887,6 +4108,23 @@ class QuoteFlowStore {
   }
 
   public async getPortalPin(quotationId: string, forceFresh = false): Promise<PortalPinRegistration | null> {
+    if (quotationId === DEMO_PORTAL_QUOTE_ID) {
+      const pinHash = this.hashPin(DEMO_PORTAL_PIN);
+      const reg: PortalPinRegistration = {
+        id: 'p0000000-0000-0000-0000-000000000042',
+        quotation_id: DEMO_PORTAL_QUOTE_ID,
+        customer_id: DEMO_PORTAL_CUSTOMER_ID,
+        customer_email: 'client@apextech.demo',
+        customer_phone: '5552345678',
+        phone_country_code: '+1',
+        auth_method: 'BOTH',
+        pin_hash: pinHash,
+        registered_at: new Date().toISOString(),
+      };
+      this.portalPins.set(DEMO_PORTAL_QUOTE_ID, reg);
+      return reg;
+    }
+
     if (!forceFresh && this.portalPins.has(quotationId)) {
       return this.portalPins.get(quotationId)!;
     }
@@ -4124,6 +4362,13 @@ class QuoteFlowStore {
   }
 
   public async verifyPortalPin(quotationId: string, pin: string): Promise<boolean> {
+    if (quotationId === DEMO_PORTAL_QUOTE_ID) {
+      const clean = (pin || '').trim();
+      if (clean === DEMO_PORTAL_PIN) {
+        return true;
+      }
+    }
+
     let reg = await this.getPortalPin(quotationId);
     if (!reg) {
       reg = await this.getPortalPin(quotationId, true);
@@ -4150,6 +4395,21 @@ class QuoteFlowStore {
     newPin: string,
     authMethodOverride?: CustomerAuthMethod
   ): Promise<{ success: boolean; message?: string }> {
+    if (quotationId === DEMO_PORTAL_QUOTE_ID) {
+      const cleanPin = newPin.trim();
+      this.portalPins.set(DEMO_PORTAL_QUOTE_ID, {
+        id: 'p0000000-0000-0000-0000-000000000042',
+        quotation_id: DEMO_PORTAL_QUOTE_ID,
+        customer_id: DEMO_PORTAL_CUSTOMER_ID,
+        customer_email: 'client@apextech.demo',
+        customer_phone: '5552345678',
+        phone_country_code: '+1',
+        auth_method: 'BOTH',
+        pin_hash: this.hashPin(cleanPin),
+        registered_at: new Date().toISOString(),
+      });
+      return { success: true, message: '6-digit PIN registered successfully' };
+    }
     this.portalPins.delete(quotationId);
     return await this.registerPortalPin(quotationId, credential, newPin, authMethodOverride);
   }
@@ -4879,6 +5139,15 @@ class QuoteFlowStore {
     activeQuotation: Quotation | null;
     allQuotations: Quotation[];
   }> {
+    const cleanToken = decodeURIComponent(token || '').trim();
+    if (cleanToken === DEMO_PORTAL_TOKEN || cleanToken === hashToken(DEMO_PORTAL_TOKEN)) {
+      const demo = this.getDemoQuotation();
+      return {
+        activeQuotation: demo,
+        allQuotations: [demo],
+      };
+    }
+
     const activeQuotation = await this.getQuotationByPublicToken(token);
     if (!activeQuotation) {
       return { activeQuotation: null, allQuotations: [] };
