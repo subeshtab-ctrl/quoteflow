@@ -438,6 +438,42 @@ export class RazorpayService {
   }
 
   /**
+   * Fetch payment details by payment ID from Razorpay
+   */
+  public async fetchPayment(paymentId: string): Promise<any | null> {
+    if (!this.isConfigured() || paymentId.startsWith('pay_mock_')) {
+      return null;
+    }
+    try {
+      const res = await fetch(`${this.baseUrl}/payments/${paymentId}`, {
+        headers: { Authorization: this.getAuthHeader() },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch invoice details by invoice ID from Razorpay
+   */
+  public async fetchInvoice(invoiceId: string): Promise<any | null> {
+    if (!this.isConfigured() || invoiceId.startsWith('inv_mock_')) {
+      return null;
+    }
+    try {
+      const res = await fetch(`${this.baseUrl}/invoices/${invoiceId}`, {
+        headers: { Authorization: this.getAuthHeader() },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Update Subscription Plan (e.g. promotional ₹99 -> standard ₹199 transition)
    */
   public async updateSubscriptionPlan(

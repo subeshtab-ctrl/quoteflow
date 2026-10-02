@@ -589,6 +589,8 @@ export interface BusinessSubscription {
   last_payment_id: string | null;
   payment_failure_count: number;
   is_trial_prepaid?: boolean;
+  plan_start_mode?: 'immediate' | 'after_trial';
+  autopay_enabled?: boolean;
   scheduled_plan_id?: string | null;
   scheduled_subscription_id?: string | null;
   paid_scheduled_start?: string | null;
@@ -606,10 +608,12 @@ export interface SubscriptionPayment {
   razorpay_payment_id: string;
   razorpay_subscription_id: string | null;
   razorpay_invoice_id: string | null;
+  invoice_url?: string | null;
   amount: number; // in paise
   currency: string;
   status: SubscriptionPaymentStatus;
   payment_method: string | null;
+  card_details?: string | null;
   failure_reason: string | null;
   paid_at: string | null;
   created_at: string;
@@ -677,6 +681,13 @@ export interface SubscriptionAccess {
   promoActive: boolean;
   promoMonthsRemaining: number;
   promotionalCyclesCompleted: number;
+  isPrepaidTrial?: boolean;
+  planStartMode?: 'immediate' | 'after_trial';
+  autopayEnabled?: boolean;
+  autopayNextDate?: string | null;
+  autopayAmount?: number;
+  razorpaySubscriptionId?: string | null;
+  lastPaymentId?: string | null;
   warningMessage: string | null;
 }
 

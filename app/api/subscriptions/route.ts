@@ -4,6 +4,9 @@ import { subscriptionService, DEFAULT_PLANS } from '@/lib/billing/subscription-s
 import { razorpayService } from '@/lib/billing/razorpay';
 import { store } from '@/lib/supabase/data-store';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();

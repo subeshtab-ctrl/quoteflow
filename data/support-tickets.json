@@ -1,1 +1,307 @@
-{}
+{
+  "f8d5d8db-86db-4df8-b0ee-45de7c9ba065": {
+    "id": "f8d5d8db-86db-4df8-b0ee-45de7c9ba065",
+    "business_id": "af47222e-a89f-4956-9818-cdd0bfe797be",
+    "created_by_user_id": "448a2522-ead4-415c-b0d7-82a90031c187",
+    "ticket_number": "QF-2026-000001",
+    "subject": "Inquiry regarding GST invoice rounding",
+    "category": "Invoice",
+    "priority": "High",
+    "status": "waiting_for_customer",
+    "description": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:35:42.561Z",
+    "updated_at": "2026-10-02T15:35:42.586Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "callback_requested": false,
+    "creator_email": "client@example.com",
+    "creator_name": "Test Client",
+    "messages": [
+      {
+        "id": "2547f633-fb37-4141-a91d-0c51ac8d49c5",
+        "ticket_id": "f8d5d8db-86db-4df8-b0ee-45de7c9ba065",
+        "sender_user_id": "448a2522-ead4-415c-b0d7-82a90031c187",
+        "sender_type": "business",
+        "sender_name": "Test Client",
+        "message": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+        "created_at": "2026-10-02T15:35:42.561Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "cd9b0919-7cee-4a3f-9b91-22571d347a80",
+        "ticket_id": "f8d5d8db-86db-4df8-b0ee-45de7c9ba065",
+        "message_id": "2547f633-fb37-4141-a91d-0c51ac8d49c5",
+        "uploaded_by_user_id": "448a2522-ead4-415c-b0d7-82a90031c187",
+        "storage_path": "/uploads/support/sample.png",
+        "file_name": "invoice_screenshot.png",
+        "file_size": 102450,
+        "mime_type": "image/png",
+        "created_at": "2026-10-02T15:35:42.561Z"
+      }
+    ]
+  },
+  "0fe7b5e7-4aa5-4c85-b0bb-bbc464f91f33": {
+    "id": "0fe7b5e7-4aa5-4c85-b0bb-bbc464f91f33",
+    "business_id": "aae93fd7-f78b-4c4b-8059-f45659f2bfa7",
+    "created_by_user_id": "usr_test_1",
+    "ticket_number": "QF-2026-000002",
+    "subject": "Billing inquiry with callback",
+    "category": "Billing",
+    "priority": "High",
+    "status": "resolved",
+    "description": "Please call me regarding promo pricing",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:35:45.432Z",
+    "updated_at": "2026-10-02T15:35:45.432Z",
+    "resolved_at": "2026-10-02T15:35:45.445Z",
+    "closed_at": null,
+    "callback_requested": true,
+    "callback_phone": "+91 9876543210"
+  },
+  "a435c650-f447-4917-a202-f969ffc3a1a7": {
+    "id": "a435c650-f447-4917-a202-f969ffc3a1a7",
+    "business_id": "ea42c7c5-bcc4-4044-8522-c47712af8096",
+    "created_by_user_id": "456243d6-fdb5-4843-9608-f47ab10595e5",
+    "ticket_number": "QF-2026-000001",
+    "subject": "Inquiry regarding GST invoice rounding",
+    "category": "Invoice",
+    "priority": "High",
+    "status": "waiting_for_customer",
+    "description": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:47:27.268Z",
+    "updated_at": "2026-10-02T15:47:27.292Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "callback_requested": false,
+    "creator_email": "client@example.com",
+    "creator_name": "Test Client",
+    "messages": [
+      {
+        "id": "b857c79e-ad03-4b59-9052-9125db4415ea",
+        "ticket_id": "a435c650-f447-4917-a202-f969ffc3a1a7",
+        "sender_user_id": "456243d6-fdb5-4843-9608-f47ab10595e5",
+        "sender_type": "business",
+        "sender_name": "Test Client",
+        "message": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+        "created_at": "2026-10-02T15:47:27.268Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "146c3e84-d88b-4f3b-b4b4-a3cb228979d5",
+        "ticket_id": "a435c650-f447-4917-a202-f969ffc3a1a7",
+        "message_id": "b857c79e-ad03-4b59-9052-9125db4415ea",
+        "uploaded_by_user_id": "456243d6-fdb5-4843-9608-f47ab10595e5",
+        "storage_path": "/uploads/support/sample.png",
+        "file_name": "invoice_screenshot.png",
+        "file_size": 102450,
+        "mime_type": "image/png",
+        "created_at": "2026-10-02T15:47:27.268Z"
+      }
+    ]
+  },
+  "073c64d9-477c-4f76-9b11-a027bff5c3a4": {
+    "id": "073c64d9-477c-4f76-9b11-a027bff5c3a4",
+    "business_id": "630f6a81-2a42-4683-8c47-dffec96a8899",
+    "created_by_user_id": "usr_test_1",
+    "ticket_number": "QF-2026-000002",
+    "subject": "Billing inquiry with callback",
+    "category": "Billing",
+    "priority": "High",
+    "status": "resolved",
+    "description": "Please call me regarding promo pricing",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:47:28.683Z",
+    "updated_at": "2026-10-02T15:47:28.683Z",
+    "resolved_at": "2026-10-02T15:47:28.693Z",
+    "closed_at": null,
+    "callback_requested": true,
+    "callback_phone": "+91 9876543210"
+  },
+  "74fee736-e99f-446c-b825-c3f240ab2e84": {
+    "id": "74fee736-e99f-446c-b825-c3f240ab2e84",
+    "business_id": "5b1568bd-f740-406f-b881-599944306a4c",
+    "created_by_user_id": "8f5a31ef-7c5a-44d1-a42e-0aece0a4ac98",
+    "ticket_number": "QF-2026-000001",
+    "subject": "Inquiry regarding GST invoice rounding",
+    "category": "Invoice",
+    "priority": "High",
+    "status": "waiting_for_customer",
+    "description": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:48:34.263Z",
+    "updated_at": "2026-10-02T15:48:34.283Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "callback_requested": false,
+    "creator_email": "client@example.com",
+    "creator_name": "Test Client",
+    "messages": [
+      {
+        "id": "10b3ac3c-b1ef-40c1-ac80-b8b6c4871053",
+        "ticket_id": "74fee736-e99f-446c-b825-c3f240ab2e84",
+        "sender_user_id": "8f5a31ef-7c5a-44d1-a42e-0aece0a4ac98",
+        "sender_type": "business",
+        "sender_name": "Test Client",
+        "message": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+        "created_at": "2026-10-02T15:48:34.263Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "89a705ba-6336-4241-b71a-4e7c283a7628",
+        "ticket_id": "74fee736-e99f-446c-b825-c3f240ab2e84",
+        "message_id": "10b3ac3c-b1ef-40c1-ac80-b8b6c4871053",
+        "uploaded_by_user_id": "8f5a31ef-7c5a-44d1-a42e-0aece0a4ac98",
+        "storage_path": "/uploads/support/sample.png",
+        "file_name": "invoice_screenshot.png",
+        "file_size": 102450,
+        "mime_type": "image/png",
+        "created_at": "2026-10-02T15:48:34.263Z"
+      }
+    ]
+  },
+  "e59a79bf-bc1f-4ec9-8dee-ba04164012d2": {
+    "id": "e59a79bf-bc1f-4ec9-8dee-ba04164012d2",
+    "business_id": "2c821c74-102c-4bcb-b23c-fe9c473dfa40",
+    "created_by_user_id": "usr_test_1",
+    "ticket_number": "QF-2026-000002",
+    "subject": "Billing inquiry with callback",
+    "category": "Billing",
+    "priority": "High",
+    "status": "resolved",
+    "description": "Please call me regarding promo pricing",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:48:35.788Z",
+    "updated_at": "2026-10-02T15:48:35.788Z",
+    "resolved_at": "2026-10-02T15:48:35.817Z",
+    "closed_at": null,
+    "callback_requested": true,
+    "callback_phone": "+91 9876543210"
+  },
+  "9e3a73d3-1c7a-420a-8c62-8130addde06b": {
+    "id": "9e3a73d3-1c7a-420a-8c62-8130addde06b",
+    "business_id": "c465597e-b296-49bb-9819-d94491e9fc61",
+    "created_by_user_id": "d1d870c5-3c82-49df-bbfb-0d736f885c2a",
+    "ticket_number": "QF-2026-000001",
+    "subject": "Inquiry regarding GST invoice rounding",
+    "category": "Invoice",
+    "priority": "High",
+    "status": "waiting_for_customer",
+    "description": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:49:17.257Z",
+    "updated_at": "2026-10-02T15:49:17.278Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "callback_requested": false,
+    "creator_email": "client@example.com",
+    "creator_name": "Test Client",
+    "messages": [
+      {
+        "id": "bbcb0769-8986-43d0-aeb9-c84db20f65ff",
+        "ticket_id": "9e3a73d3-1c7a-420a-8c62-8130addde06b",
+        "sender_user_id": "d1d870c5-3c82-49df-bbfb-0d736f885c2a",
+        "sender_type": "business",
+        "sender_name": "Test Client",
+        "message": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+        "created_at": "2026-10-02T15:49:17.257Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "02dda72b-0f6e-48c3-9031-e4662dd8445c",
+        "ticket_id": "9e3a73d3-1c7a-420a-8c62-8130addde06b",
+        "message_id": "bbcb0769-8986-43d0-aeb9-c84db20f65ff",
+        "uploaded_by_user_id": "d1d870c5-3c82-49df-bbfb-0d736f885c2a",
+        "storage_path": "/uploads/support/sample.png",
+        "file_name": "invoice_screenshot.png",
+        "file_size": 102450,
+        "mime_type": "image/png",
+        "created_at": "2026-10-02T15:49:17.257Z"
+      }
+    ]
+  },
+  "1d3b0254-1728-40e3-9e0e-6c4590767e74": {
+    "id": "1d3b0254-1728-40e3-9e0e-6c4590767e74",
+    "business_id": "b3fad4f0-0776-4c0a-b02b-6525cceb13e6",
+    "created_by_user_id": "usr_test_1",
+    "ticket_number": "QF-2026-000002",
+    "subject": "Billing inquiry with callback",
+    "category": "Billing",
+    "priority": "High",
+    "status": "resolved",
+    "description": "Please call me regarding promo pricing",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:49:18.651Z",
+    "updated_at": "2026-10-02T15:49:18.651Z",
+    "resolved_at": "2026-10-02T15:49:18.659Z",
+    "closed_at": null,
+    "callback_requested": true,
+    "callback_phone": "+91 9876543210"
+  },
+  "b2a6d41a-90f8-43bd-a9e2-9393fcaa4b4f": {
+    "id": "b2a6d41a-90f8-43bd-a9e2-9393fcaa4b4f",
+    "business_id": "8141645c-00ef-4c9b-b93b-e5ce749ba9d4",
+    "created_by_user_id": "433760e2-a87f-4c31-ae0b-1859b360cecf",
+    "ticket_number": "QF-2026-000001",
+    "subject": "Inquiry regarding GST invoice rounding",
+    "category": "Invoice",
+    "priority": "High",
+    "status": "waiting_for_customer",
+    "description": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:49:47.939Z",
+    "updated_at": "2026-10-02T15:49:48.150Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "callback_requested": false,
+    "creator_email": "client@example.com",
+    "creator_name": "Test Client",
+    "messages": [
+      {
+        "id": "3320fe8e-257e-4f9f-ae85-3a99b15c9605",
+        "ticket_id": "b2a6d41a-90f8-43bd-a9e2-9393fcaa4b4f",
+        "sender_user_id": "433760e2-a87f-4c31-ae0b-1859b360cecf",
+        "sender_type": "business",
+        "sender_name": "Test Client",
+        "message": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+        "created_at": "2026-10-02T15:49:47.939Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "3d9069f0-3cfe-4981-9935-bf1403ed509f",
+        "ticket_id": "b2a6d41a-90f8-43bd-a9e2-9393fcaa4b4f",
+        "message_id": "3320fe8e-257e-4f9f-ae85-3a99b15c9605",
+        "uploaded_by_user_id": "433760e2-a87f-4c31-ae0b-1859b360cecf",
+        "storage_path": "/uploads/support/sample.png",
+        "file_name": "invoice_screenshot.png",
+        "file_size": 102450,
+        "mime_type": "image/png",
+        "created_at": "2026-10-02T15:49:47.939Z"
+      }
+    ]
+  },
+  "d84d5457-1726-4c4c-a23c-daa00602e688": {
+    "id": "d84d5457-1726-4c4c-a23c-daa00602e688",
+    "business_id": "4b1b8b7d-b8f3-4349-93e1-4f16fbb3947a",
+    "created_by_user_id": "usr_test_1",
+    "ticket_number": "QF-2026-000002",
+    "subject": "Billing inquiry with callback",
+    "category": "Billing",
+    "priority": "High",
+    "status": "resolved",
+    "description": "Please call me regarding promo pricing",
+    "assigned_to": null,
+    "created_at": "2026-10-02T15:49:50.906Z",
+    "updated_at": "2026-10-02T15:49:50.906Z",
+    "resolved_at": "2026-10-02T15:49:50.979Z",
+    "closed_at": null,
+    "callback_requested": true,
+    "callback_phone": "+91 9876543210"
+  }
+}

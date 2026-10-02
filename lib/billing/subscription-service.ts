@@ -221,8 +221,27 @@ export class SubscriptionService {
       await store.saveBusinessSubscription(sub);
     }
 
+    const hasConfirmedPayment = Boolean(
+      sub.last_payment_id ||
+      sub.promotional_cycles_completed > 0 ||
+      sub.is_trial_prepaid
+    );
+
+    // If customer selected immediate activation, or if trial has ended with payment confirmed, activate now (when trialing or pending)
+    if (hasConfirmedPayment && (effectiveStatus === 'trialing' || effectiveStatus === 'pending')) {
+      if (sub.plan_start_mode === 'immediate' || daysRemainingInTrial === 0) {
+        effectiveStatus = 'active';
+      }
+    }
+
+    const isPrepaidTrial = Boolean(
+      hasConfirmedPayment &&
+      daysRemainingInTrial > 0 &&
+      sub.plan_start_mode !== 'immediate'
+    );
+
     const isTrial = effectiveStatus === 'trialing';
-    const isPaid = effectiveStatus === 'active';
+    const isPaid = effectiveStatus === 'active' || hasConfirmedPayment;
     const isPastDue = effectiveStatus === 'past_due';
     const isGracePeriod = effectiveStatus === 'grace_period';
     const isExpired = effectiveStatus === 'expired';
@@ -253,7 +272,29 @@ export class SubscriptionService {
       warningMessage = 'Your subscription has been cancelled.';
     }
 
-    const planName = sub.plan?.name || (sub.amount === 9900 ? 'QuoteFlow Special Offer' : sub.amount === 19900 ? 'QuoteFlow Standard' : 'QuoteFlow Free Trial');
+    let planName = sub.plan?.name;
+    if (!planName || planName === 'QuoteFlow Free Trial') {
+      if (sub.amount === 9900 || sub.promo_id || hasConfirmedPayment) {
+        planName = 'QuoteFlow Special Offer';
+      } else if (sub.amount === 19900) {
+        planName = 'QuoteFlow Standard';
+      } else {
+        planName = 'QuoteFlow Free Trial';
+      }
+    }
+
+    const planAmount = sub.amount || (hasConfirmedPayment ? 9900 : 0);
+    const promotionalCyclesCompleted = sub.promotional_cycles_completed || (hasConfirmedPayment ? 1 : 0);
+    const promoMonthsRemaining = sub.promo_months_remaining ?? (hasConfirmedPayment ? 2 : 3);
+    const planStartMode = sub.plan_start_mode || (sub.status === 'active' && !sub.is_trial_prepaid ? 'immediate' : 'after_trial');
+    const autopayEnabled = Boolean(
+      (sub.razorpay_subscription_id || hasConfirmedPayment) &&
+      !sub.cancel_at_period_end &&
+      sub.status !== 'cancelled'
+    );
+    const autopayNextDate = planStartMode === 'immediate'
+      ? (sub.current_period_end || sub.next_charge_at)
+      : (sub.trial_end_at || sub.current_period_end || sub.next_charge_at);
 
     return {
       allowed,
@@ -269,10 +310,17 @@ export class SubscriptionService {
       graceDaysRemaining,
       trialEndsAt: sub.trial_end_at,
       planName,
-      planAmount: sub.amount,
-      promoActive: sub.promo_months_remaining > 0,
-      promoMonthsRemaining: sub.promo_months_remaining,
-      promotionalCyclesCompleted: sub.promotional_cycles_completed,
+      planAmount,
+      promoActive: promoMonthsRemaining > 0,
+      promoMonthsRemaining,
+      promotionalCyclesCompleted,
+      isPrepaidTrial,
+      planStartMode,
+      autopayEnabled,
+      autopayNextDate,
+      autopayAmount: planAmount,
+      razorpaySubscriptionId: sub.razorpay_subscription_id || null,
+      lastPaymentId: sub.last_payment_id || null,
       warningMessage,
     };
   }
@@ -789,6 +837,57 @@ export class SubscriptionService {
     });
     const refreshed = (await store.getBusinessSubscription(params.businessId))!;
     return { subscription: refreshed };
+  }
+
+  /**
+   * Update Plan Activation Timing: Start Immediately vs After Free Trial
+   */
+  public async updatePlanActivationSchedule(params: {
+    businessId: string;
+    mode: 'immediate' | 'after_trial';
+  }): Promise<BusinessSubscription> {
+    const sub = await store.getBusinessSubscription(params.businessId);
+    if (!sub) throw new Error('Subscription not found for this business.');
+
+    const now = new Date();
+    const mode = params.mode;
+
+    if (mode === 'immediate') {
+      sub.plan_start_mode = 'immediate';
+      sub.status = 'active';
+      sub.is_trial_prepaid = false;
+      const start = sub.last_payment_at ? new Date(sub.last_payment_at) : now;
+      sub.current_period_start = start.toISOString();
+      sub.current_period_end = new Date(start.getTime() + 30 * 86400000).toISOString();
+      sub.next_charge_at = sub.current_period_end;
+    } else {
+      sub.plan_start_mode = 'after_trial';
+      sub.is_trial_prepaid = true;
+      const trialEndTime = sub.trial_end_at
+        ? new Date(sub.trial_end_at).getTime()
+        : now.getTime() + 30 * 86400000;
+      sub.current_period_start = new Date(trialEndTime).toISOString();
+      sub.current_period_end = new Date(trialEndTime + 30 * 86400000).toISOString();
+      sub.next_charge_at = new Date(trialEndTime).toISOString();
+      sub.status = 'active'; // keep active with scheduled next charge
+    }
+    sub.updated_at = now.toISOString();
+
+    await store.saveBusinessSubscription(sub);
+
+    await store.addNotification({
+      organizationId: params.businessId,
+      title: 'Plan Activation Schedule Updated',
+      message:
+        mode === 'immediate'
+          ? 'Your QuoteFlow plan is now active immediately starting from today.'
+          : `Your plan is scheduled to begin automatically after your free trial ends on ${new Date(
+              sub.next_charge_at!
+            ).toLocaleDateString()}.`,
+      type: 'APPROVED',
+    });
+
+    return sub;
   }
 
   // ==============================================================================

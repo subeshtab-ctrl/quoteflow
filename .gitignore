@@ -33,3 +33,4 @@ cloudflared.exe
 *.sln
 *.sw?
 scratch/
+supabase/.temp/
