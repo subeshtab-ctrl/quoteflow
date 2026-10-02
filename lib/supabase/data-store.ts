@@ -3886,8 +3886,8 @@ class QuoteFlowStore {
     return crypto.createHash('sha256').update(pin.trim()).digest('hex');
   }
 
-  public async getPortalPin(quotationId: string): Promise<PortalPinRegistration | null> {
-    if (this.portalPins.has(quotationId)) {
+  public async getPortalPin(quotationId: string, forceFresh = false): Promise<PortalPinRegistration | null> {
+    if (!forceFresh && this.portalPins.has(quotationId)) {
       return this.portalPins.get(quotationId)!;
     }
 
@@ -3897,40 +3897,20 @@ class QuoteFlowStore {
       ? cleanPhoneNumber(quote.customer.phone, quote.customer.phone_country_code)
       : undefined;
 
-    // Check if another quotation for this same customer already has a PIN
-    for (const reg of this.portalPins.values()) {
-      if (
-        (quote?.customer_id && reg.customer_id === quote.customer_id) ||
-        (customerEmail && reg.customer_email && reg.customer_email.toLowerCase().trim() === customerEmail) ||
-        (customerPhone && reg.customer_phone && reg.customer_phone === customerPhone)
-      ) {
-        this.portalPins.set(quotationId, reg);
-        return reg;
-      }
-    }
-
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        let query = supabase
+        // 1. First priority: Check Supabase specifically for this quotation's PIN registration
+        const { data: quoteEvts, error: qErr } = await supabase
           .from('quotation_events')
           .select('*')
+          .eq('quotation_id', quotationId)
           .eq('event_type', 'PORTAL_PIN_REGISTERED')
           .order('created_at', { ascending: false })
           .limit(1);
 
-        if (customerPhone) {
-          query = query.or(`quotation_id.eq.${quotationId},metadata->>customer_phone.eq.${customerPhone}`);
-        } else if (customerEmail) {
-          query = query.or(`quotation_id.eq.${quotationId},metadata->>customer_email.eq.${customerEmail}`);
-        } else {
-          query = query.eq('quotation_id', quotationId);
-        }
-
-        const { data, error } = await query;
-
-        if (!error && data && data.length > 0) {
-          const evt = data[0];
+        if (!qErr && quoteEvts && quoteEvts.length > 0) {
+          const evt = quoteEvts[0];
           const reg: PortalPinRegistration = {
             id: evt.id,
             quotation_id: quotationId,
@@ -3945,9 +3925,55 @@ class QuoteFlowStore {
           this.portalPins.set(quotationId, reg);
           return reg;
         }
+
+        // 2. Second priority: If no direct event for this quotation, check if this customer registered on another quotation
+        if (customerPhone || customerEmail) {
+          let customerQuery = supabase
+            .from('quotation_events')
+            .select('*')
+            .eq('event_type', 'PORTAL_PIN_REGISTERED')
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (customerPhone) {
+            customerQuery = customerQuery.eq('metadata->>customer_phone', customerPhone);
+          } else if (customerEmail) {
+            customerQuery = customerQuery.eq('metadata->>customer_email', customerEmail);
+          }
+
+          const { data: custEvts, error: cErr } = await customerQuery;
+          if (!cErr && custEvts && custEvts.length > 0) {
+            const evt = custEvts[0];
+            const reg: PortalPinRegistration = {
+              id: evt.id,
+              quotation_id: quotationId,
+              customer_id: quote?.customer_id,
+              customer_email: evt.metadata?.customer_email || customerEmail,
+              customer_phone: evt.metadata?.customer_phone || customerPhone,
+              phone_country_code: evt.metadata?.phone_country_code || quote?.customer?.phone_country_code,
+              auth_method: evt.metadata?.auth_method || quote?.customer?.auth_method,
+              pin_hash: evt.metadata?.pin_hash,
+              registered_at: evt.metadata?.registered_at || evt.created_at,
+            };
+            this.portalPins.set(quotationId, reg);
+            return reg;
+          }
+        }
       }
     } catch (e) {
       console.warn('Could not fetch portal pin from Supabase:', e);
+    }
+
+    // 3. Fallback: Check in-memory map for other quotes of this customer
+    for (const reg of this.portalPins.values()) {
+      if (
+        (quote?.customer_id && reg.customer_id === quote.customer_id) ||
+        (customerEmail && reg.customer_email && reg.customer_email.toLowerCase().trim() === customerEmail) ||
+        (customerPhone && reg.customer_phone && reg.customer_phone === customerPhone)
+      ) {
+        this.portalPins.set(quotationId, reg);
+        return reg;
+      }
     }
 
     return null;
@@ -4039,6 +4065,20 @@ class QuoteFlowStore {
 
     this.portalPins.set(quotationId, reg);
 
+    // Overwrite any other cached portalPins entries for this customer
+    for (const [key, existingReg] of this.portalPins.entries()) {
+      if (
+        (quote.customer_id && existingReg.customer_id === quote.customer_id) ||
+        (customerEmail && existingReg.customer_email && existingReg.customer_email.toLowerCase().trim() === customerEmail) ||
+        (customerPhone && existingReg.customer_phone && existingReg.customer_phone === customerPhone)
+      ) {
+        this.portalPins.set(key, {
+          ...reg,
+          quotation_id: key,
+        });
+      }
+    }
+
     // Also link to other quotations belonging to this customer
     for (const [qId, q] of this.quotations.entries()) {
       const qPhone = q.customer?.phone ? cleanPhoneNumber(q.customer.phone, q.customer.phone_country_code) : undefined;
@@ -4084,11 +4124,24 @@ class QuoteFlowStore {
   }
 
   public async verifyPortalPin(quotationId: string, pin: string): Promise<boolean> {
-    const reg = await this.getPortalPin(quotationId);
+    let reg = await this.getPortalPin(quotationId);
+    if (!reg) {
+      reg = await this.getPortalPin(quotationId, true);
+    }
     if (!reg) return false;
 
     const inputHash = this.hashPin(pin);
-    return inputHash === reg.pin_hash;
+    if (inputHash === reg.pin_hash) {
+      return true;
+    }
+
+    // If cached PIN hash did not match, force reload fresh from Supabase to prevent false rejects
+    const freshReg = await this.getPortalPin(quotationId, true);
+    if (freshReg && inputHash === freshReg.pin_hash) {
+      return true;
+    }
+
+    return false;
   }
 
   public async resetPortalPin(
@@ -4097,6 +4150,7 @@ class QuoteFlowStore {
     newPin: string,
     authMethodOverride?: CustomerAuthMethod
   ): Promise<{ success: boolean; message?: string }> {
+    this.portalPins.delete(quotationId);
     return await this.registerPortalPin(quotationId, credential, newPin, authMethodOverride);
   }
 

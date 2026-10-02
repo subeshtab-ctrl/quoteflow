@@ -12,6 +12,8 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface PortalPinGateProps {
@@ -23,7 +25,7 @@ interface PortalPinGateProps {
   phoneCountryCode?: string;
   customerPhoneMasked?: string;
   customerEmailMasked?: string;
-  onAuthenticated: () => void;
+  onAuthenticated: (deviceToken?: string) => void;
 }
 
 export function PortalPinGate({
@@ -50,6 +52,7 @@ export function PortalPinGate({
   const [credential, setCredential] = useState('');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -137,9 +140,18 @@ export function PortalPinGate({
         throw new Error(data.error || 'Failed to register PIN');
       }
 
+      if (data.deviceToken && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
+          if (data.customerId) {
+            localStorage.setItem(`quoteflow_portal_cust_${data.customerId}`, data.deviceToken);
+          }
+        } catch {}
+      }
+
       setSuccessMsg('Security PIN registered! Unlocking portal...');
       setTimeout(() => {
-        onAuthenticated();
+        onAuthenticated(data.deviceToken);
       }, 700);
     } catch (err: any) {
       setError(err.message || 'Registration failed');
@@ -173,12 +185,22 @@ export function PortalPinGate({
 
       const data = await res.json();
       if (!res.ok) {
+        setPin('');
         throw new Error(data.error || 'Incorrect 6-digit PIN. Please try again.');
+      }
+
+      if (data.deviceToken && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
+          if (data.customerId) {
+            localStorage.setItem(`quoteflow_portal_cust_${data.customerId}`, data.deviceToken);
+          }
+        } catch {}
       }
 
       setSuccessMsg('Access granted! Loading quotation...');
       setTimeout(() => {
-        onAuthenticated();
+        onAuthenticated(data.deviceToken);
       }, 600);
     } catch (err: any) {
       setError(err.message || 'Verification failed');
@@ -233,9 +255,18 @@ export function PortalPinGate({
         throw new Error(data.error || 'Failed to reset PIN');
       }
 
+      if (data.deviceToken && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
+          if (data.customerId) {
+            localStorage.setItem(`quoteflow_portal_cust_${data.customerId}`, data.deviceToken);
+          }
+        } catch {}
+      }
+
       setSuccessMsg('PIN updated successfully! Unlocking portal...');
       setTimeout(() => {
-        onAuthenticated();
+        onAuthenticated(data.deviceToken);
       }, 700);
     } catch (err: any) {
       setError(err.message || 'Reset failed');
@@ -294,18 +325,27 @@ export function PortalPinGate({
               )}
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPin ? "text" : "password"}
                   inputMode="numeric"
                   pattern="[0-9]*"
+                  autoComplete="one-time-code"
                   maxLength={6}
                   value={pin}
                   onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="••••••"
                   autoFocus
                   required
-                  className="w-full text-center tracking-[0.5em] text-2xl font-mono py-3.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  className="w-full text-center tracking-[0.5em] text-2xl font-mono py-3.5 pl-11 pr-11 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
                 />
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                >
+                  {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
@@ -455,35 +495,57 @@ export function PortalPinGate({
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
                   Create 6-Digit PIN
                 </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="••••••"
-                  autoFocus
-                  required
-                  className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                />
+                <div className="relative">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                    autoFocus
+                    required
+                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                  >
+                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
                   Confirm 6-Digit PIN
                 </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="••••••"
-                  required
-                  className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                />
+                <div className="relative">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={confirmPin}
+                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                    required
+                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                  >
+                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -560,34 +622,56 @@ export function PortalPinGate({
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
                   New 6-Digit PIN
                 </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="••••••"
-                  required
-                  className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                />
+                <div className="relative">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                    required
+                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                  >
+                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
                   Confirm New PIN
                 </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="••••••"
-                  required
-                  className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                />
+                <div className="relative">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={confirmPin}
+                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                    required
+                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                  >
+                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 

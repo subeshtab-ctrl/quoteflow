@@ -12,10 +12,19 @@ function maskEmail(email: string): string {
   return `${local[0]}***${local[local.length - 1]}@${domain}`;
 }
 
+const COOKIE_MAX_AGE = 365 * 24 * 60 * 60; // 365 days (1 year) for trusted devices
+
 function generateAuthSecret(quotationId: string, pinHash: string): string {
   return crypto
     .createHash('sha256')
     .update(`${quotationId}:${pinHash}:quoteflow_portal_salt_2026`)
+    .digest('hex');
+}
+
+function generateDeviceToken(customerKey: string, pinHash: string): string {
+  return crypto
+    .createHash('sha256')
+    .update(`dev:${customerKey}:${pinHash}:quoteflow_device_salt_2026`)
     .digest('hex');
 }
 
@@ -34,26 +43,60 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
     }
 
-    const pinReg = await store.getPortalPin(quotation.id);
-    const hasPin = Boolean(pinReg && pinReg.pin_hash);
-
-    let authenticated = false;
-    const cookieName = `portal_auth_${quotation.id}`;
-    const authCookie = request.cookies.get(cookieName)?.value;
-
-    if (hasPin && authCookie && pinReg) {
-      const expectedSecret = generateAuthSecret(quotation.id, pinReg.pin_hash);
-      if (authCookie === expectedSecret) {
-        authenticated = true;
-      }
-    }
-
     const customer = quotation.customer;
     const phoneCountryCode = customer?.phone_country_code || (customer?.phone ? splitPhoneNumber(customer.phone).countryCode : '+91');
     const customerPhoneClean = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
     const rawEmail = customer?.email || '';
     const hasDummyEmail = rawEmail.endsWith('@mobile.client') || rawEmail.endsWith('@customer.local');
     const customerEmail = hasDummyEmail ? '' : rawEmail;
+
+    const pinReg = await store.getPortalPin(quotation.id);
+    const hasPin = Boolean(pinReg && pinReg.pin_hash);
+
+    let authenticated = false;
+    let expectedQuoteSecret = '';
+    let expectedDeviceToken = '';
+
+    if (hasPin && pinReg) {
+      const customerKey = quotation.customer_id || customerPhoneClean || customerEmail || quotation.id;
+      expectedQuoteSecret = generateAuthSecret(quotation.id, pinReg.pin_hash);
+      expectedDeviceToken = generateDeviceToken(customerKey, pinReg.pin_hash);
+
+      // Check 1: Quotation-specific cookie
+      const quoteCookie = request.cookies.get(`portal_auth_${quotation.id}`)?.value;
+      if (quoteCookie && quoteCookie === expectedQuoteSecret) {
+        authenticated = true;
+      }
+
+      // Check 2: Customer-specific device cookie (remembers same device across multiple quotes)
+      if (!authenticated && quotation.customer_id) {
+        const custCookie = request.cookies.get(`portal_auth_cust_${quotation.customer_id}`)?.value;
+        if (custCookie && custCookie === expectedDeviceToken) {
+          authenticated = true;
+        }
+      }
+
+      // Check 3: Global portal device cookie
+      if (!authenticated) {
+        const devCookie = request.cookies.get('portal_device_token')?.value;
+        if (devCookie && (devCookie === expectedDeviceToken || devCookie === expectedQuoteSecret)) {
+          authenticated = true;
+        }
+      }
+
+      // Check 4: Client-passed deviceToken (from browser localStorage)
+      if (!authenticated) {
+        const clientDevToken =
+          searchParams.get('deviceToken') ||
+          request.headers.get('x-portal-device-token');
+        if (
+          clientDevToken &&
+          (clientDevToken === expectedDeviceToken || clientDevToken === expectedQuoteSecret)
+        ) {
+          authenticated = true;
+        }
+      }
+    }
 
     const hasPhone = Boolean(customerPhoneClean && customerPhoneClean.length >= 5);
     const hasEmail = Boolean(customerEmail && customerEmail.length > 0);
@@ -67,10 +110,12 @@ export async function GET(request: NextRequest) {
       authMethod = 'EMAIL';
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       hasPin,
       authenticated,
+      deviceToken: authenticated ? expectedDeviceToken : undefined,
+      customerId: quotation.customer_id,
       authMethod,
       phoneCountryCode,
       customerPhoneMasked: customerPhoneClean ? maskPhone(customerPhoneClean, phoneCountryCode) : '',
@@ -78,6 +123,34 @@ export async function GET(request: NextRequest) {
       quotationNumber: quotation.quotation_number,
       title: quotation.title,
     });
+
+    // Refresh cookies for 1 year if device is authenticated
+    if (authenticated && expectedQuoteSecret) {
+      response.cookies.set(`portal_auth_${quotation.id}`, expectedQuoteSecret, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: COOKIE_MAX_AGE,
+      });
+
+      if (quotation.customer_id) {
+        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, expectedDeviceToken, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: COOKIE_MAX_AGE,
+        });
+      }
+
+      response.cookies.set('portal_device_token', expectedDeviceToken, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: COOKIE_MAX_AGE,
+      });
+    }
+
+    return response;
   } catch (err: any) {
     console.error('Error in GET /api/public/portal-auth:', err);
     return NextResponse.json(
@@ -192,10 +265,14 @@ export async function POST(request: NextRequest) {
       await store.registerPortalPin(quotation.id, effectiveCredential, pin, authMethod);
       const pinReg = await store.getPortalPin(quotation.id);
       const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
+      const customerKey = quotation.customer_id || customerPhone || customerEmail || quotation.id;
+      const deviceToken = generateDeviceToken(customerKey, pinReg!.pin_hash);
 
       const response = NextResponse.json({
         success: true,
         authenticated: true,
+        deviceToken,
+        customerId: quotation.customer_id,
         message: 'Security PIN registered successfully! Access granted.',
       });
 
@@ -203,7 +280,23 @@ export async function POST(request: NextRequest) {
         path: '/',
         httpOnly: true,
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60, // 7 days
+        maxAge: COOKIE_MAX_AGE,
+      });
+
+      if (quotation.customer_id) {
+        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, deviceToken, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: COOKIE_MAX_AGE,
+        });
+      }
+
+      response.cookies.set('portal_device_token', deviceToken, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: COOKIE_MAX_AGE,
       });
 
       return response;
@@ -224,10 +317,14 @@ export async function POST(request: NextRequest) {
 
       const pinReg = await store.getPortalPin(quotation.id);
       const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
+      const customerKey = quotation.customer_id || customerPhone || customerEmail || quotation.id;
+      const deviceToken = generateDeviceToken(customerKey, pinReg!.pin_hash);
 
       const response = NextResponse.json({
         success: true,
         authenticated: true,
+        deviceToken,
+        customerId: quotation.customer_id,
         message: 'PIN verified successfully! Access granted.',
       });
 
@@ -235,7 +332,23 @@ export async function POST(request: NextRequest) {
         path: '/',
         httpOnly: true,
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60, // 7 days
+        maxAge: COOKIE_MAX_AGE,
+      });
+
+      if (quotation.customer_id) {
+        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, deviceToken, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: COOKIE_MAX_AGE,
+        });
+      }
+
+      response.cookies.set('portal_device_token', deviceToken, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: COOKIE_MAX_AGE,
       });
 
       return response;
@@ -255,10 +368,14 @@ export async function POST(request: NextRequest) {
       await store.resetPortalPin(quotation.id, effectiveCredential, pin, authMethod);
       const pinReg = await store.getPortalPin(quotation.id);
       const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
+      const customerKey = quotation.customer_id || customerPhone || customerEmail || quotation.id;
+      const deviceToken = generateDeviceToken(customerKey, pinReg!.pin_hash);
 
       const response = NextResponse.json({
         success: true,
         authenticated: true,
+        deviceToken,
+        customerId: quotation.customer_id,
         message: 'PIN reset successfully! Access granted.',
       });
 
@@ -266,7 +383,23 @@ export async function POST(request: NextRequest) {
         path: '/',
         httpOnly: true,
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60,
+        maxAge: COOKIE_MAX_AGE,
+      });
+
+      if (quotation.customer_id) {
+        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, deviceToken, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: COOKIE_MAX_AGE,
+        });
+      }
+
+      response.cookies.set('portal_device_token', deviceToken, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: COOKIE_MAX_AGE,
       });
 
       return response;

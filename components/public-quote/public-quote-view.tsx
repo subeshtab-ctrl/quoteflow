@@ -244,10 +244,28 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     let active = true;
     const verifyPortalAuth = async () => {
       try {
-        const res = await fetch(
-          `/api/public/portal-auth?token=${encodeURIComponent(currentToken)}`,
-          { cache: 'no-store' }
-        );
+        let storedDeviceToken = '';
+        if (typeof window !== 'undefined') {
+          try {
+            storedDeviceToken =
+              localStorage.getItem('quoteflow_portal_device_token') ||
+              (quotation.customer_id
+                ? localStorage.getItem(`quoteflow_portal_cust_${quotation.customer_id}`) || ''
+                : '');
+          } catch {}
+        }
+
+        const url = `/api/public/portal-auth?token=${encodeURIComponent(currentToken)}${
+          storedDeviceToken ? `&deviceToken=${encodeURIComponent(storedDeviceToken)}` : ''
+        }`;
+
+        const res = await fetch(url, {
+          cache: 'no-store',
+          headers: storedDeviceToken
+            ? { 'x-portal-device-token': storedDeviceToken }
+            : undefined,
+        });
+
         if (res.ok) {
           const data = await res.json();
           if (active) {
@@ -258,6 +276,16 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
             setAuthMethod(data.authMethod || (quotation.customer?.auth_method || 'MOBILE'));
             setPhoneCountryCode(data.phoneCountryCode || quotation.customer?.phone_country_code || '+91');
             setAuthChecked(true);
+
+            if (data.authenticated && data.deviceToken && typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
+                const custId = data.customerId || quotation.customer_id;
+                if (custId) {
+                  localStorage.setItem(`quoteflow_portal_cust_${custId}`, data.deviceToken);
+                }
+              } catch {}
+            }
           }
         } else {
           if (active) setAuthChecked(true);
@@ -271,7 +299,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     return () => {
       active = false;
     };
-  }, [currentToken]);
+  }, [currentToken, quotation.customer_id]);
 
   const loadChatMessages = async (forceMarkRead = false) => {
     try {
@@ -494,7 +522,18 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         phoneCountryCode={phoneCountryCode}
         customerPhoneMasked={customerPhoneMasked}
         customerEmailMasked={customerEmailMasked}
-        onAuthenticated={() => {
+        onAuthenticated={(deviceToken) => {
+          if (deviceToken && typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('quoteflow_portal_device_token', deviceToken);
+              if (quotation.customer_id) {
+                localStorage.setItem(
+                  `quoteflow_portal_cust_${quotation.customer_id}`,
+                  deviceToken
+                );
+              }
+            } catch {}
+          }
           setIsAuthenticated(true);
         }}
       />
