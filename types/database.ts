@@ -521,3 +521,249 @@ export interface Template {
   is_default: boolean;
   created_at: string;
 }
+
+// ==============================================================================
+// SUBSCRIPTION & BILLING TYPES
+// ==============================================================================
+
+export type SubscriptionStatus =
+  | 'trialing'
+  | 'pending'
+  | 'active'
+  | 'past_due'
+  | 'grace_period'
+  | 'cancelled'
+  | 'expired'
+  | 'halted'
+  | 'failed';
+
+export type SubscriptionPaymentStatus =
+  | 'created'
+  | 'authorized'
+  | 'captured'
+  | 'failed'
+  | 'refunded';
+
+export interface SubscriptionPlan {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  amount: number; // in paise (e.g. 19900 = ₹199)
+  currency: string;
+  billing_interval: string;
+  billing_interval_count: number;
+  trial_days: number;
+  is_active: boolean;
+  is_public: boolean;
+  razorpay_plan_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessSubscription {
+  id: string;
+  business_id: string;
+  plan_id: string;
+  status: SubscriptionStatus;
+  provider: string;
+  razorpay_customer_id: string | null;
+  razorpay_subscription_id: string | null;
+  razorpay_plan_id: string | null;
+  amount: number; // in paise
+  currency: string;
+  trial_start_at: string | null;
+  trial_end_at: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  next_charge_at: string | null;
+  promo_id: string | null;
+  promo_months_remaining: number;
+  promotional_cycles_completed: number;
+  cancel_at_period_end: boolean;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  grace_period_start_at: string | null;
+  grace_period_end_at: string | null;
+  last_payment_at: string | null;
+  last_payment_id: string | null;
+  payment_failure_count: number;
+  created_at: string;
+  updated_at: string;
+  // Hydrated references
+  plan?: SubscriptionPlan;
+  organization?: Organization;
+}
+
+export interface SubscriptionPayment {
+  id: string;
+  business_id: string;
+  subscription_id: string | null;
+  razorpay_payment_id: string;
+  razorpay_subscription_id: string | null;
+  razorpay_invoice_id: string | null;
+  amount: number; // in paise
+  currency: string;
+  status: SubscriptionPaymentStatus;
+  payment_method: string | null;
+  failure_reason: string | null;
+  paid_at: string | null;
+  created_at: string;
+}
+
+export interface SubscriptionEvent {
+  id: string;
+  event_id: string;
+  event_type: string;
+  razorpay_subscription_id: string | null;
+  razorpay_payment_id: string | null;
+  payload: Record<string, any>;
+  processed: boolean;
+  processing_error: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+export interface Promotion {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  discount_type: 'PERCENTAGE' | 'FIXED';
+  discount_value: number;
+  promotional_price: number; // in paise
+  currency: string;
+  duration_months: number;
+  max_redemptions: number | null;
+  redemption_count: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromotionAssignment {
+  id: string;
+  promotion_id: string;
+  business_id: string;
+  status: 'eligible' | 'redeemed' | 'expired' | 'revoked';
+  assigned_at: string;
+  redeemed_at: string | null;
+  expires_at: string | null;
+  created_by: string | null;
+  promotion?: Promotion;
+}
+
+export interface SubscriptionAccess {
+  allowed: boolean;
+  status: SubscriptionStatus;
+  isTrial: boolean;
+  isPaid: boolean;
+  isPastDue: boolean;
+  isGracePeriod: boolean;
+  isExpired: boolean;
+  isHalted: boolean;
+  isCancelled: boolean;
+  daysRemainingInTrial: number;
+  graceDaysRemaining: number;
+  trialEndsAt: string | null;
+  planName: string;
+  planAmount: number;
+  promoActive: boolean;
+  promoMonthsRemaining: number;
+  promotionalCyclesCompleted: number;
+  warningMessage: string | null;
+}
+
+// ==============================================================================
+// SUPPORT TICKET TYPES
+// ==============================================================================
+
+export type SupportTicketCategory =
+  | 'Billing'
+  | 'Subscription'
+  | 'Quote'
+  | 'Invoice'
+  | 'Customer Portal'
+  | 'Payment'
+  | 'WhatsApp'
+  | 'Technical Issue'
+  | 'Bug Report'
+  | 'Feature Request'
+  | 'Other';
+
+export type SupportTicketPriority = 'Low' | 'Normal' | 'High' | 'Urgent';
+
+export type SupportTicketStatus =
+  | 'open'
+  | 'in_progress'
+  | 'waiting_for_customer'
+  | 'resolved'
+  | 'closed';
+
+export interface SupportTicket {
+  id: string;
+  business_id: string;
+  created_by_user_id: string;
+  ticket_number: string; // e.g. QF-2026-000001
+  subject: string;
+  category: SupportTicketCategory;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  description: string;
+  assigned_to: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  closed_at: string | null;
+  // Hydrated references
+  business_name?: string;
+  creator_email?: string;
+  creator_name?: string;
+  messages?: SupportTicketMessage[];
+  attachments?: SupportTicketAttachment[];
+  subscription_context?: {
+    plan_name: string;
+    subscription_status: SubscriptionStatus;
+    current_period_end: string | null;
+    last_payment_at: string | null;
+    last_payment_status: string | null;
+    payment_failure_count: number;
+    grace_period_end_at: string | null;
+  };
+}
+
+export interface SupportTicketMessage {
+  id: string;
+  ticket_id: string;
+  sender_user_id: string | null;
+  sender_type: 'business' | 'developer' | 'system';
+  sender_name: string | null;
+  message: string;
+  created_at: string;
+  attachments?: SupportTicketAttachment[];
+}
+
+export interface SupportTicketAttachment {
+  id: string;
+  ticket_id: string;
+  message_id: string | null;
+  uploaded_by_user_id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  created_at: string;
+}
+
+export interface AdminAuditLog {
+  id: string;
+  admin_user_id: string;
+  admin_email: string | null;
+  action: string;
+  target_type: string;
+  target_id: string;
+  metadata: Record<string, any>;
+  created_at: string;
+}

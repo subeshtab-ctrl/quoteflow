@@ -662,6 +662,33 @@ export function SettingsClientView({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Subscription & Billing Quick Card */}
+        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
+                Subscription & SaaS Billing
+              </h3>
+              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
+                Razorpay Verified
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
+              Manage your QuoteFlow plans (30-day Free Trial, ₹99/mo Promotional Offer, and ₹199/mo Standard), view payment receipts, or update recurring billing.
+            </p>
+          </div>
+          <Link href="/billing">
+            <Button
+              type="button"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-xs shrink-0"
+            >
+              <span>Manage Subscription & Billing</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </div>
+
         {/* Operating Environment Mode Card */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">

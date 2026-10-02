@@ -14,6 +14,9 @@ import {
   Settings,
   Building2,
   GraduationCap,
+  CreditCard,
+  LifeBuoy,
+  ShieldCheck,
 } from 'lucide-react';
 import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } from '@/lib/utils/logo';
 
@@ -21,6 +24,7 @@ interface SidebarProps {
   organizationName?: string;
   logoUrl?: string | null;
   mode?: string;
+  userRole?: string;
   className?: string;
 }
 
@@ -28,6 +32,7 @@ export function DashboardSidebar({
   organizationName = 'QuoteFlow',
   logoUrl,
   mode = 'live',
+  userRole = 'STAFF',
   className,
 }: SidebarProps) {
   const pathname = usePathname();
@@ -64,8 +69,13 @@ export function DashboardSidebar({
     { name: 'Customers', href: '/customers', icon: Users },
     { name: 'Products & Services', href: '/products', icon: Package },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
+    { name: 'Subscription & Billing', href: '/billing', icon: CreditCard },
+    { name: 'Support', href: '/support', icon: LifeBuoy },
     { name: 'Training & Guides', href: '/training', icon: GraduationCap },
     { name: 'Settings', href: '/settings', icon: Settings },
+    ...(userRole === 'OWNER' || userRole === 'ADMIN'
+      ? [{ name: 'Developer Admin', href: '/admin', icon: ShieldCheck }]
+      : []),
   ];
 
   return (

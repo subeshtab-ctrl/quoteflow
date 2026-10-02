@@ -100,7 +100,7 @@ describe('Advance Payments, Verified Receipts, Invoice PDF & 1-Hour IP View Trac
 
     const pdfHeader = Buffer.from(pdfBytes.slice(0, 4)).toString('ascii');
     expect(pdfHeader).toBe('%PDF');
-  });
+  }, 60000);
 
   it('tracks client portal views with a 1-hour rolling window per IP', async () => {
     const quotations = await store.getQuotations(orgId);

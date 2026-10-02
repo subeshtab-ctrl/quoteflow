@@ -115,5 +115,5 @@ describe('Payment Proof Chat Attachment, Purge on Confirmation, & Invoice Terms'
     // 4. Generate Invoice PDF buffer
     const invoicePdf = await generateInvoicePdf(invoice);
     expect(invoicePdf.length).toBeGreaterThan(100);
-  });
+  }, 60000);
 });

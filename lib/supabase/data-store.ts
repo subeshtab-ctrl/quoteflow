@@ -23,6 +23,17 @@ import {
   PaymentDisplayMode,
   TestUsageRecord,
   TestEmailRecord,
+  BusinessSubscription,
+  SubscriptionPlan,
+  SubscriptionPayment,
+  SubscriptionEvent,
+  SubscriptionAccess,
+  Promotion,
+  PromotionAssignment,
+  SupportTicket,
+  SupportTicketMessage,
+  SupportTicketAttachment,
+  AdminAuditLog,
 } from '@/types/database';
 import { calculateQuotationTotals } from '@/lib/quotations/calculations';
 import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quotations/tokens';
@@ -97,6 +108,16 @@ class QuoteFlowStore {
   private invoices: Map<string, Invoice> = new Map();
   private invoiceItems: Map<string, InvoiceItem[]> = new Map();
   private portalPins: Map<string, PortalPinRegistration> = new Map();
+  private subscriptions: Map<string, BusinessSubscription> = new Map();
+  private subscriptionPayments: Map<string, SubscriptionPayment[]> = new Map();
+  private subscriptionEvents: Map<string, SubscriptionEvent> = new Map();
+  private promotions: Map<string, Promotion> = new Map();
+  private promotionAssignments: Map<string, PromotionAssignment[]> = new Map();
+  private supportTickets: Map<string, SupportTicket> = new Map();
+  private supportTicketMessages: Map<string, SupportTicketMessage[]> = new Map();
+  private supportTicketAttachments: Map<string, SupportTicketAttachment[]> = new Map();
+  private adminAuditLogs: AdminAuditLog[] = [];
+  private ticketCounter: number = 0;
 
   public getDemoQuotation(): Quotation {
     const existing = this.quotations.get(DEMO_PORTAL_QUOTE_ID);
@@ -6041,6 +6062,28 @@ class QuoteFlowStore {
     }
   }
 
+  public async addNotification(params: {
+    organizationId: string;
+    title: string;
+    message: string;
+    type?: 'VIEWED' | 'APPROVED' | 'REJECTED' | 'EXPIRING';
+    quotationId?: string;
+  }): Promise<Notification> {
+    const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const notif: Notification = {
+      id,
+      organization_id: params.organizationId,
+      quotation_id: params.quotationId,
+      title: params.title,
+      message: params.message,
+      type: params.type || 'VIEWED',
+      is_read: false,
+      created_at: new Date().toISOString(),
+    };
+    this.notifications.set(id, notif);
+    return notif;
+  }
+
   private createNotification(
     orgId: string,
     quotationId: string,
@@ -6473,6 +6516,729 @@ class QuoteFlowStore {
       totalViews,
       winRate,
       monthlyData,
+    };
+  }
+
+  // ==============================================================================
+  // SUBSCRIPTION BILLING PERSISTENCE & STORE METHODS
+  // ==============================================================================
+
+  private getSubscriptionsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'subscriptions.json');
+  }
+
+  private loadSubscriptionsFromFile(): Record<string, BusinessSubscription> {
+    try {
+      const p = this.getSubscriptionsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {}
+    return {};
+  }
+
+  private saveSubscriptionsToFile(data: Record<string, BusinessSubscription>): void {
+    try {
+      fs.writeFileSync(this.getSubscriptionsFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async getBusinessSubscription(businessId: string): Promise<BusinessSubscription | null> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data, error } = await admin
+          .from('business_subscriptions')
+          .select('*, plan:subscription_plans(*)')
+          .eq('business_id', businessId)
+          .maybeSingle();
+        if (data && !error) {
+          this.subscriptions.set(businessId, data);
+          return data;
+        }
+      } catch {}
+    }
+
+    if (this.subscriptions.has(businessId)) {
+      return this.subscriptions.get(businessId)!;
+    }
+
+    const fileData = this.loadSubscriptionsFromFile();
+    if (fileData[businessId]) {
+      this.subscriptions.set(businessId, fileData[businessId]);
+      return fileData[businessId];
+    }
+
+    return null;
+  }
+
+  public async saveBusinessSubscription(sub: BusinessSubscription): Promise<BusinessSubscription> {
+    this.subscriptions.set(sub.business_id, sub);
+
+    const fileData = this.loadSubscriptionsFromFile();
+    fileData[sub.business_id] = sub;
+    this.saveSubscriptionsToFile(fileData);
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('business_subscriptions').upsert({
+          id: sub.id,
+          business_id: sub.business_id,
+          plan_id: sub.plan_id,
+          status: sub.status,
+          provider: sub.provider,
+          razorpay_customer_id: sub.razorpay_customer_id,
+          razorpay_subscription_id: sub.razorpay_subscription_id,
+          razorpay_plan_id: sub.razorpay_plan_id,
+          amount: sub.amount,
+          currency: sub.currency,
+          trial_start_at: sub.trial_start_at,
+          trial_end_at: sub.trial_end_at,
+          current_period_start: sub.current_period_start,
+          current_period_end: sub.current_period_end,
+          next_charge_at: sub.next_charge_at,
+          promo_id: sub.promo_id,
+          promo_months_remaining: sub.promo_months_remaining,
+          promotional_cycles_completed: sub.promotional_cycles_completed,
+          cancel_at_period_end: sub.cancel_at_period_end,
+          cancelled_at: sub.cancelled_at,
+          cancellation_reason: sub.cancellation_reason,
+          grace_period_start_at: sub.grace_period_start_at,
+          grace_period_end_at: sub.grace_period_end_at,
+          last_payment_at: sub.last_payment_at,
+          last_payment_id: sub.last_payment_id,
+          payment_failure_count: sub.payment_failure_count,
+          created_at: sub.created_at,
+          updated_at: sub.updated_at,
+        });
+      } catch (err) {
+        console.warn('Supabase saveBusinessSubscription sync warning:', err);
+      }
+    }
+
+    return sub;
+  }
+
+  public async getSubscriptionByRazorpayId(rzpSubId: string): Promise<BusinessSubscription | null> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin
+          .from('business_subscriptions')
+          .select('*, plan:subscription_plans(*)')
+          .eq('razorpay_subscription_id', rzpSubId)
+          .maybeSingle();
+        if (data) return data;
+      } catch {}
+    }
+
+    for (const sub of this.subscriptions.values()) {
+      if (sub.razorpay_subscription_id === rzpSubId) return sub;
+    }
+    const fileData = this.loadSubscriptionsFromFile();
+    for (const sub of Object.values(fileData)) {
+      if (sub.razorpay_subscription_id === rzpSubId) return sub;
+    }
+    return null;
+  }
+
+  public async getAllSubscribers(filters?: {
+    status?: string;
+    search?: string;
+    plan?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ subscribers: BusinessSubscription[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+
+    let all: BusinessSubscription[] = [];
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        let query = admin
+          .from('business_subscriptions')
+          .select('*, plan:subscription_plans(*), organization:organizations(*)', { count: 'exact' });
+
+        if (filters?.status && filters.status !== 'all') {
+          query = query.eq('status', filters.status);
+        }
+
+        const { data, count } = await query
+          .order('created_at', { ascending: false })
+          .range((page - 1) * limit, page * limit - 1);
+
+        if (data && data.length > 0) {
+          return { subscribers: data, total: count || data.length };
+        }
+      } catch {}
+    }
+
+    // Local / In-memory fallback
+    const fileData = this.loadSubscriptionsFromFile();
+    const mapSubs = Array.from(this.subscriptions.values());
+    const mergedMap = new Map<string, BusinessSubscription>();
+    for (const s of Object.values(fileData)) mergedMap.set(s.business_id, s);
+    for (const s of mapSubs) mergedMap.set(s.business_id, s);
+    all = Array.from(mergedMap.values());
+
+    // Enrich with organizations and plans
+    for (const sub of all) {
+      if (!sub.organization) {
+        sub.organization = this.organizations.get(sub.business_id) || undefined;
+      }
+    }
+
+    if (filters?.status && filters.status !== 'all') {
+      all = all.filter((s) => s.status === filters.status);
+    }
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      all = all.filter(
+        (s) =>
+          s.business_id.toLowerCase().includes(q) ||
+          (s.organization?.name || '').toLowerCase().includes(q) ||
+          (s.organization?.email || '').toLowerCase().includes(q)
+      );
+    }
+
+    const total = all.length;
+    const startIndex = (page - 1) * limit;
+    const paginated = all.slice(startIndex, startIndex + limit);
+
+    return { subscribers: paginated, total };
+  }
+
+  // ---- SUBSCRIPTION PAYMENTS ----
+  private getSubscriptionPaymentsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'subscription-payments.json');
+  }
+
+  private loadSubscriptionPaymentsFromFile(): SubscriptionPayment[] {
+    try {
+      const p = this.getSubscriptionPaymentsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || [];
+      }
+    } catch {}
+    return [];
+  }
+
+  public async getSubscriptionPayments(businessId: string, limit = 50): Promise<SubscriptionPayment[]> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin
+          .from('subscription_payments')
+          .select('*')
+          .eq('business_id', businessId)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        if (data) return data;
+      } catch {}
+    }
+
+    const all = this.loadSubscriptionPaymentsFromFile();
+    return all.filter((p) => p.business_id === businessId).slice(0, limit);
+  }
+
+  public async saveSubscriptionPayment(payment: SubscriptionPayment): Promise<SubscriptionPayment> {
+    const all = this.loadSubscriptionPaymentsFromFile();
+    all.unshift(payment);
+    try {
+      fs.writeFileSync(this.getSubscriptionPaymentsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
+    } catch {}
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('subscription_payments').insert(payment);
+      } catch (err) {
+        console.warn('Supabase saveSubscriptionPayment sync warning:', err);
+      }
+    }
+
+    return payment;
+  }
+
+  // ---- SUBSCRIPTION EVENTS (Idempotent Webhooks) ----
+  private getSubscriptionEventsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'subscription-events.json');
+  }
+
+  private loadSubscriptionEventsFromFile(): Record<string, SubscriptionEvent> {
+    try {
+      const p = this.getSubscriptionEventsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {}
+    return {};
+  }
+
+  public async getSubscriptionEvent(eventId: string): Promise<SubscriptionEvent | null> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin
+          .from('subscription_events')
+          .select('*')
+          .eq('event_id', eventId)
+          .maybeSingle();
+        if (data) return data;
+      } catch {}
+    }
+
+    if (this.subscriptionEvents.has(eventId)) {
+      return this.subscriptionEvents.get(eventId)!;
+    }
+    const all = this.loadSubscriptionEventsFromFile();
+    return all[eventId] || null;
+  }
+
+  public async saveSubscriptionEvent(event: SubscriptionEvent): Promise<SubscriptionEvent> {
+    this.subscriptionEvents.set(event.event_id, event);
+    const all = this.loadSubscriptionEventsFromFile();
+    all[event.event_id] = event;
+    try {
+      fs.writeFileSync(this.getSubscriptionEventsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
+    } catch {}
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('subscription_events').upsert({
+          id: event.id,
+          event_id: event.event_id,
+          event_type: event.event_type,
+          razorpay_subscription_id: event.razorpay_subscription_id,
+          razorpay_payment_id: event.razorpay_payment_id,
+          payload: event.payload,
+          processed: event.processed,
+          processing_error: event.processing_error,
+          created_at: event.created_at,
+          processed_at: event.processed_at,
+        });
+      } catch (err) {
+        console.warn('Supabase saveSubscriptionEvent sync warning:', err);
+      }
+    }
+    return event;
+  }
+
+  // ---- PROMOTIONS & ASSIGNMENTS ----
+  private getPromotionsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'promotions.json');
+  }
+
+  public async getPromotions(): Promise<Promotion[]> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin.from('promotions').select('*').order('created_at', { ascending: false });
+        if (data && data.length > 0) return data;
+      } catch {}
+    }
+
+    try {
+      const p = this.getPromotionsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+    } catch {}
+
+    return [
+      {
+        id: 'f0000000-0000-0000-0000-000000000001',
+        name: '₹99 for 3 Months Special Offer',
+        code: 'WELCOME99',
+        description: 'Exclusive introductory pricing: ₹99/month for 3 successful billing cycles, automatically transitioning to ₹199/month.',
+        discount_type: 'FIXED',
+        discount_value: 100,
+        promotional_price: 9900,
+        currency: 'INR',
+        duration_months: 3,
+        max_redemptions: null,
+        redemption_count: 0,
+        starts_at: null,
+        ends_at: null,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ];
+  }
+
+  public async getPromotionAssignment(businessId: string, promoId: string): Promise<PromotionAssignment | null> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin
+          .from('promotion_assignments')
+          .select('*, promotion:promotions(*)')
+          .eq('business_id', businessId)
+          .eq('promotion_id', promoId)
+          .maybeSingle();
+        if (data) return data;
+      } catch {}
+    }
+
+    const assignments = this.promotionAssignments.get(businessId) || [];
+    return assignments.find((a) => a.promotion_id === promoId) || null;
+  }
+
+  public async assignPromotion(assignment: PromotionAssignment): Promise<PromotionAssignment> {
+    const existing = this.promotionAssignments.get(assignment.business_id) || [];
+    const updated = existing.filter((a) => a.promotion_id !== assignment.promotion_id);
+    updated.push(assignment);
+    this.promotionAssignments.set(assignment.business_id, updated);
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('promotion_assignments').upsert(assignment);
+      } catch {}
+    }
+    return assignment;
+  }
+
+  public async updatePromotionAssignmentStatus(
+    businessId: string,
+    promoId: string,
+    status: 'eligible' | 'redeemed' | 'expired' | 'revoked'
+  ): Promise<void> {
+    const assignments = this.promotionAssignments.get(businessId) || [];
+    const item = assignments.find((a) => a.promotion_id === promoId);
+    if (item) {
+      item.status = status;
+      if (status === 'redeemed') item.redeemed_at = new Date().toISOString();
+    }
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin
+          .from('promotion_assignments')
+          .update({
+            status,
+            ...(status === 'redeemed' ? { redeemed_at: new Date().toISOString() } : {}),
+          })
+          .eq('business_id', businessId)
+          .eq('promotion_id', promoId);
+      } catch {}
+    }
+  }
+
+  // ---- SUPPORT TICKETS ----
+  private getSupportTicketsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'support-tickets.json');
+  }
+
+  private loadSupportTicketsFromFile(): Record<string, SupportTicket> {
+    try {
+      const p = this.getSupportTicketsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {}
+    return {};
+  }
+
+  private saveSupportTicketsToFile(data: Record<string, SupportTicket>): void {
+    try {
+      fs.writeFileSync(this.getSupportTicketsFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async getNextTicketNumber(): Promise<number> {
+    this.ticketCounter += 1;
+    return this.ticketCounter;
+  }
+
+  public async getSupportTickets(params?: {
+    businessId?: string;
+    status?: string;
+    category?: string;
+    priority?: string;
+    search?: string;
+  }): Promise<SupportTicket[]> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        let query = admin.from('support_tickets').select('*');
+        if (params?.businessId) query = query.eq('business_id', params.businessId);
+        if (params?.status && params.status !== 'all') query = query.eq('status', params.status);
+        if (params?.category && params.category !== 'all') query = query.eq('category', params.category);
+        if (params?.priority && params.priority !== 'all') query = query.eq('priority', params.priority);
+        const { data } = await query.order('created_at', { ascending: false });
+        if (data && data.length > 0) return data;
+      } catch {}
+    }
+
+    const fileData = this.loadSupportTicketsFromFile();
+    let all = Object.values(fileData);
+    if (params?.businessId) {
+      all = all.filter((t) => t.business_id === params.businessId);
+    }
+    if (params?.status && params.status !== 'all') {
+      all = all.filter((t) => t.status === params.status);
+    }
+    if (params?.category && params.category !== 'all') {
+      all = all.filter((t) => t.category === params.category);
+    }
+    if (params?.priority && params.priority !== 'all') {
+      all = all.filter((t) => t.priority === params.priority);
+    }
+    if (params?.search) {
+      const q = params.search.toLowerCase();
+      all = all.filter(
+        (t) =>
+          t.ticket_number.toLowerCase().includes(q) ||
+          t.subject.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q)
+      );
+    }
+    return all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  public async getSupportTicket(ticketId: string): Promise<SupportTicket | null> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin
+          .from('support_tickets')
+          .select('*, messages:support_ticket_messages(*), attachments:support_ticket_attachments(*)')
+          .eq('id', ticketId)
+          .maybeSingle();
+        if (data) return data;
+      } catch {}
+    }
+
+    const fileData = this.loadSupportTicketsFromFile();
+    const ticket = fileData[ticketId] || null;
+    if (ticket) {
+      ticket.messages = this.supportTicketMessages.get(ticketId) || [];
+      ticket.attachments = this.supportTicketAttachments.get(ticketId) || [];
+    }
+    return ticket;
+  }
+
+  public async saveSupportTicket(ticket: SupportTicket): Promise<SupportTicket> {
+    this.supportTickets.set(ticket.id, ticket);
+    const fileData = this.loadSupportTicketsFromFile();
+    fileData[ticket.id] = ticket;
+    this.saveSupportTicketsToFile(fileData);
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('support_tickets').upsert({
+          id: ticket.id,
+          business_id: ticket.business_id,
+          created_by_user_id: ticket.created_by_user_id,
+          ticket_number: ticket.ticket_number,
+          subject: ticket.subject,
+          category: ticket.category,
+          priority: ticket.priority,
+          status: ticket.status,
+          description: ticket.description,
+          assigned_to: ticket.assigned_to,
+          created_at: ticket.created_at,
+          updated_at: ticket.updated_at,
+          resolved_at: ticket.resolved_at,
+          closed_at: ticket.closed_at,
+        });
+      } catch {}
+    }
+    return ticket;
+  }
+
+  public async saveSupportTicketMessage(message: SupportTicketMessage): Promise<SupportTicketMessage> {
+    const list = this.supportTicketMessages.get(message.ticket_id) || [];
+    list.push(message);
+    this.supportTicketMessages.set(message.ticket_id, list);
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('support_ticket_messages').insert({
+          id: message.id,
+          ticket_id: message.ticket_id,
+          sender_user_id: message.sender_user_id,
+          sender_type: message.sender_type,
+          sender_name: message.sender_name,
+          message: message.message,
+          created_at: message.created_at,
+        });
+      } catch {}
+    }
+    return message;
+  }
+
+  public async saveSupportTicketAttachment(attachment: SupportTicketAttachment): Promise<SupportTicketAttachment> {
+    const list = this.supportTicketAttachments.get(attachment.ticket_id) || [];
+    list.push(attachment);
+    this.supportTicketAttachments.set(attachment.ticket_id, list);
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('support_ticket_attachments').insert({
+          id: attachment.id,
+          ticket_id: attachment.ticket_id,
+          message_id: attachment.message_id,
+          uploaded_by_user_id: attachment.uploaded_by_user_id,
+          storage_path: attachment.storage_path,
+          file_name: attachment.file_name,
+          file_size: attachment.file_size,
+          mime_type: attachment.mime_type,
+          created_at: attachment.created_at,
+        });
+      } catch {}
+    }
+    return attachment;
+  }
+
+  // ---- ADMIN AUDIT LOGS ----
+  public async logAdminAudit(log: AdminAuditLog): Promise<AdminAuditLog> {
+    this.adminAuditLogs.unshift(log);
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('admin_audit_logs').insert(log);
+      } catch {}
+    }
+    return log;
+  }
+
+  public async getAdminAuditLogs(limit = 50): Promise<AdminAuditLog[]> {
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data } = await admin
+          .from('admin_audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        if (data) return data;
+      } catch {}
+    }
+    return this.adminAuditLogs.slice(0, limit);
+  }
+
+  // ---- MRR & METRICS ----
+  public async calculateMRR(): Promise<{
+    mrr: number;
+    activeCount: number;
+    promoCount: number;
+    standardCount: number;
+    breakdown: Array<{ plan: string; count: number; amount: number }>;
+  }> {
+    const { subscribers } = await this.getAllSubscribers({ limit: 10000 });
+    let mrr = 0;
+    let promoCount = 0;
+    let standardCount = 0;
+    let activeCount = 0;
+
+    for (const sub of subscribers) {
+      if (sub.status === 'active' || sub.status === 'grace_period' || sub.status === 'past_due') {
+        activeCount += 1;
+        const planAmount = sub.amount || 0; // in paise
+        mrr += planAmount / 100;
+        if (planAmount === 9900) {
+          promoCount += 1;
+        } else if (planAmount === 19900) {
+          standardCount += 1;
+        }
+      }
+    }
+
+    return {
+      mrr,
+      activeCount,
+      promoCount,
+      standardCount,
+      breakdown: [
+        { plan: 'QuoteFlow Special Offer (₹99/mo)', count: promoCount, amount: promoCount * 99 },
+        { plan: 'QuoteFlow Standard (₹199/mo)', count: standardCount, amount: standardCount * 199 },
+      ],
+    };
+  }
+
+  public async getSubscriptionStats(): Promise<{
+    totalBusinesses: number;
+    trialBusinesses: number;
+    activeSubscribers: number;
+    promoSubscribers: number;
+    pastDue: number;
+    gracePeriod: number;
+    cancelled: number;
+    expired: number;
+    halted: number;
+    mrr: number;
+  }> {
+    const { subscribers } = await this.getAllSubscribers({ limit: 10000 });
+    let trialBusinesses = 0;
+    let activeSubscribers = 0;
+    let promoSubscribers = 0;
+    let pastDue = 0;
+    let gracePeriod = 0;
+    let cancelled = 0;
+    let expired = 0;
+    let halted = 0;
+    let mrr = 0;
+
+    for (const sub of subscribers) {
+      if (sub.status === 'trialing') trialBusinesses += 1;
+      else if (sub.status === 'active') {
+        activeSubscribers += 1;
+        mrr += (sub.amount || 0) / 100;
+        if (sub.amount === 9900) promoSubscribers += 1;
+      } else if (sub.status === 'past_due') pastDue += 1;
+      else if (sub.status === 'grace_period') gracePeriod += 1;
+      else if (sub.status === 'cancelled') cancelled += 1;
+      else if (sub.status === 'expired') expired += 1;
+      else if (sub.status === 'halted') halted += 1;
+    }
+
+    return {
+      totalBusinesses: subscribers.length,
+      trialBusinesses,
+      activeSubscribers,
+      promoSubscribers,
+      pastDue,
+      gracePeriod,
+      cancelled,
+      expired,
+      halted,
+      mrr,
     };
   }
 }
