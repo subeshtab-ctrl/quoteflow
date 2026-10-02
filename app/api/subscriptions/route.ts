@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService, DEFAULT_PLANS } from '@/lib/billing/subscription-service';
+import { razorpayService } from '@/lib/billing/razorpay';
 import { store } from '@/lib/supabase/data-store';
 
 export async function GET(req: NextRequest) {
@@ -22,6 +23,9 @@ export async function GET(req: NextRequest) {
       DEFAULT_PLANS.STANDARD_199,
     ];
 
+    const keyId = razorpayService.getKeyId();
+    const isTestMode = Boolean(keyId && keyId.startsWith('rzp_test_'));
+
     return NextResponse.json({
       success: true,
       subscription,
@@ -30,6 +34,8 @@ export async function GET(req: NextRequest) {
       promoPlan: DEFAULT_PLANS.PROMO_99,
       plans: publicPlans,
       payments,
+      isTestMode,
+      keyId,
     });
   } catch (err: any) {
     console.error('Error fetching subscription details:', err);
