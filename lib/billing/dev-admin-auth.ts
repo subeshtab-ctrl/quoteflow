@@ -20,6 +20,8 @@ export interface DeveloperAdminConfig {
   passwordHash: string | null;
   salt: string | null;
   updatedAt: string | null;
+  razorpayPlanIdPromo99?: string | null;
+  razorpayPlanIdStandard199?: string | null;
 }
 
 interface OtpRecord {
@@ -91,11 +93,13 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
       const raw = fs.readFileSync(p, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed.passwordHash && parsed.salt) {
-        const cfg = {
+        const cfg: DeveloperAdminConfig = {
           email: DEVELOPER_ADMIN_EMAIL,
           passwordHash: parsed.passwordHash,
           salt: parsed.salt,
           updatedAt: parsed.updatedAt || null,
+          razorpayPlanIdPromo99: parsed.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
+          razorpayPlanIdStandard199: parsed.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || null,
         };
         globalThis.__devAdminConfig__ = cfg;
         return cfg;
@@ -111,6 +115,8 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
     passwordHash: defaultHash,
     salt: defaultSalt,
     updatedAt: null,
+    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
+    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || null,
   };
   globalThis.__devAdminConfig__ = defaultCfg;
   return defaultCfg;
@@ -150,8 +156,10 @@ export function setDeveloperAdminPassword(newPassword: string): boolean {
   if (!newPassword || newPassword.length < 6) {
     throw new Error('Password must be at least 6 characters long.');
   }
+  const current = getDeveloperAdminConfig();
   const { hash, salt } = hashPassword(newPassword);
   const cfg: DeveloperAdminConfig = {
+    ...current,
     email: DEVELOPER_ADMIN_EMAIL,
     passwordHash: hash,
     salt,
@@ -166,6 +174,28 @@ export function setDeveloperAdminPassword(newPassword: string): boolean {
     console.warn('Could not write admin config to disk (in-memory config preserved):', err);
   }
   return true;
+}
+
+/**
+ * Update Razorpay Plan IDs configuration
+ */
+export function updateRazorpayPlansConfig(
+  promoPlanId?: string | null,
+  standardPlanId?: string | null
+): DeveloperAdminConfig {
+  const current = getDeveloperAdminConfig();
+  if (promoPlanId !== undefined) current.razorpayPlanIdPromo99 = promoPlanId?.trim() || null;
+  if (standardPlanId !== undefined) current.razorpayPlanIdStandard199 = standardPlanId?.trim() || null;
+  current.updatedAt = new Date().toISOString();
+  globalThis.__devAdminConfig__ = current;
+
+  try {
+    const p = getConfigPath();
+    fs.writeFileSync(p, JSON.stringify(current, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not write admin config to disk (in-memory config preserved):', err);
+  }
+  return current;
 }
 
 /**

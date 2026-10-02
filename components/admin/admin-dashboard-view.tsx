@@ -38,8 +38,17 @@ import {
 } from 'lucide-react';
 
 export function AdminDashboardView() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'razorpay' | 'audit'>('overview');
   const [isLoading, setIsLoading] = useState(true);
+
+  // Razorpay Configuration State
+  const [razorpayConfig, setRazorpayConfig] = useState<any>(null);
+  const [razorpayPromoPlanId, setRazorpayPromoPlanId] = useState('');
+  const [razorpayStandardPlanId, setRazorpayStandardPlanId] = useState('');
+  const [isSavingRazorpayPlans, setIsSavingRazorpayPlans] = useState(false);
+  const [isTestingRazorpayConnection, setIsTestingRazorpayConnection] = useState(false);
+  const [razorpayTestResult, setRazorpayTestResult] = useState<any>(null);
+  const [razorpayFeedback, setRazorpayFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Stats & MRR
   const [stats, setStats] = useState<any>(null);
@@ -134,9 +143,83 @@ export function AdminDashboardView() {
     } catch {}
   };
 
+  const fetchRazorpayConfig = async () => {
+    try {
+      const res = await fetch('/api/admin/razorpay');
+      const json = await res.json();
+      if (res.ok && json.razorpay) {
+        setRazorpayConfig(json.razorpay);
+        setRazorpayPromoPlanId(json.razorpay.promoPlanId || '');
+        setRazorpayStandardPlanId(json.razorpay.standardPlanId || '');
+      }
+    } catch {}
+  };
+
+  const handleSaveRazorpayPlans = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsSavingRazorpayPlans(true);
+      setRazorpayFeedback(null);
+      const res = await fetch('/api/admin/razorpay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_plans',
+          promo_plan_id: razorpayPromoPlanId,
+          standard_plan_id: razorpayStandardPlanId,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setRazorpayFeedback({ type: 'success', text: 'Razorpay Plan IDs saved successfully!' });
+        await fetchRazorpayConfig();
+      } else {
+        setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to save plan IDs' });
+      }
+    } catch (err: any) {
+      setRazorpayFeedback({ type: 'error', text: err.message || 'Error saving plan IDs' });
+    } finally {
+      setIsSavingRazorpayPlans(false);
+    }
+  };
+
+  const handleTestRazorpayConnection = async () => {
+    try {
+      setIsTestingRazorpayConnection(true);
+      setRazorpayFeedback(null);
+      setRazorpayTestResult(null);
+      const res = await fetch('/api/admin/razorpay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'test_connection',
+          promo_plan_id: razorpayPromoPlanId,
+          standard_plan_id: razorpayStandardPlanId,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.testResult) {
+        setRazorpayTestResult(json.testResult);
+      } else {
+        setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to execute connection test' });
+      }
+    } catch (err: any) {
+      setRazorpayFeedback({ type: 'error', text: err.message || 'Error connecting to Razorpay' });
+    } finally {
+      setIsTestingRazorpayConnection(false);
+    }
+  };
+
   const loadAll = async () => {
     setIsLoading(true);
-    await Promise.all([fetchStats(), fetchSubscribers(), fetchPromotions(), fetchTickets(), fetchAuditLogs()]);
+    await Promise.all([
+      fetchStats(),
+      fetchSubscribers(),
+      fetchPromotions(),
+      fetchTickets(),
+      fetchAuditLogs(),
+      fetchRazorpayConfig(),
+    ]);
     setIsLoading(false);
   };
 
@@ -271,6 +354,7 @@ export function AdminDashboardView() {
           { id: 'subscribers', label: `Subscribers (${subscriberTotal})`, icon: Users },
           { id: 'offers', label: 'Offers & Promotions', icon: Tag },
           { id: 'tickets', label: `Support Tickets (${tickets.length})`, icon: LifeBuoy },
+          { id: 'razorpay', label: 'Razorpay & Plans', icon: CreditCard },
           { id: 'audit', label: 'Admin Audit Log', icon: ShieldCheck },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -768,6 +852,256 @@ export function AdminDashboardView() {
               </div>
             </Modal>
           )}
+        </div>
+      )}
+
+      {/* TAB: RAZORPAY CONFIGURATION & PLANS */}
+      {activeTab === 'razorpay' && (
+        <div className="space-y-6">
+          {razorpayFeedback && (
+            <div
+              className={`p-4 rounded-xl text-xs flex items-center justify-between gap-3 ${
+                razorpayFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
+              }`}
+            >
+              <span>{razorpayFeedback.text}</span>
+              <button
+                type="button"
+                onClick={() => setRazorpayFeedback(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+
+          {/* Gateway Status Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Razorpay Status</span>
+              <div className="flex items-center gap-2 pt-1">
+                {razorpayConfig?.isConfigured ? (
+                  <Badge className="bg-emerald-600 text-white text-[11px] gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    <span>Configured ({razorpayConfig?.mode?.toUpperCase()})</span>
+                  </Badge>
+                ) : (
+                  <Badge className="bg-amber-600 text-white text-[11px] gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    <span>Mock / Test Mode</span>
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 pt-1">
+                {razorpayConfig?.isConfigured ? 'Live credentials detected' : 'Placeholder keys in effect'}
+              </p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Public Key ID</span>
+              <p className="text-lg font-mono font-bold text-slate-900 dark:text-white pt-1">
+                {razorpayConfig?.keyId || 'Not Set'}
+              </p>
+              <p className="text-[11px] text-slate-500">Exposed safely to browser for modal</p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Key Secret</span>
+              <div className="pt-1">
+                {razorpayConfig?.hasSecret ? (
+                  <Badge className="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 text-[11px]">
+                    Verified in Environment
+                  </Badge>
+                ) : (
+                  <Badge className="bg-rose-600/20 text-rose-400 border border-rose-500/30 text-[11px]">
+                    Missing in Vercel
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 pt-1">Kept strictly server-side</p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Plan Linkage</span>
+              <p className="text-lg font-bold text-slate-900 dark:text-white pt-1">
+                {razorpayPromoPlanId && razorpayStandardPlanId ? (
+                  <span className="text-emerald-500">2 Plans Linked ✓</span>
+                ) : razorpayPromoPlanId || razorpayStandardPlanId ? (
+                  <span className="text-amber-500">1 Plan Linked</span>
+                ) : (
+                  <span className="text-slate-400">Pending Setup</span>
+                )}
+              </p>
+              <p className="text-[11px] text-slate-500">Promo (₹99) & Standard (₹199)</p>
+            </div>
+          </div>
+
+          {/* Test Connection Button & Live Feedback */}
+          <div className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-indigo-500" />
+                  <span>Test Razorpay Live Connection & Plans</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Sends an authorized test probe to the Razorpay API to verify your Key ID, Key Secret, and Plan existence.
+                </p>
+              </div>
+              <Button
+                onClick={handleTestRazorpayConnection}
+                disabled={isTestingRazorpayConnection}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shrink-0 flex items-center gap-2"
+              >
+                {isTestingRazorpayConnection ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Activity className="h-3.5 w-3.5" />
+                )}
+                <span>Test Razorpay Connection</span>
+              </Button>
+            </div>
+
+            {razorpayTestResult && (
+              <div
+                className={`p-4 rounded-xl border text-xs space-y-2 ${
+                  razorpayTestResult.apiSuccess
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold text-sm">
+                  {razorpayTestResult.apiSuccess ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                  )}
+                  <span>{razorpayTestResult.apiMessage}</span>
+                </div>
+
+                {razorpayTestResult.apiSuccess && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-slate-300 border-t border-emerald-500/20">
+                    <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Promo Plan (₹99):</span>
+                      <p className="font-mono text-white text-xs mt-0.5">
+                        {razorpayTestResult.promoPlanDetails
+                          ? `${razorpayTestResult.promoPlanDetails.name} (₹${razorpayTestResult.promoPlanDetails.amount / 100}) - ${razorpayTestResult.promoPlanDetails.id}`
+                          : 'Not linked or not found on Razorpay'}
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Standard Plan (₹199):</span>
+                      <p className="font-mono text-white text-xs mt-0.5">
+                        {razorpayTestResult.standardPlanDetails
+                          ? `${razorpayTestResult.standardPlanDetails.name} (₹${razorpayTestResult.standardPlanDetails.amount / 100}) - ${razorpayTestResult.standardPlanDetails.id}`
+                          : 'Not linked or not found on Razorpay'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Form to configure Razorpay Plan IDs */}
+          <div className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Razorpay Subscription Plan IDs
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Link your created Razorpay Subscription Plans directly so QuoteFlow initiates authentic recurring subscriptions.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveRazorpayPlans} className="space-y-4 max-w-2xl">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Promotional Plan ID (₹99/mo for first 3 cycles)
+                </label>
+                <Input
+                  type="text"
+                  placeholder="e.g. plan_O1a2b3c4d5e6f7"
+                  value={razorpayPromoPlanId}
+                  onChange={(e) => setRazorpayPromoPlanId(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <p className="text-[11px] text-slate-400">
+                  Plan created in Razorpay Dashboard with frequency: Monthly (1), Amount: ₹99.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Standard Plan ID (₹199/mo recurring)
+                </label>
+                <Input
+                  type="text"
+                  placeholder="e.g. plan_P1a2b3c4d5e6f7"
+                  value={razorpayStandardPlanId}
+                  onChange={(e) => setRazorpayStandardPlanId(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <p className="text-[11px] text-slate-400">
+                  Plan created in Razorpay Dashboard with frequency: Monthly (1), Amount: ₹199.
+                </p>
+              </div>
+
+              <div className="pt-2 flex items-center gap-3">
+                <Button
+                  type="submit"
+                  disabled={isSavingRazorpayPlans}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-2"
+                >
+                  {isSavingRazorpayPlans ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>Save Plan IDs</span>
+                </Button>
+              </div>
+            </form>
+          </div>
+
+          {/* Setup Guide Box */}
+          <div className="p-6 rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/20 text-xs space-y-3">
+            <h4 className="font-bold text-sm text-indigo-900 dark:text-indigo-200 flex items-center gap-2">
+              <span>📋 How to set up Razorpay Subscriptions (Step-by-Step)</span>
+            </h4>
+            <ol className="list-decimal list-inside space-y-2 text-slate-700 dark:text-slate-300 leading-relaxed">
+              <li>
+                Log in to your <strong>Razorpay Dashboard</strong> (<a href="https://dashboard.razorpay.com" target="_blank" rel="noreferrer" className="text-indigo-500 underline font-mono">dashboard.razorpay.com</a>).
+              </li>
+              <li>
+                In the left sidebar, navigate to <strong>Subscriptions &rarr; Plans</strong> (if Subscriptions is not visible, activate Subscriptions under Account &amp; Settings).
+              </li>
+              <li>
+                Click <strong>+ Create Plan</strong>:
+                <ul className="list-disc list-inside ml-5 mt-1 space-y-1 text-slate-600 dark:text-slate-400">
+                  <li><strong>Plan 1 (Promo)</strong>: Name: <code>QuoteFlow Special Offer</code>, Frequency: <code>Monthly</code> (Every 1 Month), Amount: <code>₹99</code>. Copy the generated Plan ID (e.g. <code>plan_...</code>).</li>
+                  <li><strong>Plan 2 (Standard)</strong>: Name: <code>QuoteFlow Standard</code>, Frequency: <code>Monthly</code> (Every 1 Month), Amount: <code>₹199</code>. Copy the generated Plan ID (e.g. <code>plan_...</code>).</li>
+                </ul>
+              </li>
+              <li>
+                Paste both Plan IDs in the fields above and click <strong>Save Plan IDs</strong>.
+              </li>
+              <li>
+                In your <strong>Vercel Project Settings &rarr; Environment Variables</strong>, ensure you have set:
+                <div className="p-2.5 mt-1 bg-slate-900 text-slate-200 rounded-lg font-mono text-[11px] space-y-1">
+                  <div>RAZORPAY_KEY_ID=rzp_live_... (or rzp_test_...)</div>
+                  <div>RAZORPAY_KEY_SECRET=...</div>
+                  <div>NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_live_... (matching key ID)</div>
+                  <div>RAZORPAY_MODE=live (or test)</div>
+                </div>
+              </li>
+              <li>
+                Click <strong>Test Razorpay Connection</strong> above to verify that everything is connected and ready for customer payments!
+              </li>
+            </ol>
+          </div>
         </div>
       )}
 

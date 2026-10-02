@@ -15,6 +15,7 @@ import {
   SupportTicketStatus,
 } from '@/types/database';
 import { razorpayService } from './razorpay';
+import { getDeveloperAdminConfig, updateRazorpayPlansConfig } from './dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 import { sendEmail } from '@/lib/email/service';
 
@@ -312,6 +313,7 @@ export class SubscriptionService {
     planSlug: string;
     isTrialScheduled?: boolean;
     trialEndAt?: string | null;
+    isMock?: boolean;
   }> {
     const isPromo = params.planSlug === 'promo_99';
     let targetPlan: SubscriptionPlan;
@@ -326,9 +328,13 @@ export class SubscriptionService {
       targetPlan = DEFAULT_PLANS.STANDARD_199;
     }
 
-    // 1. Create or retrieve plan in Razorpay
-    let rzpPlanId = targetPlan.razorpay_plan_id;
-    if (!rzpPlanId) {
+    // 1. Resolve Razorpay Plan ID from Developer Admin config, environment, or target plan
+    const cfg = getDeveloperAdminConfig();
+    let rzpPlanId = isPromo
+      ? (cfg.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || targetPlan.razorpay_plan_id)
+      : (cfg.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || targetPlan.razorpay_plan_id);
+
+    if (!rzpPlanId && razorpayService.isConfigured()) {
       try {
         const rzpPlan = await razorpayService.createPlan({
           name: targetPlan.name,
@@ -337,10 +343,21 @@ export class SubscriptionService {
           description: targetPlan.description || undefined,
         });
         rzpPlanId = rzpPlan.id;
-      } catch (err) {
-        console.warn('Razorpay plan creation error, using fallback ID:', err);
-        rzpPlanId = `plan_${targetPlan.slug}_${targetPlan.amount}`;
+        if (isPromo) {
+          updateRazorpayPlansConfig(rzpPlan.id, undefined);
+        } else {
+          updateRazorpayPlansConfig(undefined, rzpPlan.id);
+        }
+      } catch (err: any) {
+        console.warn('Razorpay dynamic plan creation error:', err);
+        throw new Error(
+          `Razorpay Plan ID not configured. Please create a ${targetPlan.name} plan (₹${targetPlan.amount / 100}/mo) in your Razorpay Dashboard (Subscriptions -> Plans) and enter its Plan ID in Developer Admin (/admin) or RAZORPAY_PLAN_ID_${isPromo ? 'PROMO_99' : 'STANDARD_199'} in Vercel. Razorpay message: ${err.message}`
+        );
       }
+    }
+
+    if (!rzpPlanId) {
+      rzpPlanId = `plan_mock_${targetPlan.slug}_${targetPlan.amount}`;
     }
 
     // 2. Check if customer is in active free trial and schedule start if applicable
@@ -419,6 +436,7 @@ export class SubscriptionService {
       planSlug: targetPlan.slug,
       isTrialScheduled: Boolean(isCurrentlyTrialing),
       trialEndAt: existing?.trial_end_at || null,
+      isMock: !razorpayService.isConfigured(),
     };
   }
 

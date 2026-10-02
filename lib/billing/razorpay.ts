@@ -80,6 +80,122 @@ export class RazorpayService {
     );
   }
 
+  /**
+   * Test Razorpay connection and fetch plan details
+   */
+  public async testConnection(promoPlanId?: string | null, standardPlanId?: string | null): Promise<{
+    configured: boolean;
+    mode: string;
+    keyId: string;
+    hasSecret: boolean;
+    hasWebhookSecret: boolean;
+    apiSuccess: boolean;
+    apiMessage: string;
+    promoPlanDetails?: any;
+    standardPlanDetails?: any;
+  }> {
+    const keyId = this.keyId;
+    const hasSecret = Boolean(this.keySecret && !this.keySecret.includes('placeholder'));
+    const hasWebhookSecret = Boolean(this.webhookSecret && !this.webhookSecret.includes('placeholder'));
+
+    if (!this.isConfigured()) {
+      return {
+        configured: false,
+        mode: this.mode,
+        keyId: keyId ? `${keyId.substring(0, 8)}...` : 'Not Set',
+        hasSecret,
+        hasWebhookSecret,
+        apiSuccess: false,
+        apiMessage: 'Razorpay credentials are using placeholder values or not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Vercel environment variables.',
+      };
+    }
+
+    try {
+      // Test fetching plans from Razorpay API
+      const res = await fetch(`${this.baseUrl}/plans?count=10`, {
+        method: 'GET',
+        headers: {
+          Authorization: this.getAuthHeader(),
+        },
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return {
+          configured: true,
+          mode: this.mode,
+          keyId: `${keyId.substring(0, 8)}...`,
+          hasSecret,
+          hasWebhookSecret,
+          apiSuccess: false,
+          apiMessage: `Razorpay API authentication failed (${res.status}): ${errText}`,
+        };
+      }
+
+      const data = await res.json();
+
+      let promoDetails: any = null;
+      let standardDetails: any = null;
+
+      if (promoPlanId) {
+        try {
+          const pRes = await fetch(`${this.baseUrl}/plans/${promoPlanId}`, {
+            headers: { Authorization: this.getAuthHeader() },
+          });
+          if (pRes.ok) {
+            const pJson = await pRes.json();
+            promoDetails = {
+              id: pJson.id,
+              name: pJson.item?.name,
+              amount: pJson.item?.amount,
+              currency: pJson.item?.currency,
+            };
+          }
+        } catch {}
+      }
+
+      if (standardPlanId) {
+        try {
+          const sRes = await fetch(`${this.baseUrl}/plans/${standardPlanId}`, {
+            headers: { Authorization: this.getAuthHeader() },
+          });
+          if (sRes.ok) {
+            const sJson = await sRes.json();
+            standardDetails = {
+              id: sJson.id,
+              name: sJson.item?.name,
+              amount: sJson.item?.amount,
+              currency: sJson.item?.currency,
+            };
+          }
+        } catch {}
+      }
+
+      const planCount = data.count || (data.items ? data.items.length : 0);
+      return {
+        configured: true,
+        mode: this.mode,
+        keyId: `${keyId.substring(0, 8)}...`,
+        hasSecret,
+        hasWebhookSecret,
+        apiSuccess: true,
+        apiMessage: `✓ Connected successfully to Razorpay API (${this.mode.toUpperCase()} mode). Found ${planCount} plans in account.`,
+        promoPlanDetails: promoDetails,
+        standardPlanDetails: standardDetails,
+      };
+    } catch (err: any) {
+      return {
+        configured: true,
+        mode: this.mode,
+        keyId: `${keyId.substring(0, 8)}...`,
+        hasSecret,
+        hasWebhookSecret,
+        apiSuccess: false,
+        apiMessage: `Network or connection error to Razorpay: ${err.message}`,
+      };
+    }
+  }
+
   private getAuthHeader(): string {
     const credentials = Buffer.from(`${this.keyId}:${this.keySecret}`).toString('base64');
     return `Basic ${credentials}`;
@@ -422,6 +538,11 @@ export class RazorpayService {
   }): boolean {
     if (!params.paymentId || !params.subscriptionId || !params.signature) {
       return false;
+    }
+
+    // In mock mode (no real keys configured in Vercel), accept simulated signature
+    if (!this.isConfigured() && params.signature.startsWith('mock_sig_')) {
+      return true;
     }
 
     const secret = this.keySecret || 'mock_secret_for_tests';

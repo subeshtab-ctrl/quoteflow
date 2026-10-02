@@ -61,6 +61,11 @@ export function BillingView({ initialData }: BillingViewProps) {
   // Support & Help Modal state
   const [supportModalOpen, setSupportModalOpen] = useState(false);
 
+  // Test Mode Simulation Modal state
+  const [mockSimulationModalOpen, setMockSimulationModalOpen] = useState(false);
+  const [mockCheckoutData, setMockCheckoutData] = useState<any>(null);
+  const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
+
   const fetchBillingData = async () => {
     try {
       setIsLoading(true);
@@ -123,6 +128,19 @@ export function BillingView({ initialData }: BillingViewProps) {
 
       const { checkout } = json;
 
+      // In mock simulation mode (real keys not yet set in Vercel), do not open broken Razorpay popup
+      if (
+        checkout.isMock ||
+        !checkout.keyId ||
+        checkout.keyId.includes('placeholder') ||
+        checkout.subscriptionId?.startsWith('sub_mock_')
+      ) {
+        setMockCheckoutData(checkout);
+        setMockSimulationModalOpen(true);
+        setIsProcessingCheckout(false);
+        return;
+      }
+
       // 2. Load Razorpay SDK
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
@@ -135,7 +153,8 @@ export function BillingView({ initialData }: BillingViewProps) {
         subscription_id: checkout.subscriptionId,
         name: 'QuoteFlow',
         description: checkout.planName,
-        image: '/uploads/logo-1790062784938.jpg',
+        subscription_card_change: true,
+        image: typeof window !== 'undefined' ? `${window.location.origin}/uploads/logo-1790062784938.jpg` : undefined,
         modal: {
           backdropclose: false,
           escape: true,
@@ -205,6 +224,39 @@ export function BillingView({ initialData }: BillingViewProps) {
     } catch (err: any) {
       setFeedbackMsg({ type: 'error', text: err.message || 'Error launching payment modal' });
       setIsProcessingCheckout(false);
+    }
+  };
+
+  const handleSimulateTestPayment = async () => {
+    if (!mockCheckoutData) return;
+    try {
+      setIsSimulatingPayment(true);
+      const mockPayId = `pay_mock_${Date.now()}`;
+      const mockSig = `mock_sig_${Date.now()}`;
+      const res = await fetch('/api/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          razorpay_subscription_id: mockCheckoutData.subscriptionId,
+          razorpay_payment_id: mockPayId,
+          razorpay_signature: mockSig,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to simulate payment');
+
+      setFeedbackMsg({
+        type: 'success',
+        text: mockCheckoutData.isTrialScheduled
+          ? 'Payment confirmed & promotional rate locked in! Your full 30-day free trial continues uninterrupted, and your ₹99 plan begins automatically when trial ends.'
+          : 'Subscription successfully activated (Test Mode)! Welcome to QuoteFlow Premium.',
+      });
+      setMockSimulationModalOpen(false);
+      await fetchBillingData();
+    } catch (err: any) {
+      setFeedbackMsg({ type: 'error', text: err.message || 'Error simulating test payment' });
+    } finally {
+      setIsSimulatingPayment(false);
     }
   };
 
@@ -871,6 +923,70 @@ export function BillingView({ initialData }: BillingViewProps) {
                 className="bg-rose-600 hover:bg-rose-700 text-white"
               >
                 {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Cancellation'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Test Mode Simulation Modal */}
+      {mockSimulationModalOpen && mockCheckoutData && (
+        <Modal
+          isOpen={mockSimulationModalOpen}
+          onClose={() => setMockSimulationModalOpen(false)}
+          title="⚡ Razorpay Simulation Mode Active"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 space-y-1">
+              <p className="font-semibold text-sm text-amber-200">Test Credentials Active</p>
+              <p className="text-xs text-amber-300/90 leading-relaxed">
+                Real Razorpay API credentials and Plan IDs are not yet configured in Vercel. In simulation mode, you can immediately test the entire subscription activation flow, trial scheduling, and access policies without card errors.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Selected Plan:</span>
+                <span className="font-bold text-white">{mockCheckoutData.planName}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Billing Amount:</span>
+                <span className="font-bold text-emerald-400">₹{(mockCheckoutData.amount / 100).toFixed(2)}/mo</span>
+              </div>
+              {mockCheckoutData.isTrialScheduled && (
+                <div className="flex justify-between items-center text-slate-300 border-t border-slate-800 pt-2 text-[11px]">
+                  <span>Free Trial Days:</span>
+                  <span className="text-amber-400 font-semibold">Preserved until trial end</span>
+                </div>
+              )}
+            </div>
+
+            <div className="text-[11px] text-slate-400">
+              💡 <strong>Developer Tip:</strong> To accept live customer cards and UPI payments, add your <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code>, and Razorpay Plan IDs in Vercel or Developer Admin (<code>/admin</code>).
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMockSimulationModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSimulateTestPayment}
+                disabled={isSimulatingPayment}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold flex items-center gap-2"
+              >
+                {isSimulatingPayment ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Simulate Payment Activation</span>
+                  </>
+                )}
               </Button>
             </div>
           </div>
