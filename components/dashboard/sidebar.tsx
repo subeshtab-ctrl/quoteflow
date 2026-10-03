@@ -16,6 +16,7 @@ import {
   GraduationCap,
   CreditCard,
   LifeBuoy,
+  Clock,
 } from 'lucide-react';
 import { parseLogoUrl, getLogoShapeClass, getLogoFitClass, getCompanyInitials } from '@/lib/utils/logo';
 
@@ -63,7 +64,7 @@ export function DashboardSidebar({
         .then((r) => r.json())
         .then((data) => {
           if (data.subscription) {
-            const isPro = data.subscription.status === 'active' || Boolean(data.subscription.is_trial_prepaid);
+            const isPro = data.subscription.status === 'active' || Boolean(data.subscription.is_trial_prepaid) || Boolean(data.access?.isPaid);
             setSubStatus(isPro ? 'pro' : 'trial');
           }
         })
@@ -140,19 +141,19 @@ export function DashboardSidebar({
               {subStatus === 'pro' ? (
                 <Link
                   href="/billing"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-gradient-to-b from-[#28c840] to-[#1da432] text-white shadow-xs border border-[#1b932c]/50 hover:brightness-110 active:scale-95 transition-all select-none cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-tight bg-[#e8f8f0] dark:bg-[#064e3b]/35 text-[#047857] dark:text-[#34d399] border border-[#6ee7b7] dark:border-[#059669]/60 hover:bg-[#d1fae5] dark:hover:bg-[#064e3b]/50 shadow-xs transition-all select-none cursor-pointer"
                   title="Subscribed to QuoteFlow Pro • Click to view billing"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] shrink-0" />
                   <span>PRO</span>
                 </Link>
               ) : (
                 <Link
                   href="/billing"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-gradient-to-b from-[#d98b18] to-[#9c600b] text-white shadow-xs border border-[#7d4c06]/50 hover:brightness-110 active:scale-95 transition-all select-none cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-tight bg-[#fffbeb] dark:bg-[#78350f]/25 text-[#92400e] dark:text-[#fbbf24] border border-[#fcd34d] dark:border-[#b45309]/60 hover:bg-[#fef3c7] dark:hover:bg-[#78350f]/35 shadow-xs transition-all select-none cursor-pointer"
                   title="Trial Active • Click to upgrade to QuoteFlow Pro"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-100" />
+                  <Clock className="w-2.5 h-2.5 text-[#d97706] dark:text-[#f59e0b] shrink-0 stroke-[2.5]" />
                   <span>TRIAL</span>
                 </Link>
               )}

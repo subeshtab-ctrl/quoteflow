@@ -347,8 +347,8 @@ export function BillingView({ initialData }: BillingViewProps) {
   const trialDaysRemaining = access?.daysRemainingInTrial ?? 0;
   const inTrial = trialDaysRemaining > 0;
 
-  const nextPaymentDateFormatted = access?.nextPaymentDue
-    ? new Date(access.nextPaymentDue).toLocaleDateString('en-IN', {
+  const trialEndDateFormatted = access?.trialEndsAt
+    ? new Date(access.trialEndsAt).toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
@@ -359,7 +359,15 @@ export function BillingView({ initialData }: BillingViewProps) {
         month: 'long',
         year: 'numeric',
       })
-    : '—';
+    : null;
+
+  const nextPaymentDateFormatted = hasConfirmedPayment && (access?.nextPaymentDue || sub?.current_period_end)
+    ? new Date(access?.nextPaymentDue || sub?.current_period_end!).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : null;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-12 selection:bg-indigo-500 selection:text-white">
@@ -381,7 +389,9 @@ export function BillingView({ initialData }: BillingViewProps) {
             Billing
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Manage your subscription, view next payment due dates, and download payment receipts.
+            {hasConfirmedPayment
+              ? 'Manage your subscription, view next payment due dates, and download payment receipts.'
+              : 'Manage your subscription, view trial status, and explore QuoteFlow Pro features.'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -514,7 +524,9 @@ export function BillingView({ initialData }: BillingViewProps) {
                   </Badge>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300">
-                  Trial ends on {nextPaymentDateFormatted}. You can start your ₹99/month subscription anytime with zero disruption.
+                  {trialEndDateFormatted
+                    ? `Trial ends on ${trialEndDateFormatted}. You can start your ₹99/month subscription anytime with zero disruption.`
+                    : `You can start your ₹99/month subscription anytime with zero disruption.`}
                 </p>
               </div>
             </div>
@@ -542,13 +554,25 @@ export function BillingView({ initialData }: BillingViewProps) {
               <Badge
                 className={
                   hasConfirmedPayment
-                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300'
+                    ? 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold tracking-tight bg-[#e8f8f0] dark:bg-[#064e3b]/35 text-[#047857] dark:text-[#34d399] border border-[#6ee7b7] dark:border-[#059669]/60'
                     : inTrial
-                    ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border-indigo-300'
-                    : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-300'
+                    ? 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold tracking-tight bg-[#fffbeb] dark:bg-[#78350f]/25 text-[#92400e] dark:text-[#fbbf24] border border-[#fcd34d] dark:border-[#b45309]/60'
+                    : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-300 font-bold'
                 }
               >
-                {hasConfirmedPayment ? 'Active' : inTrial ? 'Trial' : 'Payment Overdue'}
+                {hasConfirmedPayment ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] shrink-0" />
+                    <span>Active</span>
+                  </>
+                ) : inTrial ? (
+                  <>
+                    <Clock className="w-3 h-3 text-[#d97706] dark:text-[#f59e0b] shrink-0 stroke-[2.5]" />
+                    <span>Trial</span>
+                  </>
+                ) : (
+                  'Payment Overdue'
+                )}
               </Badge>
             </div>
           </div>
@@ -563,12 +587,22 @@ export function BillingView({ initialData }: BillingViewProps) {
         </div>
 
         {/* Customer-Friendly Key Billing Info Grid (Strictly NO Mandate IDs) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div
+          className={`grid grid-cols-1 ${
+            hasConfirmedPayment
+              ? inTrial
+                ? 'sm:grid-cols-3'
+                : 'sm:grid-cols-2'
+              : inTrial
+              ? 'sm:grid-cols-2'
+              : 'sm:grid-cols-1'
+          } gap-4`}
+        >
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
             <span className="text-xs text-slate-400 font-medium">Status</span>
             <p className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              <span>{hasConfirmedPayment ? 'Active' : inTrial ? 'Trial Active' : 'Payment Overdue'}</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+              <span>{hasConfirmedPayment ? 'Active' : inTrial ? 'Trial Active' : 'Trial Ended'}</span>
             </p>
             <p className="text-[11px] text-slate-400">Account status</p>
           </div>
@@ -577,21 +611,25 @@ export function BillingView({ initialData }: BillingViewProps) {
             <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
               <span className="text-xs text-slate-400 font-medium">Free Trial</span>
               <p className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-indigo-500" />
+                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>{trialDaysRemaining} days remaining</span>
               </p>
-              <p className="text-[11px] text-slate-400">30-day initial exploration</p>
+              <p className="text-[11px] text-slate-400">
+                {trialEndDateFormatted ? `Trial ends on ${trialEndDateFormatted}` : '30-day initial exploration'}
+              </p>
             </div>
           )}
 
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
-            <span className="text-xs text-slate-400 font-medium">Next Payment Due</span>
-            <p className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-              <Calendar className="h-4 w-4 text-emerald-500" />
-              <span>{nextPaymentDateFormatted}</span>
-            </p>
-            <p className="text-[11px] text-slate-400">Amount: ₹99</p>
-          </div>
+          {hasConfirmedPayment && (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
+              <span className="text-xs text-slate-400 font-medium">Next Payment Due</span>
+              <p className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                <Calendar className="h-4 w-4 text-emerald-500 shrink-0" />
+                <span>{nextPaymentDateFormatted || '—'}</span>
+              </p>
+              <p className="text-[11px] text-slate-400">Amount: ₹99</p>
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}

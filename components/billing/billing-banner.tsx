@@ -95,8 +95,8 @@ export function BillingBanner({ access }: { access: SubscriptionAccess | null })
           <div className="flex items-center gap-2.5 text-center sm:text-left">
             <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <p className="font-medium">
-              <span className="font-bold mr-1.5">⚠️ Payment Due:</span>
-              ₹99 payment is due. Due date: {trialEndDate || 'today'}.
+              <span className="font-bold mr-1.5">⚠️ Free Trial Expired:</span>
+              Subscribe to QuoteFlow Pro for ₹99/month to maintain full access to quotations and invoices.
             </p>
           </div>
           <Link href="/billing" className="shrink-0">
