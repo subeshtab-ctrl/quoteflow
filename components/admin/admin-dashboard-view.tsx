@@ -393,39 +393,16 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
       const json = await res.json();
       if (res.ok && json.razorpay) {
         setRazorpayConfig(json.razorpay);
-        setRazorpayKeyId(json.razorpay.keyId || '');
-        setRazorpayPromoPlanId(json.razorpay.promoPlanId || 'plan_Tj1uiAIYxdedEa');
-        setRazorpayStandardPlanId(json.razorpay.standardPlanId || 'plan_Tj1uiAIYxdedEa');
+        const incomingKey = json.razorpay.keyId || '';
+        // Strict Live Mode: Never populate test keys into the live key input
+        setRazorpayKeyId(incomingKey.startsWith('rzp_test_') ? '' : incomingKey);
+        setRazorpayPromoPlanId(json.razorpay.promoPlanId || 'plan_Tj1jndtNip44ci');
+        setRazorpayStandardPlanId(json.razorpay.standardPlanId || 'plan_Tj1jndtNip44ci');
       }
     } catch {}
   };
 
-  const handleToggleRazorpayMode = async () => {
-    try {
-      const currentMode = razorpayConfig?.mode || 'live';
-      const targetMode = currentMode === 'live' ? 'test' : 'live';
-      const res = await fetch('/api/admin/razorpay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'toggle_mode',
-          mode: targetMode,
-        }),
-      });
-      const json = await res.json();
-      if (res.ok) {
-        setRazorpayFeedback({
-          type: 'success',
-          text: `Switched Razorpay to ${targetMode.toUpperCase()} mode successfully.`,
-        });
-        await fetchRazorpayConfig();
-      } else {
-        setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to toggle mode' });
-      }
-    } catch (err: any) {
-      setRazorpayFeedback({ type: 'error', text: err.message || 'Error toggling mode' });
-    }
-  };
+
 
   const handleSaveRazorpayPlans = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2421,48 +2398,32 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Gateway Mode</span>
-                <button
-                  type="button"
-                  onClick={handleToggleRazorpayMode}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border ${
-                    razorpayConfig?.mode === 'live'
-                      ? 'bg-amber-500/10 text-amber-500 border-amber-500/30 hover:bg-amber-500/20'
-                      : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/20'
-                  }`}
-                  title="Click to toggle between Live Production and Test Mode"
-                >
-                  Switch to {razorpayConfig?.mode === 'live' ? 'Test' : 'Live'}
-                </button>
+                <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+                  Strict Live
+                </span>
               </div>
               <div className="flex items-center gap-2 pt-0.5">
-                {razorpayConfig?.mode === 'live' ? (
-                  <Badge className="bg-emerald-600 text-white text-[11px] gap-1.5 py-1 px-2.5 font-bold shadow-xs">
-                    <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                    <span>LIVE PRODUCTION</span>
-                  </Badge>
-                ) : (
-                  <Badge className="bg-amber-600 text-white text-[11px] gap-1.5 py-1 px-2.5 font-bold shadow-xs">
-                    <span className="h-2 w-2 rounded-full bg-white" />
-                    <span>TEST / SANDBOX</span>
-                  </Badge>
-                )}
+                <Badge className="bg-emerald-600 text-white text-[11px] gap-1.5 py-1 px-2.5 font-bold shadow-xs">
+                  <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                  <span>LIVE PRODUCTION</span>
+                </Badge>
               </div>
               <p className="text-[11px] text-slate-500 pt-1">
-                {razorpayConfig?.mode === 'live' ? 'Processing live real customer payments' : 'Sandbox keys in effect for simulation'}
+                Processing live real customer payments
               </p>
             </div>
 
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Public Key ID</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live Public Key ID</span>
               <div className="flex items-center justify-between gap-2 pt-1">
                 <p className="text-sm font-mono font-bold text-slate-900 dark:text-white truncate">
-                  {razorpayConfig?.keyId
+                  {razorpayConfig?.keyId && !razorpayConfig.keyId.startsWith('rzp_test_')
                     ? (showOverviewKeyId
                         ? razorpayConfig.keyId
                         : `${razorpayConfig.keyId.slice(0, 8)}••••••••••••`)
-                    : 'Not Set'}
+                    : 'Not Configured'}
                 </p>
-                {razorpayConfig?.keyId && (
+                {razorpayConfig?.keyId && !razorpayConfig.keyId.startsWith('rzp_test_') && (
                   <button
                     type="button"
                     onClick={() => setShowOverviewKeyId(!showOverviewKeyId)}
@@ -2473,19 +2434,19 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   </button>
                 )}
               </div>
-              <p className="text-[11px] text-slate-500">Exposed safely to browser for modal</p>
+              <p className="text-[11px] text-slate-500">Live checkout modal public key</p>
             </div>
 
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Key Secret</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live Key Secret</span>
               <div className="pt-1">
                 {razorpayConfig?.hasSecret ? (
                   <Badge className="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 text-[11px]">
-                    Verified in Environment
+                    Verified &amp; Active
                   </Badge>
                 ) : (
                   <Badge className="bg-rose-600/20 text-rose-400 border border-rose-500/30 text-[11px]">
-                    Missing in Vercel
+                    Missing Secret
                   </Badge>
                 )}
               </div>
@@ -2493,7 +2454,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             </div>
 
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Plan Linkage</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live Plan Linkage</span>
               <p className="text-lg font-bold text-slate-900 dark:text-white pt-1">
                 {razorpayPromoPlanId ? (
                   <span className="text-emerald-500">Plan Linked ✓</span>
@@ -2678,10 +2639,10 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Key className="h-4 w-4 text-indigo-500" />
-                <span>Razorpay API Credentials &amp; Subscription Plan</span>
+                <span>Razorpay Live Production Credentials &amp; Subscription Plan</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Update your live credentials and QuoteFlow Pro (₹99/month) Plan ID.
+                Saved permanently in your Supabase cloud store and automatically synchronized across all customer checkouts.
               </p>
             </div>
 
@@ -2689,14 +2650,14 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               {/* Key ID Field */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                  <span>Razorpay Key ID</span>
-                  <span className="text-[10px] font-normal text-slate-400">Public (used in checkout modal)</span>
+                  <span>Razorpay Live Key ID</span>
+                  <span className="text-[10px] font-normal text-slate-400">Public Live Key (used in checkout modal)</span>
                 </label>
                 <div className="relative">
                   <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input
                     type={showKeyId ? 'text' : 'password'}
-                    placeholder="rzp_test_... or rzp_live_..."
+                    placeholder="rzp_live_..."
                     value={razorpayKeyId}
                     onChange={(e) => setRazorpayKeyId(e.target.value)}
                     className="pl-9 pr-10 font-mono text-xs"
@@ -2712,23 +2673,23 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  From Razorpay Dashboard &rarr; Account &amp; Settings &rarr; API Keys.
+                  From Razorpay Dashboard &rarr; Account &amp; Settings &rarr; API Keys (Live Production mode).
                 </p>
               </div>
 
               {/* Key Secret Field */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                  <span>Razorpay Key Secret</span>
+                  <span>Razorpay Live Key Secret</span>
                   {razorpayConfig?.hasSecret && (
-                    <span className="text-[10px] font-semibold text-emerald-500">✓ Secret already saved on server</span>
+                    <span className="text-[10px] font-semibold text-emerald-500">✓ Live Secret saved &amp; verified on server</span>
                   )}
                 </label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input
                     type={showKeySecret ? 'text' : 'password'}
-                    placeholder={razorpayConfig?.hasSecret ? '•••••••••••••••••••••••••••• (leave blank to keep unchanged)' : 'Enter Razorpay Key Secret'}
+                    placeholder={razorpayConfig?.hasSecret ? '•••••••••••••••••••••••••••• (leave blank to keep unchanged)' : 'Enter Razorpay Live Key Secret'}
                     value={razorpayKeySecret}
                     onChange={(e) => setRazorpayKeySecret(e.target.value)}
                     className="pl-9 pr-10 font-mono text-xs"
@@ -2743,7 +2704,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Kept strictly on your server. Only enter a value if you wish to set or update the secret.
+                  Kept strictly encrypted in Supabase and on your server. Only enter a value if you wish to set or update the secret.
                 </p>
               </div>
 
@@ -2754,12 +2715,12 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               {/* Pro Plan ID */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  QuoteFlow Pro Plan ID (₹99/month recurring)
+                  Live QuoteFlow Pro Plan ID (₹99/month recurring)
                 </label>
                 <Input
                   type="text"
-                  placeholder="plan_Tj1uiAIYxdedEa"
-                  value={razorpayPromoPlanId || 'plan_Tj1uiAIYxdedEa'}
+                  placeholder="plan_Tj1jndtNip44ci"
+                  value={razorpayPromoPlanId || 'plan_Tj1jndtNip44ci'}
                   onChange={(e) => {
                     setRazorpayPromoPlanId(e.target.value);
                     setRazorpayStandardPlanId(e.target.value);
@@ -2767,7 +2728,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   className="font-mono text-xs"
                 />
                 <p className="text-[11px] text-slate-400">
-                  Monthly recurring plan created in Razorpay with amount ₹99.
+                  Live monthly recurring plan created in Razorpay with amount ₹99.
                 </p>
               </div>
 
@@ -2782,7 +2743,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   ) : (
                     <CheckCircle2 className="h-3.5 w-3.5" />
                   )}
-                  <span>Save Credentials &amp; Plan</span>
+                  <span>Save Live Credentials &amp; Plan</span>
                 </Button>
 
                 <Button
@@ -2810,7 +2771,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             </h4>
             <ol className="list-decimal list-inside space-y-2 text-slate-700 dark:text-slate-300 leading-relaxed">
               <li>
-                Log in to your <strong>Razorpay Dashboard</strong> (<a href="https://dashboard.razorpay.com" target="_blank" rel="noreferrer" className="text-indigo-500 underline font-mono">dashboard.razorpay.com</a>).
+                Log in to your <strong>Razorpay Dashboard</strong> (<a href="https://dashboard.razorpay.com" target="_blank" rel="noreferrer" className="text-indigo-500 underline font-mono">dashboard.razorpay.com</a>) and ensure Live Production mode is active.
               </li>
               <li>
                 In the left sidebar, navigate to <strong>Subscriptions &rarr; Plans</strong> (if Subscriptions is not visible, activate Subscriptions under Account &amp; Settings).
@@ -2822,19 +2783,20 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 </div>
               </li>
               <li>
-                Paste the Plan ID in the field above and click <strong>Save Credentials &amp; Plan</strong>.
+                Paste the Plan ID in the field above and click <strong>Save Live Credentials &amp; Plan</strong>.
               </li>
               <li>
                 In your <strong>Vercel Project Settings &rarr; Environment Variables</strong>, ensure you have set:
                 <div className="p-2.5 mt-1 bg-slate-900 text-slate-200 rounded-lg font-mono text-[11px] space-y-1">
-                  <div>RAZORPAY_KEY_ID=rzp_live_... (or rzp_test_...)</div>
+                  <div>RAZORPAY_KEY_ID=rzp_live_...</div>
                   <div>RAZORPAY_KEY_SECRET=...</div>
-                  <div>NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_live_... (matching key ID)</div>
-                  <div>RAZORPAY_MODE=live (or test)</div>
+                  <div>NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_live_...</div>
+                  <div>RAZORPAY_MODE=live</div>
+                  <div>RAZORPAY_PLAN_ID_PROMO_99=plan_Tj1jndtNip44ci</div>
                 </div>
               </li>
               <li>
-                Click <strong>Test Razorpay Connection</strong> above to verify that everything is connected and ready for customer payments!
+                Click <strong>Test Live Connection</strong> above to verify that everything is connected and ready for customer payments!
               </li>
             </ol>
           </div>

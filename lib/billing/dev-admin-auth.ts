@@ -158,9 +158,9 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
     updatedAt: null,
     razorpayKeyId: envKeyId,
     razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || null,
-    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
-    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
-    razorpayMode: envKeyId?.startsWith('rzp_test_') ? 'test' : ((process.env.RAZORPAY_MODE as 'live' | 'test') || 'live'),
+    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1jndtNip44ci',
+    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1jndtNip44ci',
+    razorpayMode: 'live',
     staffMembers: [],
   };
   globalThis.__devAdminConfig__ = defaultCfg;
@@ -278,18 +278,10 @@ export async function updateRazorpayApiConfig(params: {
   const current = getDeveloperAdminConfig();
   if (params.keyId !== undefined) current.razorpayKeyId = params.keyId?.trim() || null;
   if (params.keySecret !== undefined) current.razorpayKeySecret = params.keySecret?.trim() || null;
-  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || 'plan_Tj1uiAIYxdedEa';
-  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || 'plan_Tj1uiAIYxdedEa';
+  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || 'plan_Tj1jndtNip44ci';
+  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || 'plan_Tj1jndtNip44ci';
 
-  if (params.keyId && params.keyId.startsWith('rzp_live_')) {
-    current.razorpayMode = 'live';
-  } else if (params.keyId && params.keyId.startsWith('rzp_test_')) {
-    current.razorpayMode = 'test';
-  } else if (params.mode !== undefined) {
-    current.razorpayMode = params.mode;
-  } else if (!current.razorpayMode) {
-    current.razorpayMode = 'live';
-  }
+  current.razorpayMode = 'live';
 
   current.updatedAt = new Date().toISOString();
   globalThis.__devAdminConfig__ = current;

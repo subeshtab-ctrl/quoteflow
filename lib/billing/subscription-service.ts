@@ -49,7 +49,7 @@ export const DEFAULT_PLANS = {
     trial_days: 0,
     is_active: true,
     is_public: true,
-    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_MONTHLY_99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
+    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_MONTHLY_99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1jndtNip44ci',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   } as SubscriptionPlan,
