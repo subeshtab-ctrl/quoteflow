@@ -70,7 +70,7 @@ export async function GET(request: Request) {
       }
 
       // If user came from password recovery, route to recovery destination
-      if (type === 'recovery') {
+      if (type === 'recovery' || next?.includes('reset-password')) {
         return NextResponse.redirect(`${origin}${next}`);
       }
 
@@ -111,7 +111,7 @@ export async function GET(request: Request) {
 
         const userEmail = data.user.email || '';
         // If recovery flow, honor next; otherwise show verification celebration
-        if (type === 'recovery') {
+        if (type === 'recovery' || next?.includes('reset-password')) {
           return NextResponse.redirect(`${origin}${next}`);
         }
 

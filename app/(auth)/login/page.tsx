@@ -25,6 +25,7 @@ function LoginForm() {
   const paramEmail = searchParams.get('email') || '';
   const redirectParam = searchParams.get('redirect') || '/dashboard';
   const urlError = searchParams.get('error');
+  const resetParam = searchParams.get('reset') === 'true';
 
   const [email, setEmail] = useState(paramEmail || '');
   const [password, setPassword] = useState('');
@@ -181,16 +182,21 @@ function LoginForm() {
     if (!email.trim()) return;
     setIsResending(true);
     setResendSuccess(false);
+    setError(null);
     try {
-      const supabase = createClient();
-      if (supabase) {
-        await supabase.auth.resend({
-          type: 'signup',
-          email: email.trim(),
-        });
+      const res = await fetch('/api/auth/send-verification-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to resend verification email.');
       }
+
       setResendSuccess(true);
-      setTimeout(() => setResendSuccess(false), 6000);
+      setTimeout(() => setResendSuccess(false), 8000);
     } catch (err: any) {
       setError(err.message || 'Failed to resend verification email.');
     } finally {
@@ -304,6 +310,13 @@ function LoginForm() {
               <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 border border-emerald-200 flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
                 <span>Email verified successfully! You can now sign in.</span>
+              </div>
+            )}
+
+            {resetParam && (
+              <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 border border-emerald-200 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Your password has been reset successfully! Please sign in with your new password.</span>
               </div>
             )}
 

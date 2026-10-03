@@ -370,3 +370,163 @@ export function generatePaymentDueEmail(params: {
   };
 }
 
+/**
+ * Password Reset Email Template
+ */
+export function generatePasswordResetEmail(params: {
+  email: string;
+  resetUrl?: string;
+  otpCode?: string;
+}): EmailPayload {
+  const subject = params.otpCode
+    ? `Your QuoteFlow Password Reset Code: ${params.otpCode}`
+    : 'Reset your QuoteFlow password';
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
+          .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+          .badge { display: inline-block; background: #4f46e5; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px; }
+          .code-box { background: #eef2ff; border: 2px dashed #6366f1; border-radius: 12px; padding: 18px; text-align: center; margin: 20px 0; }
+          .code-digits { font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #4338ca; font-family: monospace; }
+          .note { font-size: 13px; color: #64748b; line-height: 1.6; }
+          .btn { display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; margin: 20px 0; }
+          .footer { font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="badge">QuoteFlow Security</div>
+          <h2 style="margin: 0 0 10px 0; font-size: 22px; font-weight: 800; color: #1e1b4b;">Reset Your Password</h2>
+          <p class="note">
+            We received a request to reset the password for your QuoteFlow account (<strong>${params.email}</strong>).
+          </p>
+
+          ${
+            params.otpCode
+              ? `<div class="code-box">
+                  <div style="font-size: 12px; font-weight: 600; color: #6366f1; margin-bottom: 6px; text-transform: uppercase;">6-Digit Security Code</div>
+                  <div class="code-digits">${params.otpCode}</div>
+                </div>`
+              : ''
+          }
+
+          ${
+            params.resetUrl
+              ? `<div style="text-align: center; margin: 20px 0;">
+                  <a href="${params.resetUrl}" class="btn">Reset Password Now</a>
+                </div>
+                <p class="note" style="font-size: 12px; word-break: break-all;">
+                  Or click this secure link:<br>
+                  <a href="${params.resetUrl}" style="color: #4f46e5;">${params.resetUrl}</a>
+                </p>`
+              : ''
+          }
+
+          <p class="note" style="margin-top: 20px;">
+            This link and code will expire in 1 hour. If you did not request a password reset, you can safely ignore this email — your account remains completely secure.
+          </p>
+
+          <div class="footer">
+            <p>QuoteFlow Platform © 2026 • Blend &amp; Bold</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  return {
+    to: params.email,
+    fromName: 'QuoteFlow Security',
+    subject,
+    html,
+    text: `Reset your QuoteFlow password:\n${params.resetUrl || ''}\n${params.otpCode ? `Or enter code: ${params.otpCode}` : ''}\nIf you didn't request this, ignore this email.`,
+  };
+}
+
+/**
+ * Verification Email Template
+ */
+export function generateVerificationOtpEmail(params: {
+  email: string;
+  verifyUrl?: string;
+  otpCode?: string;
+  companyName?: string;
+  fullName?: string;
+}): EmailPayload {
+  const subject = params.otpCode
+    ? `Your QuoteFlow Verification Code: ${params.otpCode}`
+    : `Verify your email for QuoteFlow`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
+          .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+          .badge { display: inline-block; background: #4f46e5; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px; }
+          .code-box { background: #eef2ff; border: 2px dashed #6366f1; border-radius: 12px; padding: 18px; text-align: center; margin: 20px 0; }
+          .code-digits { font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #4338ca; font-family: monospace; }
+          .note { font-size: 13px; color: #64748b; line-height: 1.6; }
+          .btn { display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; margin: 20px 0; }
+          .footer { font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="badge">QuoteFlow Security</div>
+          <h2 style="margin: 0 0 10px 0; font-size: 22px; font-weight: 800; color: #1e1b4b;">Verify Your Email Address</h2>
+          <p class="note">
+            ${params.fullName ? `Hello <strong>${params.fullName}</strong>,<br><br>` : ''}
+            Please confirm your email address (<strong>${params.email}</strong>) to activate and access your QuoteFlow workspace${params.companyName ? ` for <strong>${params.companyName}</strong>` : ''}:
+          </p>
+
+          ${
+            params.otpCode
+              ? `<div class="code-box">
+                  <div style="font-size: 12px; font-weight: 600; color: #6366f1; margin-bottom: 6px; text-transform: uppercase;">Verification Code</div>
+                  <div class="code-digits">${params.otpCode}</div>
+                </div>`
+              : ''
+          }
+
+          ${
+            params.verifyUrl
+              ? `<div style="text-align: center; margin: 20px 0;">
+                  <a href="${params.verifyUrl}" class="btn">Verify Email &amp; Activate Account</a>
+                </div>
+                <p class="note" style="font-size: 12px; word-break: break-all;">
+                  Or click this link:<br>
+                  <a href="${params.verifyUrl}" style="color: #4f46e5;">${params.verifyUrl}</a>
+                </p>`
+              : ''
+          }
+
+          <p class="note" style="margin-top: 20px;">
+            If you did not request this verification, you can safely ignore this email.
+          </p>
+
+          <div class="footer">
+            <p>QuoteFlow Platform © 2026 • Blend &amp; Bold</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  return {
+    to: params.email,
+    fromName: 'QuoteFlow Security',
+    subject,
+    html,
+    text: `Your QuoteFlow verification code: ${params.otpCode || ''}\nOr verify via: ${params.verifyUrl || ''}`,
+  };
+}
+
+

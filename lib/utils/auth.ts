@@ -1,25 +1,33 @@
 /**
- * Returns a globally accessible redirect URL for Supabase Auth flows
- * ensuring mobile devices clicking confirmation links aren't routed to dead localhosts.
+ * Returns the base public application URL
  */
-export function getAuthRedirectUrl(): string {
+export function getBaseAppUrl(): string {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    // If the user is on a public domain (like trycloudflare or custom domain), use it
     if (!host.includes('localhost') && !host.includes('127.0.0.1')) {
-      return `${window.location.origin}/auth/callback`;
+      return window.location.origin;
     }
   }
 
-  // If local, prefer public tunnel URL if configured
   const publicAppUrl = process.env.NEXT_PUBLIC_APP_URL;
   if (publicAppUrl && !publicAppUrl.includes('localhost') && !publicAppUrl.includes('127.0.0.1')) {
-    return `${publicAppUrl.replace(/\/$/, '')}/auth/callback`;
+    return publicAppUrl.replace(/\/$/, '');
   }
 
   if (typeof window !== 'undefined') {
-    return `${window.location.origin}/auth/callback`;
+    return window.location.origin;
   }
 
-  return 'http://localhost:3001/auth/callback';
+  return 'https://www.blendandbold.com';
 }
+
+/**
+ * Returns a globally accessible redirect URL for Supabase Auth flows
+ * ensuring mobile devices clicking confirmation links aren't routed to dead localhosts.
+ */
+export function getAuthRedirectUrl(path: string = '/auth/callback'): string {
+  const base = getBaseAppUrl();
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
+

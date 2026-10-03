@@ -278,32 +278,35 @@ function VerifyEmailContent() {
     setResendMessage(null);
 
     try {
-      const supabase = createClient();
-      const redirectUrl = getAuthRedirectUrl();
+      // 1. Primary: Dispatch via our robust backend Resend service
+      const res = await fetch('/api/auth/send-verification-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail }),
+      });
 
-      // 1. Resend via Supabase Auth client
-      if (supabase) {
-        await supabase.auth.resend({
-          type: 'signup',
-          email: targetEmail,
-          options: {
-            emailRedirectTo: redirectUrl,
-          },
-        });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to resend verification email.');
       }
 
-      // 2. Also trigger internal backend notification
+      // 2. Optional: Trigger Supabase Auth client, safely catching any SMTP rate-limit exceptions
       try {
-        await fetch('/api/auth/send-verification-otp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: targetEmail }),
-        });
-      } catch (backendErr) {
-        console.warn('Backend resend trigger note:', backendErr);
+        const supabase = createClient();
+        if (supabase) {
+          await supabase.auth.resend({
+            type: 'signup',
+            email: targetEmail,
+            options: {
+              emailRedirectTo: getAuthRedirectUrl(),
+            },
+          });
+        }
+      } catch (clientErr) {
+        console.warn('Optional client resend note:', clientErr);
       }
 
-      setResendMessage(`Verification email resent to ${targetEmail}! Please check your inbox.`);
+      setResendMessage(`Verification email sent to ${targetEmail}! Please check your inbox.`);
     } catch (err: any) {
       console.error('Resend verification error:', err);
       setResendError(err.message || 'Failed to resend verification email. Please try again.');
