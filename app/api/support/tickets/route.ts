@@ -4,6 +4,10 @@ import { subscriptionService } from '@/lib/billing/subscription-service';
 import { store } from '@/lib/supabase/data-store';
 import { SupportTicketCategory, SupportTicketPriority } from '@/types/database';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();

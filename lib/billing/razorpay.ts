@@ -63,20 +63,31 @@ export class RazorpayService {
   public reloadCredentials(): void {
     let cfgKeyId: string | null = null;
     let cfgKeySecret: string | null = null;
+    let cfgMode: string | null = null;
     try {
       const cfg = getDeveloperAdminConfig();
       cfgKeyId = cfg.razorpayKeyId || null;
       cfgKeySecret = cfg.razorpayKeySecret || null;
+      cfgMode = cfg.razorpayMode || null;
     } catch {}
 
     this.keyId =
       cfgKeyId ||
       process.env.RAZORPAY_KEY_ID ||
       process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
-      'rzp_test_Tj1rwkFR1rYnbz';
-    this.keySecret = cfgKeySecret || process.env.RAZORPAY_KEY_SECRET || 'mypvV0zCt7tVPIzxRov72AUG';
+      '';
+    this.keySecret = cfgKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
     this.webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
-    this.mode = (process.env.RAZORPAY_MODE || (this.keyId.startsWith('rzp_test_') ? 'test' : 'live')).toLowerCase();
+
+    if (cfgMode) {
+      this.mode = cfgMode.toLowerCase();
+    } else if (this.keyId.startsWith('rzp_live_')) {
+      this.mode = 'live';
+    } else if (this.keyId.startsWith('rzp_test_')) {
+      this.mode = (process.env.RAZORPAY_MODE || 'live').toLowerCase() === 'test' ? 'test' : 'live';
+    } else {
+      this.mode = 'live';
+    }
   }
 
   public getMode(): string {
@@ -90,7 +101,7 @@ export class RazorpayService {
 
   public getKeySecret(): string {
     this.reloadCredentials();
-    return this.keySecret;
+    return this.keySecret || 'mock_secret_for_tests';
   }
 
   public getGracePeriodDays(): number {

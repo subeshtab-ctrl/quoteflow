@@ -24,6 +24,7 @@ export interface DeveloperAdminConfig {
   razorpayKeySecret?: string | null;
   razorpayPlanIdPromo99?: string | null;
   razorpayPlanIdStandard199?: string | null;
+  razorpayMode?: 'live' | 'test';
 }
 
 interface OtpRecord {
@@ -86,6 +87,15 @@ export function hashPassword(password: string, customSalt?: string): { hash: str
  */
 export function getDeveloperAdminConfig(): DeveloperAdminConfig {
   if (globalThis.__devAdminConfig__) {
+    if (!globalThis.__devAdminConfig__.razorpayPlanIdPromo99) {
+      globalThis.__devAdminConfig__.razorpayPlanIdPromo99 = process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa';
+    }
+    if (!globalThis.__devAdminConfig__.razorpayPlanIdStandard199) {
+      globalThis.__devAdminConfig__.razorpayPlanIdStandard199 = process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa';
+    }
+    if (!globalThis.__devAdminConfig__.razorpayMode) {
+      globalThis.__devAdminConfig__.razorpayMode = 'live';
+    }
     return globalThis.__devAdminConfig__;
   }
 
@@ -102,8 +112,9 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
           updatedAt: parsed.updatedAt || null,
           razorpayKeyId: parsed.razorpayKeyId || process.env.RAZORPAY_KEY_ID || null,
           razorpayKeySecret: parsed.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || null,
-          razorpayPlanIdPromo99: parsed.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
-          razorpayPlanIdStandard199: parsed.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || null,
+          razorpayPlanIdPromo99: parsed.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
+          razorpayPlanIdStandard199: parsed.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
+          razorpayMode: parsed.razorpayMode || 'live',
         };
         globalThis.__devAdminConfig__ = cfg;
         return cfg;
@@ -119,8 +130,11 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
     passwordHash: defaultHash,
     salt: defaultSalt,
     updatedAt: null,
-    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || null,
-    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || null,
+    razorpayKeyId: process.env.RAZORPAY_KEY_ID || null,
+    razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || null,
+    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
+    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
+    razorpayMode: 'live',
   };
   globalThis.__devAdminConfig__ = defaultCfg;
   return defaultCfg;
@@ -201,12 +215,21 @@ export function updateRazorpayApiConfig(params: {
   keySecret?: string | null;
   promoPlanId?: string | null;
   standardPlanId?: string | null;
+  mode?: 'live' | 'test';
 }): DeveloperAdminConfig {
   const current = getDeveloperAdminConfig();
   if (params.keyId !== undefined) current.razorpayKeyId = params.keyId?.trim() || null;
   if (params.keySecret !== undefined) current.razorpayKeySecret = params.keySecret?.trim() || null;
-  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || null;
-  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || null;
+  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || 'plan_Tj1uiAIYxdedEa';
+  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || 'plan_Tj1uiAIYxdedEa';
+  if (params.mode !== undefined) {
+    current.razorpayMode = params.mode;
+  } else if (params.keyId && params.keyId.startsWith('rzp_live_')) {
+    current.razorpayMode = 'live';
+  } else if (!current.razorpayMode) {
+    current.razorpayMode = 'live';
+  }
+
   current.updatedAt = new Date().toISOString();
   globalThis.__devAdminConfig__ = current;
 
@@ -228,17 +251,43 @@ export function updateRazorpayApiConfig(params: {
       if (params.keySecret && params.keySecret.trim()) {
         content = content.replace(/^RAZORPAY_KEY_SECRET=.*/m, `RAZORPAY_KEY_SECRET=${params.keySecret.trim()}`);
       }
-      if (params.promoPlanId && params.promoPlanId.trim()) {
-        content = content.replace(/^RAZORPAY_PLAN_ID_PROMO_99=.*/m, `RAZORPAY_PLAN_ID_PROMO_99=${params.promoPlanId.trim()}`);
+      if (current.razorpayPlanIdPromo99) {
+        content = content.replace(/^RAZORPAY_PLAN_ID_PROMO_99=.*/m, `RAZORPAY_PLAN_ID_PROMO_99=${current.razorpayPlanIdPromo99}`);
       }
-      if (params.standardPlanId && params.standardPlanId.trim()) {
-        content = content.replace(/^RAZORPAY_PLAN_ID_STANDARD_199=.*/m, `RAZORPAY_PLAN_ID_STANDARD_199=${params.standardPlanId.trim()}`);
+      if (current.razorpayPlanIdStandard199) {
+        content = content.replace(/^RAZORPAY_PLAN_ID_STANDARD_199=.*/m, `RAZORPAY_PLAN_ID_STANDARD_199=${current.razorpayPlanIdStandard199}`);
+      }
+      if (current.razorpayMode) {
+        content = content.replace(/^RAZORPAY_MODE=.*/m, `RAZORPAY_MODE=${current.razorpayMode}`);
       }
       fs.writeFileSync(envPath, content, 'utf-8');
     }
   } catch {
     // Non-fatal if filesystem is read-only (e.g. serverless)
   }
+
+  // Cloud Persistence: Persist in Supabase notifications table for serverless survival
+  try {
+    const { createAdminClient } = require('@/lib/supabase/client');
+    const admin = createAdminClient();
+    if (admin) {
+      admin.from('notifications').upsert({
+        id: '00000000-0000-0000-0000-000000000099',
+        organization_id: '765a894f-c3c4-4fe4-a8e2-7b240eda570a',
+        title: 'DEVELOPER_ADMIN_CONFIG',
+        message: JSON.stringify({
+          razorpayKeyId: current.razorpayKeyId,
+          razorpayKeySecret: current.razorpayKeySecret,
+          razorpayPlanIdPromo99: current.razorpayPlanIdPromo99,
+          razorpayPlanIdStandard199: current.razorpayPlanIdStandard199,
+          razorpayMode: current.razorpayMode,
+          updatedAt: current.updatedAt,
+        }),
+        type: 'ADMIN_CONFIG',
+        is_read: true,
+      }).then(() => {}).catch(() => {});
+    }
+  } catch {}
 
   return current;
 }
@@ -379,3 +428,36 @@ export async function isAuthorizedDeveloperAdmin(req?: NextRequest): Promise<boo
 
   return false;
 }
+
+/**
+ * Asynchronously sync admin configuration from Supabase notifications cloud store
+ */
+export async function syncCloudAdminConfig(): Promise<DeveloperAdminConfig> {
+  const cfg = getDeveloperAdminConfig();
+  try {
+    const { createAdminClient } = require('@/lib/supabase/client');
+    const admin = createAdminClient();
+    if (admin) {
+      const { data } = await admin
+        .from('notifications')
+        .select('message')
+        .eq('type', 'ADMIN_CONFIG')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.message) {
+        const parsed = JSON.parse(data.message);
+        if (parsed.razorpayKeyId) cfg.razorpayKeyId = parsed.razorpayKeyId;
+        if (parsed.razorpayKeySecret) cfg.razorpayKeySecret = parsed.razorpayKeySecret;
+        if (parsed.razorpayPlanIdPromo99) cfg.razorpayPlanIdPromo99 = parsed.razorpayPlanIdPromo99;
+        if (parsed.razorpayPlanIdStandard199) cfg.razorpayPlanIdStandard199 = parsed.razorpayPlanIdStandard199;
+        if (parsed.razorpayMode) cfg.razorpayMode = parsed.razorpayMode;
+        cfg.updatedAt = parsed.updatedAt || cfg.updatedAt;
+        globalThis.__devAdminConfig__ = cfg;
+      }
+    }
+  } catch {}
+  return cfg;
+}
+

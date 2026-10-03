@@ -6656,6 +6656,24 @@ class QuoteFlowStore {
           return sub;
         }
       } catch {}
+
+      // Robust Cloud Fallback: Check persistent storage in Supabase notifications table
+      try {
+        const { data: cloudRow } = await admin
+          .from('notifications')
+          .select('message')
+          .eq('organization_id', businessId)
+          .eq('type', 'BUSINESS_SUBSCRIPTION')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (cloudRow?.message) {
+          const parsed = JSON.parse(cloudRow.message);
+          const sub = this.hydrateSubscriptionPlan(parsed);
+          this.subscriptions.set(businessId, sub);
+          return sub;
+        }
+      } catch {}
     }
 
     if (this.subscriptions.has(businessId)) {
@@ -6715,6 +6733,18 @@ class QuoteFlowStore {
       } catch (err) {
         console.warn('Supabase saveBusinessSubscription sync warning:', err);
       }
+
+      // Permanent Cloud Persistence: Save in Supabase notifications table so subscription never reverts on Vercel
+      try {
+        await admin.from('notifications').upsert({
+          id: sub.id,
+          organization_id: sub.business_id,
+          title: `SUBSCRIPTION:${sub.business_id}`,
+          message: JSON.stringify(sub),
+          type: 'BUSINESS_SUBSCRIPTION',
+          is_read: sub.status === 'active',
+        });
+      } catch {}
     }
 
     return sub;
@@ -6876,6 +6906,30 @@ class QuoteFlowStore {
       }
     }
 
+    // 2b. Fetch cloud subscriptions from Supabase notifications table
+    const adminClient = createAdminClient();
+    if (adminClient) {
+      try {
+        const { data: cloudSubs } = await adminClient
+          .from('notifications')
+          .select('message')
+          .eq('type', 'BUSINESS_SUBSCRIPTION');
+        if (cloudSubs && cloudSubs.length > 0) {
+          for (const row of cloudSubs) {
+            try {
+              const s: BusinessSubscription = JSON.parse(row.message);
+              if (s && s.business_id && !s.deleted_at) {
+                const org = orgMap.get(s.business_id);
+                if (org || s.business_id === POZONE_ORG_ID) {
+                  subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
     // 3. Ensure EVERY legitimate registered organization has an authoritative subscription record
     for (const org of orgMap.values()) {
       if (org.deleted_at) continue;
@@ -6987,13 +7041,23 @@ class QuoteFlowStore {
       return true;
     });
 
-    // 5. Apply Status Filters
+    // 5. Apply Status Filters (Distinct Paid, Active Trial, and Expired Trial options)
     if (filters?.status && filters.status !== 'all') {
       const st = filters.status.toLowerCase();
-      if (st === 'trial' || st === 'trialing') {
+      if (st === 'paid' || st === 'active') {
+        all = all.filter((s) => s.status === 'active' || s.is_trial_prepaid || s.business_id === POZONE_ORG_ID);
+      } else if (st === 'active_trial' || st === 'trial_active') {
+        all = all.filter(
+          (s) => s.status === 'trialing' && (s.trial_end_at ? new Date(s.trial_end_at).getTime() > now : true)
+        );
+      } else if (st === 'expired_trial' || st === 'trial_expired' || st === 'expired') {
+        all = all.filter(
+          (s) =>
+            s.status === 'expired' ||
+            (s.status === 'trialing' && s.trial_end_at ? new Date(s.trial_end_at).getTime() <= now : false)
+        );
+      } else if (st === 'trial' || st === 'trialing') {
         all = all.filter((s) => s.status === 'trialing');
-      } else if (st === 'active') {
-        all = all.filter((s) => s.status === 'active');
       } else if (st === 'payment_due') {
         all = all.filter((s) => {
           const tEnd = s.trial_end_at ? new Date(s.trial_end_at).getTime() : 0;
@@ -7478,12 +7542,35 @@ class QuoteFlowStore {
           }
         }
       } catch {}
+
+      // 4. Cloud tickets stored in Supabase notifications table (rock-solid persistence across refreshes and serverless lambdas)
+      try {
+        const { data: cloudTickets } = await admin
+          .from('notifications')
+          .select('id, organization_id, message, created_at')
+          .eq('type', 'SUPPORT_TICKET')
+          .order('created_at', { ascending: false });
+        if (cloudTickets && cloudTickets.length > 0) {
+          for (const row of cloudTickets) {
+            try {
+              const t: SupportTicket = JSON.parse(row.message);
+              if (t && t.id && !t.deleted_at) {
+                const existing = ticketMap.get(t.id);
+                ticketMap.set(t.id, {
+                  ...t,
+                  messages: (t.messages && t.messages.length > 0) ? t.messages : (existing?.messages || []),
+                  attachments: (t.attachments && t.attachments.length > 0) ? t.attachments : (existing?.attachments || []),
+                });
+              }
+            } catch {}
+          }
+        }
+      } catch {}
     }
 
     let all = Array.from(ticketMap.values()).filter((t) => {
       if (t.deleted_at) return false;
-      if (t.business_id?.startsWith('test_') || t.business_id?.startsWith('test-')) return false;
-      if (t.subject === 'Inquiry regarding GST invoice rounding' || t.subject === 'Billing inquiry with callback') return false;
+      if (!params?.businessId && (t.business_id?.startsWith('test_') || t.business_id?.startsWith('test-'))) return false;
       return true;
     });
 
@@ -7571,6 +7658,24 @@ class QuoteFlowStore {
           };
         }
       } catch {}
+
+      // Fallback: Check cloud ticket in Supabase notifications table
+      try {
+        const { data: cloudRow } = await admin
+          .from('notifications')
+          .select('message')
+          .eq('id', ticketId)
+          .eq('type', 'SUPPORT_TICKET')
+          .maybeSingle();
+        if (cloudRow?.message) {
+          const parsed = JSON.parse(cloudRow.message);
+          ticket = {
+            ...parsed,
+            messages: (parsed.messages && parsed.messages.length > 0) ? parsed.messages : (ticket?.messages || []),
+            attachments: (parsed.attachments && parsed.attachments.length > 0) ? parsed.attachments : (ticket?.attachments || []),
+          };
+        }
+      } catch {}
     }
 
     if (ticket) {
@@ -7626,6 +7731,18 @@ class QuoteFlowStore {
           closed_at: ticket.closed_at,
         });
       } catch {}
+
+      // Persistent Cloud Storage: Save in Supabase notifications table
+      try {
+        await admin.from('notifications').upsert({
+          id: ticket.id,
+          organization_id: ticket.business_id,
+          title: `SUPPORT_TICKET:${ticket.ticket_number}`,
+          message: JSON.stringify(ticket),
+          type: 'SUPPORT_TICKET',
+          is_read: ticket.status === 'resolved' || ticket.status === 'closed',
+        });
+      } catch {}
     }
     return ticket;
   }
@@ -7671,6 +7788,21 @@ class QuoteFlowStore {
           message: message.message,
           created_at: message.created_at,
         });
+      } catch {}
+
+      // Update cloud ticket in Supabase notifications table with latest message list
+      try {
+        const fullTicket = this.supportTickets.get(message.ticket_id) || fileData[message.ticket_id];
+        if (fullTicket) {
+          await admin.from('notifications').upsert({
+            id: fullTicket.id,
+            organization_id: fullTicket.business_id,
+            title: `SUPPORT_TICKET:${fullTicket.ticket_number}`,
+            message: JSON.stringify(fullTicket),
+            type: 'SUPPORT_TICKET',
+            is_read: fullTicket.status === 'resolved' || fullTicket.status === 'closed',
+          });
+        }
       } catch {}
     }
     return message;

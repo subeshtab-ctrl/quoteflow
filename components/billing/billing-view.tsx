@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   BusinessSubscription,
   SubscriptionAccess,
@@ -51,6 +52,7 @@ interface BillingViewProps {
 }
 
 export function BillingView({ initialData }: BillingViewProps) {
+  const router = useRouter();
   const [data, setData] = useState(initialData || null);
   const [isLoading, setIsLoading] = useState(!initialData);
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
@@ -59,6 +61,13 @@ export function BillingView({ initialData }: BillingViewProps) {
   const [cancelReason, setCancelReason] = useState('Too expensive');
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(true);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Synchronize incoming server data immediately
+  useEffect(() => {
+    if (initialData) {
+      setData(initialData);
+    }
+  }, [initialData]);
 
   // Support & Help Modal state
   const [supportModalOpen, setSupportModalOpen] = useState(false);
@@ -90,6 +99,20 @@ export function BillingView({ initialData }: BillingViewProps) {
 
   useEffect(() => {
     fetchBillingData();
+
+    const handleSync = () => {
+      if (document.visibilityState === 'visible') {
+        fetchBillingData();
+        router.refresh();
+      }
+    };
+
+    window.addEventListener('focus', handleSync);
+    document.addEventListener('visibilitychange', handleSync);
+    return () => {
+      window.removeEventListener('focus', handleSync);
+      document.removeEventListener('visibilitychange', handleSync);
+    };
   }, []);
 
   const loadRazorpayScript = (): Promise<boolean> => {
@@ -186,6 +209,7 @@ export function BillingView({ initialData }: BillingViewProps) {
                 type: 'success',
                 text: 'Payment of ₹99.00 confirmed! QuoteFlow Pro is now active.',
               });
+              router.refresh();
               await fetchBillingData();
             } else {
               setFeedbackMsg({
@@ -243,6 +267,7 @@ export function BillingView({ initialData }: BillingViewProps) {
         text: 'Payment of ₹99.00 verified! QuoteFlow Pro is now active.',
       });
       setMockSimulationModalOpen(false);
+      router.refresh();
       await fetchBillingData();
     } catch (err: any) {
       setFeedbackMsg({ type: 'error', text: err.message || 'Error simulating test payment' });

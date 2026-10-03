@@ -77,7 +77,7 @@ export function SupportHelpModal({
   const loadRecentTickets = async () => {
     try {
       setIsLoadingTickets(true);
-      const res = await fetch('/api/support/tickets?limit=5');
+      const res = await fetch('/api/support/tickets?limit=15', { cache: 'no-store' });
       const data = await res.json();
       if (res.ok && data.tickets) {
         setRecentTickets(data.tickets);
@@ -109,7 +109,7 @@ export function SupportHelpModal({
   // Fetch specific ticket details
   const fetchTicketDetails = async (ticketId: string) => {
     try {
-      const res = await fetch(`/api/support/tickets/${ticketId}`);
+      const res = await fetch(`/api/support/tickets/${ticketId}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok && data.ticket) {
         setActiveTicket(data.ticket);

@@ -4,6 +4,10 @@ import { subscriptionService } from '@/lib/billing/subscription-service';
 import { isAuthorizedDeveloperAdmin, DEVELOPER_ADMIN_EMAIL } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

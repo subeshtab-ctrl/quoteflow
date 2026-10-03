@@ -4,6 +4,7 @@ import {
   getDeveloperAdminConfig,
   updateRazorpayPlansConfig,
   updateRazorpayApiConfig,
+  syncCloudAdminConfig,
 } from '@/lib/billing/dev-admin-auth';
 import { razorpayService } from '@/lib/billing/razorpay';
 
@@ -19,9 +20,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    await syncCloudAdminConfig();
     const cfg = getDeveloperAdminConfig();
     const keyId = razorpayService.getKeyId();
-    const mode = razorpayService.getMode();
+    const mode = cfg.razorpayMode || razorpayService.getMode();
     const isConfigured = razorpayService.isConfigured();
 
     return NextResponse.json({
@@ -33,8 +35,8 @@ export async function GET(req: NextRequest) {
         maskedKeyId: keyId ? `${keyId.substring(0, 8)}...` : 'Not Set',
         hasSecret: isConfigured,
         hasCustomKey: Boolean(cfg.razorpayKeyId),
-        promoPlanId: cfg.razorpayPlanIdPromo99 || '',
-        standardPlanId: cfg.razorpayPlanIdStandard199 || '',
+        promoPlanId: cfg.razorpayPlanIdPromo99 || 'plan_Tj1uiAIYxdedEa',
+        standardPlanId: cfg.razorpayPlanIdStandard199 || 'plan_Tj1uiAIYxdedEa',
       },
     });
   } catch (err: any) {
@@ -54,14 +56,26 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { action, key_id, key_secret, promo_plan_id, standard_plan_id } = body;
+    const { action, key_id, key_secret, promo_plan_id, standard_plan_id, mode } = body;
+
+    if (action === 'toggle_mode') {
+      const targetMode: 'live' | 'test' = mode === 'test' ? 'test' : 'live';
+      const updated = updateRazorpayApiConfig({ mode: targetMode });
+      razorpayService.reloadCredentials();
+      return NextResponse.json({
+        success: true,
+        message: `Razorpay switched to ${targetMode.toUpperCase()} mode.`,
+        mode: targetMode,
+      });
+    }
 
     if (action === 'save_credentials' || action === 'save_plans') {
       const updated = updateRazorpayApiConfig({
         keyId: key_id,
         keySecret: key_secret,
-        promoPlanId: promo_plan_id,
-        standardPlanId: standard_plan_id,
+        promoPlanId: promo_plan_id || 'plan_Tj1uiAIYxdedEa',
+        standardPlanId: standard_plan_id || promo_plan_id || 'plan_Tj1uiAIYxdedEa',
+        mode: mode || (key_id?.startsWith('rzp_live_') ? 'live' : undefined),
       });
       razorpayService.reloadCredentials();
 
@@ -69,8 +83,9 @@ export async function POST(req: NextRequest) {
         success: true,
         message: 'Razorpay configuration updated successfully.',
         keyId: razorpayService.getKeyId() || '',
-        promoPlanId: updated.razorpayPlanIdPromo99 || '',
-        standardPlanId: updated.razorpayPlanIdStandard199 || '',
+        promoPlanId: updated.razorpayPlanIdPromo99 || 'plan_Tj1uiAIYxdedEa',
+        standardPlanId: updated.razorpayPlanIdStandard199 || 'plan_Tj1uiAIYxdedEa',
+        mode: updated.razorpayMode || 'live',
       });
     }
 

@@ -20,6 +20,7 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  X,
   Tag,
   LifeBuoy,
   ShieldCheck,
@@ -88,8 +89,9 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   const [subSearch, setSubSearch] = useState('');
   const [subPage, setSubPage] = useState(1);
 
-  // Business Expansion & Offer / Clean-up State
+  // Business Slide-Over Drawer & Details State
   const [expandedBusinessId, setExpandedBusinessId] = useState<string | null>(null);
+  const [selectedDrawerBusiness, setSelectedDrawerBusiness] = useState<BusinessSubscription | null>(null);
   const [expandedBusinessDetails, setExpandedBusinessDetails] = useState<any | null>(null);
   const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -138,13 +140,8 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleToggleExpand = async (sub: BusinessSubscription) => {
-    if (expandedBusinessId === sub.business_id) {
-      setExpandedBusinessId(null);
-      setExpandedBusinessDetails(null);
-      return;
-    }
-
+  const handleOpenDrawer = async (sub: BusinessSubscription) => {
+    setSelectedDrawerBusiness(sub);
     setExpandedBusinessId(sub.business_id);
     setExpandedBusinessDetails(null);
     try {
@@ -159,6 +156,16 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
     } finally {
       setIsLoadingExpanded(false);
     }
+  };
+
+  const handleCloseDrawer = () => {
+    setSelectedDrawerBusiness(null);
+    setExpandedBusinessId(null);
+    setExpandedBusinessDetails(null);
+  };
+
+  const handleToggleExpand = async (sub: BusinessSubscription) => {
+    handleOpenDrawer(sub);
   };
 
   const handleOpenCleanupModal = async () => {
@@ -312,10 +319,37 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
       if (res.ok && json.razorpay) {
         setRazorpayConfig(json.razorpay);
         setRazorpayKeyId(json.razorpay.keyId || '');
-        setRazorpayPromoPlanId(json.razorpay.promoPlanId || '');
-        setRazorpayStandardPlanId(json.razorpay.standardPlanId || '');
+        setRazorpayPromoPlanId(json.razorpay.promoPlanId || 'plan_Tj1uiAIYxdedEa');
+        setRazorpayStandardPlanId(json.razorpay.standardPlanId || 'plan_Tj1uiAIYxdedEa');
       }
     } catch {}
+  };
+
+  const handleToggleRazorpayMode = async () => {
+    try {
+      const currentMode = razorpayConfig?.mode || 'live';
+      const targetMode = currentMode === 'live' ? 'test' : 'live';
+      const res = await fetch('/api/admin/razorpay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggle_mode',
+          mode: targetMode,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setRazorpayFeedback({
+          type: 'success',
+          text: `Switched Razorpay to ${targetMode.toUpperCase()} mode successfully.`,
+        });
+        await fetchRazorpayConfig();
+      } else {
+        setRazorpayFeedback({ type: 'error', text: json.error || 'Failed to toggle mode' });
+      }
+    } catch (err: any) {
+      setRazorpayFeedback({ type: 'error', text: err.message || 'Error toggling mode' });
+    }
   };
 
   const handleSaveRazorpayPlans = async (e: React.FormEvent) => {
@@ -330,8 +364,9 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
           action: 'save_credentials',
           key_id: razorpayKeyId.trim(),
           key_secret: razorpayKeySecret.trim() || undefined,
-          promo_plan_id: razorpayPromoPlanId.trim(),
-          standard_plan_id: razorpayStandardPlanId.trim(),
+          promo_plan_id: razorpayPromoPlanId.trim() || 'plan_Tj1uiAIYxdedEa',
+          standard_plan_id: razorpayStandardPlanId.trim() || razorpayPromoPlanId.trim() || 'plan_Tj1uiAIYxdedEa',
+          mode: razorpayConfig?.mode || (razorpayKeyId.trim().startsWith('rzp_live_') ? 'live' : 'live'),
         }),
       });
       const json = await res.json();
@@ -759,7 +794,40 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
       {/* TAB 2: SUBSCRIBERS */}
       {activeTab === 'subscribers' && (
         <div className="space-y-4">
-          {/* Filters, Search & Cleanup */}
+          {/* Distinct Options for Paid, Active Trial, Expired Trial (User Requirement) */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {[
+              { id: 'all', label: 'All Subscribers', icon: Users, color: 'text-slate-500' },
+              { id: 'paid', label: 'Paid (QuoteFlow Pro)', icon: CheckCircle2, color: 'text-emerald-500' },
+              { id: 'active_trial', label: 'Active Trial', icon: Clock, color: 'text-indigo-500' },
+              { id: 'expired_trial', label: 'Expired Trial', icon: AlertTriangle, color: 'text-amber-500' },
+              { id: 'payment_due', label: 'Payment Due', icon: CreditCard, color: 'text-rose-500' },
+              { id: 'cancelled', label: 'Cancelled', icon: XCircle, color: 'text-slate-400' },
+            ].map((pill) => {
+              const isActive = subStatusFilter === pill.id;
+              const Icon = pill.icon;
+              return (
+                <button
+                  key={pill.id}
+                  type="button"
+                  onClick={() => {
+                    setSubStatusFilter(pill.id);
+                    setSubPage(1);
+                  }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-2 border ${
+                    isActive
+                      ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 ${isActive ? 'text-white' : pill.color}`} />
+                  <span>{pill.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search, Status Dropdown & Cleanup */}
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -775,24 +843,6 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <select
-                value={subStatusFilter}
-                onChange={(e) => {
-                  setSubStatusFilter(e.target.value);
-                  setSubPage(1);
-                }}
-                className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium"
-              >
-                <option value="all">All Statuses</option>
-                <option value="trial">Trial</option>
-                <option value="active">Active</option>
-                <option value="payment_due">Payment Due</option>
-                <option value="payment_overdue">Payment Overdue</option>
-                <option value="restricted">Restricted</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="ai_test">AI / Test</option>
-              </select>
-
               <Button
                 variant="outline"
                 size="sm"
@@ -805,7 +855,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             </div>
           </div>
 
-          {/* Subscribers 11-Column Table (Requirement 24) */}
+          {/* Subscribers Table with Smooth Row Selection */}
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
@@ -827,20 +877,18 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {subscribers.map((s) => {
                     const isPozone = s.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a';
-                    const isExpanded = expandedBusinessId === s.business_id;
+                    const isSelected = selectedDrawerBusiness?.business_id === s.business_id;
                     const now = Date.now();
                     const trialEndMs = s.trial_end_at ? new Date(s.trial_end_at).getTime() : 0;
                     const isTrialActive = trialEndMs > now;
                     const daysRemaining = isTrialActive ? Math.max(0, Math.ceil((trialEndMs - now) / 86400000)) : 0;
 
-                    // Authoritative trial status
                     const trialStatusText = s.is_trial_prepaid
                       ? `Paid (${daysRemaining}d trial left)`
                       : isTrialActive
                       ? `Active (${daysRemaining}d left)`
                       : 'Concluded';
 
-                    // Next payment due date
                     const nextPaymentDueFormatted = s.next_charge_at
                       ? new Date(s.next_charge_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
                       : s.trial_end_at
@@ -848,349 +896,140 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                       : '—';
 
                     return (
-                      <React.Fragment key={s.id}>
-                        <tr
-                          onClick={() => handleToggleExpand(s)}
-                          className={`cursor-pointer transition-colors ${
-                            isExpanded
-                              ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
-                              : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
-                          }`}
-                        >
-                          {/* 1. Business Name */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              {isExpanded ? (
-                                <ChevronUp className="h-4 w-4 text-indigo-500 shrink-0" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
-                              )}
-                              <div className="space-y-0.5 min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-bold text-slate-900 dark:text-slate-100 hover:text-indigo-600 transition-colors">
-                                    {s.organization?.name || (s as any).business_name || (isPozone ? 'Pozone' : 'Registered Business')}
-                                  </span>
-                                  {isPozone && (
-                                    <Badge className="bg-emerald-600 text-white text-[9px] font-bold">
-                                      Verified Paid
-                                    </Badge>
-                                  )}
-                                  {s.is_test && (
-                                    <Badge variant="outline" className="text-amber-500 border-amber-500/30 text-[9px]">
-                                      Test
-                                    </Badge>
-                                  )}
-                                </div>
-                                <p className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
-                                  {s.business_id}
-                                </p>
+                      <tr
+                        key={s.id}
+                        onClick={() => handleOpenDrawer(s)}
+                        className={`cursor-pointer transition-colors group ${
+                          isSelected
+                            ? 'bg-indigo-50/80 dark:bg-indigo-950/50'
+                            : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                        }`}
+                      >
+                        {/* 1. Business Name & Slide Action */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                  {s.organization?.name || (s as any).business_name || (isPozone ? 'Pozone' : 'Registered Business')}
+                                </span>
+                                {isPozone && (
+                                  <Badge className="bg-emerald-600 text-white text-[9px] font-bold">
+                                    Verified Paid
+                                  </Badge>
+                                )}
+                                {s.is_test && (
+                                  <Badge variant="outline" className="text-amber-500 border-amber-500/30 text-[9px]">
+                                    Test
+                                  </Badge>
+                                )}
                               </div>
+                              <p className="text-[10px] text-slate-400 font-mono truncate max-w-[130px]">
+                                {s.business_id}
+                              </p>
                             </div>
-                          </td>
-
-                          {/* 2. Email */}
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {s.organization?.email || '—'}
-                          </td>
-
-                          {/* 3. Phone */}
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {s.organization?.phone || '—'}
-                          </td>
-
-                          {/* 4. Country */}
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                            {s.organization?.country || '—'}
-                          </td>
-
-                          {/* 5. Registration Date */}
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                            {new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </td>
-
-                          {/* 6. Plan */}
-                          <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                            {s.plan?.name || (s.amount === 9900 ? 'QuoteFlow Pro' : 'Free Trial')}
-                          </td>
-
-                          {/* 7. Trial Status */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                isTrialActive
-                                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
-                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                              }`}
-                            >
-                              {trialStatusText}
+                            <span className="text-[10px] font-semibold text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap hidden sm:inline">
+                              View &rarr;
                             </span>
-                          </td>
+                          </div>
+                        </td>
 
-                          {/* 8. Subscription Status */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                s.status === 'active'
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : s.status === 'trialing'
-                                  ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                                  : s.status === 'grace_period'
-                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                                  : s.status === 'payment_overdue' || (s as any).account_access === 'restricted'
-                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                                  : s.status === 'payment_pending'
-                                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
-                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                              }`}
-                            >
-                              {s.status}
-                            </span>
-                          </td>
+                        {/* 2. Email */}
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                          {s.organization?.email || '—'}
+                        </td>
 
-                          {/* 9. Trial End Date */}
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                            {s.trial_end_at
-                              ? new Date(s.trial_end_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                              : '—'}
-                          </td>
+                        {/* 3. Phone */}
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                          {s.organization?.phone || '—'}
+                        </td>
 
-                          {/* 10. Next Payment Due */}
-                          <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                            {nextPaymentDueFormatted}
-                          </td>
+                        {/* 4. Country */}
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                          {s.organization?.country || '—'}
+                        </td>
 
-                          {/* 11. Payment Status */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            {s.last_payment_id || s.status === 'active' || isPozone ? (
-                              <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
-                                Paid (₹99)
-                              </Badge>
-                            ) : s.is_trial_prepaid ? (
-                              <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
-                                Prepaid
-                              </Badge>
-                            ) : s.status === 'grace_period' || s.status === 'payment_overdue' ? (
-                              <Badge className="bg-rose-600 text-white text-[10px] font-bold">
-                                Overdue
-                              </Badge>
-                            ) : s.status === 'trialing' ? (
-                              <Badge variant="outline" className="text-slate-500 text-[10px]">
-                                Trial (₹0)
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-amber-600 text-white text-[10px] font-bold">
-                                Pending
-                              </Badge>
-                            )}
-                          </td>
-                        </tr>
+                        {/* 5. Registration Date */}
+                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                          {new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </td>
 
-                        {/* EXPANDED ROW DETAILS (Requirements 25, 26, 27, 28, 29, 30) */}
-                        {isExpanded && (
-                          <tr className="bg-slate-50/90 dark:bg-slate-950 border-y border-indigo-200 dark:border-indigo-900/60">
-                            <td colSpan={11} className="p-6">
-                              {isLoadingExpanded ? (
-                                <div className="py-8 flex items-center justify-center gap-2 text-slate-400">
-                                  <Loader2 className="h-5 w-5 animate-spin text-indigo-500" />
-                                  <span>Loading authoritative business details...</span>
-                                </div>
-                              ) : (
-                                <div className="space-y-6">
-                                  {/* Top Actions & Header */}
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-2">
-                                        <Building2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                                        <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                                          {s.organization?.name || 'Business Overview'}
-                                        </h4>
-                                        {isPozone && (
-                                          <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
-                                            Live Paying Account (Protected)
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <p className="text-xs text-slate-500">
-                                        Registered on {new Date(s.created_at).toLocaleString()} • Business ID: <span className="font-mono">{s.business_id}</span>
-                                      </p>
-                                    </div>
+                        {/* 6. Plan */}
+                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                          {s.plan?.name || (s.amount === 9900 ? 'QuoteFlow Pro' : 'Free Trial')}
+                        </td>
 
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <Button
-                                        size="sm"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleOpenApplyOffer(s);
-                                        }}
-                                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold gap-1.5 shadow-xs"
-                                      >
-                                        <Tag className="h-3.5 w-3.5" />
-                                        <span>Apply Offer</span>
-                                      </Button>
-                                    </div>
-                                  </div>
+                        {/* 7. Trial Status */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              isTrialActive
+                                ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}
+                          >
+                            {trialStatusText}
+                          </span>
+                        </td>
 
-                                  {/* Grid of 4 Cards */}
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                    {/* 1. Business Info (from Settings) */}
-                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
-                                        <Building2 className="h-3.5 w-3.5 text-indigo-500" />
-                                        <span>Settings Profile</span>
-                                      </span>
-                                      <div className="space-y-1.5 text-[11px] pt-1">
-                                        <div><span className="text-slate-400">Email:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.email || '—'}</strong></div>
-                                        <div><span className="text-slate-400">Phone:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.phone || '—'}</strong></div>
-                                        <div><span className="text-slate-400">Address:</span> <strong className="text-slate-800 dark:text-slate-200">{[s.organization?.address_line1, s.organization?.city, s.organization?.state, s.organization?.postal_code, s.organization?.country].filter(Boolean).join(', ') || '—'}</strong></div>
-                                        <div><span className="text-slate-400">Website:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.website || '—'}</strong></div>
-                                        <div><span className="text-slate-400">Tax/GST/VAT:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.gst_vat_number || 'None'}</strong></div>
-                                      </div>
-                                    </div>
+                        {/* 8. Subscription Status */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              s.status === 'active'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : s.status === 'trialing'
+                                ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                                : s.status === 'grace_period'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                : s.status === 'payment_overdue' || (s as any).account_access === 'restricted'
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                : s.status === 'payment_pending'
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                            }`}
+                          >
+                            {s.status}
+                          </span>
+                        </td>
 
-                                    {/* 2. Trial Details */}
-                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
-                                        <Clock className="h-3.5 w-3.5 text-indigo-500" />
-                                        <span>Trial Timeline</span>
-                                      </span>
-                                      <div className="space-y-1.5 text-[11px] pt-1">
-                                        <div><span className="text-slate-400">Trial Started:</span> <strong className="text-slate-800 dark:text-slate-200">{s.trial_start_at ? new Date(s.trial_start_at).toLocaleDateString() : 'At Registration'}</strong></div>
-                                        <div><span className="text-slate-400">Trial Ends:</span> <strong className="text-slate-800 dark:text-slate-200">{s.trial_end_at ? new Date(s.trial_end_at).toLocaleDateString() : '30 days'}</strong></div>
-                                        <div><span className="text-slate-400">Days Remaining:</span> <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{daysRemaining} days</strong></div>
-                                        <div><span className="text-slate-400">Prepaid:</span> <strong className="text-slate-800 dark:text-slate-200">{s.is_trial_prepaid ? 'Yes (Trial Active)' : 'No'}</strong></div>
-                                      </div>
-                                    </div>
+                        {/* 9. Trial End Date */}
+                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                          {s.trial_end_at
+                            ? new Date(s.trial_end_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : '—'}
+                        </td>
 
-                                    {/* 3. Plan Details */}
-                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
-                                        <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
-                                        <span>Plan & Schedule</span>
-                                      </span>
-                                      <div className="space-y-1.5 text-[11px] pt-1">
-                                        <div><span className="text-slate-400">Plan:</span> <strong className="text-slate-800 dark:text-slate-200">{s.plan?.name || 'QuoteFlow Pro'}</strong></div>
-                                        <div><span className="text-slate-400">Price:</span> <strong className="text-slate-900 dark:text-white font-bold">₹{(s.amount / 100).toFixed(2)} / month</strong></div>
-                                        <div><span className="text-slate-400">Status:</span> <strong className="text-slate-800 dark:text-slate-200">{s.status}</strong></div>
-                                        <div><span className="text-slate-400">Next Payment Due:</span> <strong className="text-slate-900 dark:text-white">{nextPaymentDueFormatted}</strong></div>
-                                        <div><span className="text-slate-400">Billing Interval:</span> <strong className="text-slate-800 dark:text-slate-200">Monthly (₹99)</strong></div>
-                                      </div>
-                                    </div>
+                        {/* 10. Next Payment Due */}
+                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                          {nextPaymentDueFormatted}
+                        </td>
 
-                                    {/* 4. Admin-Only Copyable Identifiers */}
-                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
-                                        <Key className="h-3.5 w-3.5 text-amber-500" />
-                                        <span>Razorpay IDs (Admin Only)</span>
-                                      </span>
-                                      <div className="space-y-2 pt-1 font-mono text-[10px]">
-                                        <div>
-                                          <span className="text-slate-400 block font-sans">Payment ID:</span>
-                                          <div className="flex items-center justify-between gap-1">
-                                            <span className="truncate">{s.last_payment_id || 'None'}</span>
-                                            {s.last_payment_id && (
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleCopy(s.last_payment_id!, `pay_${s.id}`);
-                                                }}
-                                                className="p-1 hover:text-indigo-500 text-slate-400"
-                                                title="Copy Payment ID"
-                                              >
-                                                {copiedKey === `pay_${s.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                                              </button>
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        <div>
-                                          <span className="text-slate-400 block font-sans">Subscription ID:</span>
-                                          <div className="flex items-center justify-between gap-1">
-                                            <span className="truncate">{s.razorpay_subscription_id || 'None'}</span>
-                                            {s.razorpay_subscription_id && (
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleCopy(s.razorpay_subscription_id!, `sub_${s.id}`);
-                                                }}
-                                                className="p-1 hover:text-indigo-500 text-slate-400"
-                                                title="Copy Subscription ID"
-                                              >
-                                                {copiedKey === `sub_${s.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                                              </button>
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        <div>
-                                          <span className="text-slate-400 block font-sans">Plan ID:</span>
-                                          <div className="flex items-center justify-between gap-1">
-                                            <span className="truncate">{s.razorpay_plan_id || 'plan_monthly_99'}</span>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleCopy(s.razorpay_plan_id || 'plan_monthly_99', `plan_${s.id}`);
-                                              }}
-                                              className="p-1 hover:text-indigo-500 text-slate-400"
-                                              title="Copy Plan ID"
-                                            >
-                                              {copiedKey === `plan_${s.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* 5. Admin Transaction History Table */}
-                                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
-                                    <h5 className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                                      <Activity className="h-4 w-4 text-emerald-500" />
-                                      <span>Admin Transaction History</span>
-                                    </h5>
-
-                                    {expandedBusinessDetails?.payments && expandedBusinessDetails.payments.length > 0 ? (
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-xs text-left">
-                                          <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 uppercase font-semibold text-[10px]">
-                                            <tr>
-                                              <th className="px-3 py-2">Date</th>
-                                              <th className="px-3 py-2">Amount</th>
-                                              <th className="px-3 py-2">Status</th>
-                                              <th className="px-3 py-2">Payment ID</th>
-                                              <th className="px-3 py-2">Invoice ID</th>
-                                              <th className="px-3 py-2">Method</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {expandedBusinessDetails.payments.map((p: any) => (
-                                              <tr key={p.id}>
-                                                <td className="px-3 py-2">{new Date(p.paid_at || p.created_at).toLocaleString()}</td>
-                                                <td className="px-3 py-2 font-bold text-slate-900 dark:text-white">₹{(p.amount / 100).toFixed(2)}</td>
-                                                <td className="px-3 py-2">
-                                                  <Badge className={p.status === 'captured' ? 'bg-emerald-600 text-white text-[9px]' : 'bg-rose-600 text-white text-[9px]'}>
-                                                    {p.status}
-                                                  </Badge>
-                                                </td>
-                                                <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{p.razorpay_payment_id || '—'}</td>
-                                                <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{p.razorpay_invoice_id || '—'}</td>
-                                                <td className="px-3 py-2 uppercase text-[10px] text-slate-500">{p.payment_method || 'card'}</td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    ) : (
-                                      <p className="text-xs text-slate-400 py-3 text-center">
-                                        No captured payments recorded for this account.
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
+                        {/* 11. Payment Status */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {s.last_payment_id || s.status === 'active' || isPozone ? (
+                            <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                              Paid (₹99)
+                            </Badge>
+                          ) : s.is_trial_prepaid ? (
+                            <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                              Prepaid
+                            </Badge>
+                          ) : s.status === 'grace_period' || s.status === 'payment_overdue' ? (
+                            <Badge className="bg-rose-600 text-white text-[10px] font-bold">
+                              Overdue
+                            </Badge>
+                          ) : s.status === 'trialing' ? (
+                            <Badge variant="outline" className="text-slate-500 text-[10px]">
+                              Trial (₹0)
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-600 text-white text-[10px] font-bold">
+                              Pending
+                            </Badge>
+                          )}
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
@@ -1203,6 +1042,268 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               </div>
             )}
           </div>
+
+          {/* SLIDE-OVER DRAWER FOR BUSINESS DETAILS (User Requirement: Independent Seekable Slide Bar) */}
+          {selectedDrawerBusiness && (
+            <div className="fixed inset-0 z-50 overflow-hidden">
+              {/* Backdrop */}
+              <div
+                className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+                onClick={handleCloseDrawer}
+              />
+
+              {/* Drawer Container */}
+              <div className="fixed inset-y-0 right-0 max-w-2xl w-full bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-200 dark:border-slate-800 flex flex-col z-50 animate-in slide-in-from-right duration-300">
+                {/* Sticky Header */}
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/90 dark:bg-slate-950/80 sticky top-0 z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                      <Building2 className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                          {selectedDrawerBusiness.organization?.name || (selectedDrawerBusiness as any).business_name || 'Business Details'}
+                        </h3>
+                        {selectedDrawerBusiness.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a' && (
+                          <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                            Live Paying Account (Protected)
+                          </Badge>
+                        )}
+                        {selectedDrawerBusiness.is_test && (
+                          <Badge variant="outline" className="text-amber-500 border-amber-500/30 text-[10px]">
+                            Test
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        ID: {selectedDrawerBusiness.business_id}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCloseDrawer}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    aria-label="Close details"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* Seekable Scrollable Body with Independent Slide Bar */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {isLoadingExpanded ? (
+                    <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400">
+                      <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+                      <span className="text-xs">Loading authoritative business details...</span>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Top Meta Strip */}
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs">
+                        <span className="text-slate-500">Registered: <strong>{new Date(selectedDrawerBusiness.created_at).toLocaleString()}</strong></span>
+                        <Button
+                          size="sm"
+                          onClick={() => handleOpenApplyOffer(selectedDrawerBusiness)}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold h-7 gap-1"
+                        >
+                          <Tag className="h-3 w-3" />
+                          <span>Apply Offer</span>
+                        </Button>
+                      </div>
+
+                      {/* 4 Informational Cards Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* 1. Settings Profile */}
+                        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs shadow-xs">
+                          <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+                            <span>Settings Profile</span>
+                          </span>
+                          <div className="space-y-1.5 text-[11px] pt-1">
+                            <div><span className="text-slate-400">Email:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.email || '—'}</strong></div>
+                            <div><span className="text-slate-400">Phone:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.phone || '—'}</strong></div>
+                            <div><span className="text-slate-400">Address:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{[selectedDrawerBusiness.organization?.address_line1, selectedDrawerBusiness.organization?.city, selectedDrawerBusiness.organization?.state, selectedDrawerBusiness.organization?.postal_code, selectedDrawerBusiness.organization?.country].filter(Boolean).join(', ') || '—'}</strong></div>
+                            <div><span className="text-slate-400">Website:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.website || '—'}</strong></div>
+                            <div><span className="text-slate-400">Tax/GST/VAT:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.gst_vat_number || 'None'}</strong></div>
+                          </div>
+                        </div>
+
+                        {/* 2. Trial Timeline */}
+                        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs shadow-xs">
+                          <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                            <span>Trial Timeline</span>
+                          </span>
+                          {(() => {
+                            const nowMs = Date.now();
+                            const tEndMs = selectedDrawerBusiness.trial_end_at ? new Date(selectedDrawerBusiness.trial_end_at).getTime() : 0;
+                            const isAct = tEndMs > nowMs;
+                            const dRem = isAct ? Math.max(0, Math.ceil((tEndMs - nowMs) / 86400000)) : 0;
+                            return (
+                              <div className="space-y-1.5 text-[11px] pt-1">
+                                <div><span className="text-slate-400">Started:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.trial_start_at ? new Date(selectedDrawerBusiness.trial_start_at).toLocaleDateString() : 'At Registration'}</strong></div>
+                                <div><span className="text-slate-400">Trial Ends:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.trial_end_at ? new Date(selectedDrawerBusiness.trial_end_at).toLocaleDateString() : '30 days'}</strong></div>
+                                <div><span className="text-slate-400">Days Left:</span> <strong className="text-indigo-600 dark:text-indigo-400 font-bold ml-1">{dRem} days</strong></div>
+                                <div><span className="text-slate-400">Prepaid:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.is_trial_prepaid ? 'Yes (Trial Active)' : 'No'}</strong></div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* 3. Subscription & Schedule */}
+                        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs shadow-xs">
+                          <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
+                            <span>Plan &amp; Schedule</span>
+                          </span>
+                          <div className="space-y-1.5 text-[11px] pt-1">
+                            <div><span className="text-slate-400">Plan:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.plan?.name || 'QuoteFlow Pro'}</strong></div>
+                            <div><span className="text-slate-400">Price:</span> <strong className="text-slate-900 dark:text-white font-bold ml-1">₹{(selectedDrawerBusiness.amount / 100).toFixed(2)} / month</strong></div>
+                            <div><span className="text-slate-400">Status:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1 uppercase">{selectedDrawerBusiness.status}</strong></div>
+                            <div>
+                              <span className="text-slate-400">Next Due:</span>
+                              <strong className="text-slate-900 dark:text-white ml-1">
+                                {selectedDrawerBusiness.next_charge_at
+                                  ? new Date(selectedDrawerBusiness.next_charge_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                                  : selectedDrawerBusiness.trial_end_at
+                                  ? new Date(selectedDrawerBusiness.trial_end_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div><span className="text-slate-400">Interval:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">Monthly (₹99)</strong></div>
+                          </div>
+                        </div>
+
+                        {/* 4. Razorpay Identifiers */}
+                        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs shadow-xs">
+                          <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <Key className="h-3.5 w-3.5 text-amber-500" />
+                            <span>Razorpay IDs (Admin Only)</span>
+                          </span>
+                          <div className="space-y-2 pt-1 font-mono text-[10px]">
+                            <div>
+                              <span className="text-slate-400 block font-sans">Payment ID:</span>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="truncate">{selectedDrawerBusiness.last_payment_id || 'None'}</span>
+                                {selectedDrawerBusiness.last_payment_id && (
+                                  <button
+                                    onClick={() => handleCopy(selectedDrawerBusiness.last_payment_id!, `pay_${selectedDrawerBusiness.id}`)}
+                                    className="p-1 hover:text-indigo-500 text-slate-400"
+                                    title="Copy Payment ID"
+                                  >
+                                    {copiedKey === `pay_${selectedDrawerBusiness.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="text-slate-400 block font-sans">Subscription ID:</span>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="truncate">{selectedDrawerBusiness.razorpay_subscription_id || 'None'}</span>
+                                {selectedDrawerBusiness.razorpay_subscription_id && (
+                                  <button
+                                    onClick={() => handleCopy(selectedDrawerBusiness.razorpay_subscription_id!, `sub_${selectedDrawerBusiness.id}`)}
+                                    className="p-1 hover:text-indigo-500 text-slate-400"
+                                    title="Copy Subscription ID"
+                                  >
+                                    {copiedKey === `sub_${selectedDrawerBusiness.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="text-slate-400 block font-sans">Plan ID:</span>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="truncate">{selectedDrawerBusiness.razorpay_plan_id || 'plan_Tj1uiAIYxdedEa'}</span>
+                                <button
+                                  onClick={() => handleCopy(selectedDrawerBusiness.razorpay_plan_id || 'plan_Tj1uiAIYxdedEa', `plan_${selectedDrawerBusiness.id}`)}
+                                  className="p-1 hover:text-indigo-500 text-slate-400"
+                                  title="Copy Plan ID"
+                                >
+                                  {copiedKey === `plan_${selectedDrawerBusiness.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 5. Admin Transaction History Table */}
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-xs">
+                        <h5 className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                          <Activity className="h-4 w-4 text-emerald-500" />
+                          <span>Admin Transaction History</span>
+                        </h5>
+
+                        {expandedBusinessDetails?.payments && expandedBusinessDetails.payments.length > 0 ? (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 uppercase font-semibold text-[10px]">
+                                <tr>
+                                  <th className="px-3 py-2">Date</th>
+                                  <th className="px-3 py-2">Amount</th>
+                                  <th className="px-3 py-2">Status</th>
+                                  <th className="px-3 py-2">Payment ID</th>
+                                  <th className="px-3 py-2">Invoice ID</th>
+                                  <th className="px-3 py-2">Method</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {expandedBusinessDetails.payments.map((p: any) => (
+                                  <tr key={p.id}>
+                                    <td className="px-3 py-2">{new Date(p.paid_at || p.created_at).toLocaleString()}</td>
+                                    <td className="px-3 py-2 font-bold text-slate-900 dark:text-white">₹{(p.amount / 100).toFixed(2)}</td>
+                                    <td className="px-3 py-2">
+                                      <Badge className={p.status === 'captured' ? 'bg-emerald-600 text-white text-[9px]' : 'bg-rose-600 text-white text-[9px]'}>
+                                        {p.status}
+                                      </Badge>
+                                    </td>
+                                    <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{p.razorpay_payment_id || '—'}</td>
+                                    <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{p.razorpay_invoice_id || '—'}</td>
+                                    <td className="px-3 py-2 uppercase text-[10px] text-slate-500">{p.payment_method || 'card'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400 py-3 text-center">
+                            No captured payments recorded for this account.
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Sticky Footer */}
+                <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex items-center justify-between sticky bottom-0 z-10">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCloseDrawer}
+                    className="text-xs"
+                  >
+                    Close Drawer
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    onClick={() => handleOpenApplyOffer(selectedDrawerBusiness)}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold gap-1.5 shadow-xs"
+                  >
+                    <Tag className="h-3.5 w-3.5" />
+                    <span>Apply Special Offer</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* APPLY OFFER MODAL (Requirements 27, 28, 44) */}
           {applyOfferModalOpen && offerTargetBusiness && (
@@ -1938,23 +2039,37 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
           {/* Gateway Status Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Razorpay Status</span>
-              <div className="flex items-center gap-2 pt-1">
-                {razorpayConfig?.isConfigured ? (
-                  <Badge className="bg-emerald-600 text-white text-[11px] gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    <span>Configured ({razorpayConfig?.mode?.toUpperCase()})</span>
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Gateway Mode</span>
+                <button
+                  type="button"
+                  onClick={handleToggleRazorpayMode}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border ${
+                    razorpayConfig?.mode === 'live'
+                      ? 'bg-amber-500/10 text-amber-500 border-amber-500/30 hover:bg-amber-500/20'
+                      : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/20'
+                  }`}
+                  title="Click to toggle between Live Production and Test Mode"
+                >
+                  Switch to {razorpayConfig?.mode === 'live' ? 'Test' : 'Live'}
+                </button>
+              </div>
+              <div className="flex items-center gap-2 pt-0.5">
+                {razorpayConfig?.mode === 'live' ? (
+                  <Badge className="bg-emerald-600 text-white text-[11px] gap-1.5 py-1 px-2.5 font-bold shadow-xs">
+                    <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                    <span>LIVE PRODUCTION</span>
                   </Badge>
                 ) : (
-                  <Badge className="bg-amber-600 text-white text-[11px] gap-1">
-                    <AlertTriangle className="h-3 w-3" />
-                    <span>Mock / Test Mode</span>
+                  <Badge className="bg-amber-600 text-white text-[11px] gap-1.5 py-1 px-2.5 font-bold shadow-xs">
+                    <span className="h-2 w-2 rounded-full bg-white" />
+                    <span>TEST / SANDBOX</span>
                   </Badge>
                 )}
               </div>
               <p className="text-[11px] text-slate-500 pt-1">
-                {razorpayConfig?.isConfigured ? 'Live credentials detected' : 'Placeholder keys in effect'}
+                {razorpayConfig?.mode === 'live' ? 'Processing live real customer payments' : 'Sandbox keys in effect for simulation'}
               </p>
             </div>
 
@@ -2240,8 +2355,8 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 </label>
                 <Input
                   type="text"
-                  placeholder="e.g. plan_O1a2b3c4d5e6f7"
-                  value={razorpayPromoPlanId}
+                  placeholder="plan_Tj1uiAIYxdedEa"
+                  value={razorpayPromoPlanId || 'plan_Tj1uiAIYxdedEa'}
                   onChange={(e) => {
                     setRazorpayPromoPlanId(e.target.value);
                     setRazorpayStandardPlanId(e.target.value);
