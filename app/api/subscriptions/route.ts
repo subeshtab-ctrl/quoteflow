@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService, DEFAULT_PLANS } from '@/lib/billing/subscription-service';
 import { razorpayService } from '@/lib/billing/razorpay';
+import { syncCloudAdminConfig } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,9 @@ export async function GET(req: NextRequest) {
     if (!auth) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Ensure latest Razorpay credentials & plan IDs are synced from Supabase
+    await syncCloudAdminConfig();
 
     const [subscription, access, isEligibleForPromo, payments] = await Promise.all([
       store.getBusinessSubscription(auth.orgId),
@@ -60,6 +64,9 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
+
+    // Ensure latest Razorpay credentials & plan IDs are synced before checkout creation
+    await syncCloudAdminConfig();
 
     const body = await req.json().catch(() => ({}));
     const planSlug = body.plan_slug || 'monthly_199';

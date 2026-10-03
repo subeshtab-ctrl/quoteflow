@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
 
     if (action === 'toggle_mode') {
       const targetMode: 'live' | 'test' = mode === 'test' ? 'test' : 'live';
-      const updated = updateRazorpayApiConfig({ mode: targetMode });
+      const updated = await updateRazorpayApiConfig({ mode: targetMode });
       razorpayService.reloadCredentials();
       return NextResponse.json({
         success: true,
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'save_credentials' || action === 'save_plans') {
-      const updated = updateRazorpayApiConfig({
+      const updated = await updateRazorpayApiConfig({
         keyId: key_id,
         keySecret: key_secret,
         promoPlanId: promo_plan_id || 'plan_Tj1uiAIYxdedEa',
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 
     if (action === 'test_connection') {
       if (key_id || key_secret || promo_plan_id !== undefined || standard_plan_id !== undefined) {
-        updateRazorpayApiConfig({
+        await updateRazorpayApiConfig({
           keyId: key_id,
           keySecret: key_secret,
           promoPlanId: promo_plan_id,
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
         (result.promoPlanDetails?.isAutoDetected && !cfg.razorpayPlanIdPromo99) ||
         (result.standardPlanDetails?.isAutoDetected && !cfg.razorpayPlanIdStandard199)
       ) {
-        updateRazorpayApiConfig({
+        await updateRazorpayApiConfig({
           promoPlanId: result.promoPlanDetails?.id,
           standardPlanId: result.standardPlanDetails?.id,
         });
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
 
     if (action === 'auto_create_plans') {
       if (key_id || key_secret) {
-        updateRazorpayApiConfig({
+        await updateRazorpayApiConfig({
           keyId: key_id,
           keySecret: key_secret,
         });
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
       });
 
       // Update config with the newly created plan ID
-      const updated = updateRazorpayApiConfig({
+      const updated = await updateRazorpayApiConfig({
         promoPlanId: proPlan.id,
         standardPlanId: proPlan.id,
       });
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'auto_link_plans') {
-      const updated = updateRazorpayApiConfig({
+      const updated = await updateRazorpayApiConfig({
         promoPlanId: promo_plan_id,
         standardPlanId: standard_plan_id,
       });

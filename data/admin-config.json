@@ -3,10 +3,10 @@
   "passwordHash": "c16b5be76435e38be1d791a1eaae6423ca53d491abc8c40a34b002fbbe8adba4fb8ba6a69e2fed5bbc55a229ae8204dad0a6ce5f759bef47e70801b1b070fba7",
   "salt": "a2a0de47b382a604361bd6522550b384",
   "updatedAt": "2026-10-03T10:43:03.040Z",
-  "razorpayKeyId": null,
-  "razorpayKeySecret": null,
+  "razorpayKeyId": "rzp_test_Tj1rwkFR1rYnbz",
+  "razorpayKeySecret": "mypvV0zCt7tVPIzxRov72AUG",
   "razorpayPlanIdPromo99": "plan_Tj1uiAIYxdedEa",
   "razorpayPlanIdStandard199": "plan_Tj1vAzUPVDv51g",
-  "razorpayMode": "live",
+  "razorpayMode": "test",
   "staffMembers": []
 }

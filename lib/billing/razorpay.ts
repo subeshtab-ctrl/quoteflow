@@ -79,14 +79,14 @@ export class RazorpayService {
     this.keySecret = cfgKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
     this.webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 
-    if (cfgMode) {
-      this.mode = cfgMode.toLowerCase();
-    } else if (this.keyId.startsWith('rzp_live_')) {
+    if (this.keyId.startsWith('rzp_live_')) {
       this.mode = 'live';
     } else if (this.keyId.startsWith('rzp_test_')) {
-      this.mode = (process.env.RAZORPAY_MODE || 'live').toLowerCase() === 'test' ? 'test' : 'live';
+      this.mode = 'test';
+    } else if (cfgMode) {
+      this.mode = cfgMode.toLowerCase();
     } else {
-      this.mode = 'live';
+      this.mode = (process.env.RAZORPAY_MODE || 'live').toLowerCase();
     }
   }
 

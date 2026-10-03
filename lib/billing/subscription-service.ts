@@ -16,7 +16,7 @@ import {
   SubscriptionStatus,
 } from '@/types/database';
 import { razorpayService } from './razorpay';
-import { getDeveloperAdminConfig, updateRazorpayPlansConfig } from './dev-admin-auth';
+import { getDeveloperAdminConfig, updateRazorpayPlansConfig, syncCloudAdminConfig } from './dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 import { sendEmail } from '@/lib/email/service';
 
@@ -380,6 +380,7 @@ export class SubscriptionService {
     const isPromo = false;
 
     // 1. Resolve Razorpay Plan ID from Developer Admin config, environment, or target plan
+    await syncCloudAdminConfig();
     const cfg = getDeveloperAdminConfig();
     let rzpPlanId =
       cfg.razorpayPlanIdPromo99 ||
@@ -1028,6 +1029,7 @@ export class SubscriptionService {
     cancelAtPeriodEnd?: boolean;
     cancelledByUserId?: string;
   }): Promise<BusinessSubscription> {
+    await syncCloudAdminConfig();
     const sub = await store.getBusinessSubscription(params.businessId);
     if (!sub) throw new Error('No active subscription found for this business.');
 

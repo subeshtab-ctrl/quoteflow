@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { razorpayService } from '@/lib/billing/razorpay';
 import { DEFAULT_PLANS } from '@/lib/billing/subscription-service';
+import { syncCloudAdminConfig } from '@/lib/billing/dev-admin-auth';
 
 export async function POST(req: NextRequest) {
   try {
+    // Ensure latest Razorpay credentials are synced from Supabase cloud store
+    await syncCloudAdminConfig();
+
     const auth = await getAuthenticatedUserContext();
     if (!auth) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
