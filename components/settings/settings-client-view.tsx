@@ -265,6 +265,13 @@ export function SettingsClientView({
   useEffect(() => {
     if (org.brand_color) {
       document.documentElement.style.setProperty('--brand-color', org.brand_color);
+      const root = document.getElementById('quoteflow-dashboard-root');
+      if (root) {
+        root.style.setProperty('--brand-color', org.brand_color);
+      }
+      try {
+        localStorage.setItem('quoteflow_brand_color', org.brand_color);
+      } catch {}
     }
   }, [org.brand_color]);
 
@@ -620,6 +627,16 @@ export function SettingsClientView({
       if (!res.ok) throw new Error(data.error || 'Failed to update settings');
 
       setOrg(data.organization);
+      if (data.organization?.brand_color) {
+        document.documentElement.style.setProperty('--brand-color', data.organization.brand_color);
+        const root = document.getElementById('quoteflow-dashboard-root');
+        if (root) {
+          root.style.setProperty('--brand-color', data.organization.brand_color);
+        }
+        try {
+          localStorage.setItem('quoteflow_brand_color', data.organization.brand_color);
+        } catch {}
+      }
       setSuccessMsg('Company settings successfully updated.');
       router.refresh();
       setTimeout(() => setSuccessMsg(null), 3500);

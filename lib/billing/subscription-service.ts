@@ -866,6 +866,96 @@ export class SubscriptionService {
   }
 
   /**
+   * Manually activate QuoteFlow Pro plan for a business.
+   * Enables developer admin to activate QuoteFlow Pro ₹99 when Razorpay had network issues,
+   * or payment was credited directly to developer Razorpay account but automated webhook failed.
+   */
+  public async manuallyActivateProPlan(params: {
+    businessId: string;
+    paymentReference?: string;
+    reason?: string;
+    durationDays?: number;
+    adminUserId?: string;
+    adminEmail?: string;
+  }): Promise<{ success: boolean; message: string; sub: BusinessSubscription }> {
+    let sub = await store.getBusinessSubscription(params.businessId);
+    if (!sub) {
+      sub = await this.startFreeTrial(params.businessId);
+    }
+
+    const now = new Date();
+    const durationDays = params.durationDays && params.durationDays > 0 ? params.durationDays : 30;
+    const periodEnd = new Date(now.getTime() + durationDays * 86400000);
+    const payRef = params.paymentReference?.trim() || `pay_manual_${Date.now().toString(36)}`;
+
+    sub.plan = DEFAULT_PLANS.PRO_99;
+    sub.plan_id = DEFAULT_PLANS.PRO_99.id;
+    sub.amount = 9900;
+    sub.currency = 'INR';
+    sub.status = 'active';
+    sub.is_trial_prepaid = false;
+    sub.plan_start_mode = 'immediate';
+    sub.current_period_start = now.toISOString();
+    sub.current_period_end = periodEnd.toISOString();
+    sub.next_charge_at = periodEnd.toISOString();
+    sub.last_payment_id = payRef;
+    sub.last_payment_at = now.toISOString();
+    (sub as any).payment_provider = 'razorpay_manual_activation';
+    sub.updated_at = now.toISOString();
+
+    await store.saveBusinessSubscription(sub);
+
+    // Save payment record
+    const payment: SubscriptionPayment = {
+      id: crypto.randomUUID(),
+      business_id: params.businessId,
+      subscription_id: sub.id,
+      razorpay_payment_id: payRef,
+      razorpay_subscription_id: sub.razorpay_subscription_id || null,
+      razorpay_invoice_id: `inv_manual_${Date.now().toString(36)}`,
+      amount: 9900,
+      currency: 'INR',
+      status: 'captured',
+      payment_method: 'manual_verification',
+      failure_reason: null,
+      paid_at: now.toISOString(),
+      created_at: now.toISOString(),
+    };
+    await store.saveSubscriptionPayment(payment);
+
+    // Audit log
+    await store.logAdminAudit({
+      id: crypto.randomUUID(),
+      admin_user_id: params.adminUserId || 'developer-admin',
+      admin_email: params.adminEmail || 'developer-admin@quoteflow.in',
+      action: 'MANUAL_ACTIVATE_PRO',
+      target_type: 'subscription',
+      target_id: sub.id,
+      metadata: {
+        business_id: params.businessId,
+        payment_reference: payRef,
+        reason: params.reason || 'Manual activation via Developer Dashboard (Razorpay network issue / manual verification)',
+        duration_days: durationDays,
+      },
+      created_at: now.toISOString(),
+    });
+
+    // Notify business
+    await store.addNotification({
+      organizationId: params.businessId,
+      title: 'QuoteFlow Pro Activated!',
+      message: `Your QuoteFlow Pro subscription (₹99/month) has been activated successfully by support engineering. Valid until ${periodEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+      type: 'APPROVED',
+    });
+
+    return {
+      success: true,
+      message: `QuoteFlow Pro successfully activated for business until ${periodEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+      sub,
+    };
+  }
+
+  /**
    * Process Recurring Payment Failure with Grace Period
    */
   public async handlePaymentFailure(params: {

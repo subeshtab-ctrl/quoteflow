@@ -15,6 +15,17 @@ const SECRET =
   process.env.RAZORPAY_KEY_SECRET ||
   'quoteflow_developer_admin_secret_2026';
 
+export interface SupportStaffMember {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: 'SUPPORT_ENGINEER' | 'BILLING_SPECIALIST' | 'CUSTOMER_SUCCESS';
+  status: 'active' | 'invited' | 'inactive';
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DeveloperAdminConfig {
   email: string;
   passwordHash: string | null;
@@ -25,6 +36,7 @@ export interface DeveloperAdminConfig {
   razorpayPlanIdPromo99?: string | null;
   razorpayPlanIdStandard199?: string | null;
   razorpayMode?: 'live' | 'test';
+  staffMembers?: SupportStaffMember[];
 }
 
 interface OtpRecord {
@@ -115,6 +127,7 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
           razorpayPlanIdPromo99: parsed.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
           razorpayPlanIdStandard199: parsed.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
           razorpayMode: parsed.razorpayMode || 'live',
+          staffMembers: Array.isArray(parsed.staffMembers) ? parsed.staffMembers : [],
         };
         globalThis.__devAdminConfig__ = cfg;
         return cfg;
@@ -135,6 +148,7 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
     razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
     razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
     razorpayMode: 'live',
+    staffMembers: [],
   };
   globalThis.__devAdminConfig__ = defaultCfg;
   return defaultCfg;
@@ -453,11 +467,119 @@ export async function syncCloudAdminConfig(): Promise<DeveloperAdminConfig> {
         if (parsed.razorpayPlanIdPromo99) cfg.razorpayPlanIdPromo99 = parsed.razorpayPlanIdPromo99;
         if (parsed.razorpayPlanIdStandard199) cfg.razorpayPlanIdStandard199 = parsed.razorpayPlanIdStandard199;
         if (parsed.razorpayMode) cfg.razorpayMode = parsed.razorpayMode;
+        if (Array.isArray(parsed.staffMembers)) cfg.staffMembers = parsed.staffMembers;
         cfg.updatedAt = parsed.updatedAt || cfg.updatedAt;
         globalThis.__devAdminConfig__ = cfg;
       }
     }
   } catch {}
   return cfg;
+}
+
+/**
+ * Get all support staff members
+ */
+export function getSupportStaffMembers(): SupportStaffMember[] {
+  const cfg = getDeveloperAdminConfig();
+  return cfg.staffMembers || [];
+}
+
+/**
+ * Add a new support staff member
+ */
+export function addSupportStaffMember(member: {
+  name: string;
+  email: string;
+  phone?: string;
+  role?: SupportStaffMember['role'];
+}): SupportStaffMember {
+  const cfg = getDeveloperAdminConfig();
+  const staff = cfg.staffMembers || [];
+
+  const normalizedEmail = member.email.trim().toLowerCase();
+  const existing = staff.find((s) => s.email.toLowerCase() === normalizedEmail);
+  if (existing) {
+    throw new Error('A staff account with this email address already exists.');
+  }
+
+  const now = new Date().toISOString();
+  const newStaff: SupportStaffMember = {
+    id: `staff_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
+    name: member.name.trim(),
+    email: normalizedEmail,
+    phone: member.phone?.trim() || undefined,
+    role: member.role || 'SUPPORT_ENGINEER',
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  };
+
+  staff.push(newStaff);
+  cfg.staffMembers = staff;
+  cfg.updatedAt = now;
+  globalThis.__devAdminConfig__ = cfg;
+
+  try {
+    const p = getConfigPath();
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not write admin config to disk:', err);
+  }
+
+  // Cloud Persistence via Supabase notifications table
+  try {
+    const { createAdminClient } = require('@/lib/supabase/client');
+    const admin = createAdminClient();
+    if (admin) {
+      admin.from('notifications').upsert({
+        id: '00000000-0000-0000-0000-000000000099',
+        organization_id: '765a894f-c3c4-4fe4-a8e2-7b240eda570a',
+        title: 'DEVELOPER_ADMIN_CONFIG',
+        message: JSON.stringify(cfg),
+        type: 'ADMIN_CONFIG',
+        is_read: true,
+      }).then(() => {}).catch(() => {});
+    }
+  } catch {}
+
+  return newStaff;
+}
+
+/**
+ * Remove a support staff member
+ */
+export function removeSupportStaffMember(id: string): boolean {
+  const cfg = getDeveloperAdminConfig();
+  const staff = cfg.staffMembers || [];
+  const idx = staff.findIndex((s) => s.id === id);
+  if (idx === -1) return false;
+
+  staff.splice(idx, 1);
+  cfg.staffMembers = staff;
+  cfg.updatedAt = new Date().toISOString();
+  globalThis.__devAdminConfig__ = cfg;
+
+  try {
+    const p = getConfigPath();
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8');
+  } catch {}
+
+  // Cloud Persistence
+  try {
+    const { createAdminClient } = require('@/lib/supabase/client');
+    const admin = createAdminClient();
+    if (admin) {
+      admin.from('notifications').upsert({
+        id: '00000000-0000-0000-0000-000000000099',
+        organization_id: '765a894f-c3c4-4fe4-a8e2-7b240eda570a',
+        title: 'DEVELOPER_ADMIN_CONFIG',
+        message: JSON.stringify(cfg),
+        type: 'ADMIN_CONFIG',
+        is_read: true,
+      }).then(() => {}).catch(() => {});
+    }
+  } catch {}
+
+  return true;
 }
 

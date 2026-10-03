@@ -25,6 +25,7 @@ interface SidebarProps {
   mode?: string;
   userRole?: string;
   className?: string;
+  initialSubStatus?: 'pro' | 'trial';
 }
 
 export function DashboardSidebar({
@@ -33,6 +34,7 @@ export function DashboardSidebar({
   mode = 'live',
   userRole = 'STAFF',
   className,
+  initialSubStatus,
 }: SidebarProps) {
   const pathname = usePathname();
   const [orgData, setOrgData] = useState<{ name: string; logoUrl?: string | null; mode?: string }>({
@@ -40,6 +42,7 @@ export function DashboardSidebar({
     logoUrl: logoUrl || undefined,
     mode,
   });
+  const [subStatus, setSubStatus] = useState<'pro' | 'trial'>(initialSubStatus || 'trial');
 
   useEffect(() => {
     fetch('/api/settings')
@@ -54,6 +57,22 @@ export function DashboardSidebar({
         }
       })
       .catch(() => {});
+
+    const loadSub = () => {
+      fetch('/api/subscriptions', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.subscription) {
+            const isPro = data.subscription.status === 'active' || Boolean(data.subscription.is_trial_prepaid);
+            setSubStatus(isPro ? 'pro' : 'trial');
+          }
+        })
+        .catch(() => {});
+    };
+
+    loadSub();
+    window.addEventListener('focus', loadSub);
+    return () => window.removeEventListener('focus', loadSub);
   }, [organizationName, logoUrl]);
 
   const logoConfig = parseLogoUrl(orgData.logoUrl);
@@ -118,6 +137,25 @@ export function DashboardSidebar({
               <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate leading-none">
                 Workspace
               </p>
+              {subStatus === 'pro' ? (
+                <Link
+                  href="/billing"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-gradient-to-b from-[#28c840] to-[#1da432] text-white shadow-xs border border-[#1b932c]/50 hover:brightness-110 active:scale-95 transition-all select-none cursor-pointer"
+                  title="Subscribed to QuoteFlow Pro • Click to view billing"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  <span>PRO</span>
+                </Link>
+              ) : (
+                <Link
+                  href="/billing"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-gradient-to-b from-[#d98b18] to-[#9c600b] text-white shadow-xs border border-[#7d4c06]/50 hover:brightness-110 active:scale-95 transition-all select-none cursor-pointer"
+                  title="Trial Active • Click to upgrade to QuoteFlow Pro"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-100" />
+                  <span>TRIAL</span>
+                </Link>
+              )}
               {orgData.mode === 'test' && (
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
                   TEST

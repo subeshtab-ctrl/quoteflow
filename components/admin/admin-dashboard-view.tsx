@@ -58,15 +58,22 @@ import {
   CheckCheck,
   MessageCircle,
   ExternalLink,
+  UserPlus,
+  Zap,
+  BadgePercent,
+  Gift,
 } from 'lucide-react';
+import { SupportChatFloatingWidget } from '@/components/support/support-chat-floating-widget';
 
 export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark' } = {}) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'razorpay' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'staff' | 'razorpay' | 'audit'>('overview');
   const [isLoading, setIsLoading] = useState(true);
 
   // Razorpay Configuration State
   const [razorpayConfig, setRazorpayConfig] = useState<any>(null);
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
+  const [showKeyId, setShowKeyId] = useState(false);
+  const [showOverviewKeyId, setShowOverviewKeyId] = useState(false);
   const [razorpayKeySecret, setRazorpayKeySecret] = useState('');
   const [showKeySecret, setShowKeySecret] = useState(false);
   const [razorpayPromoPlanId, setRazorpayPromoPlanId] = useState('');
@@ -77,6 +84,24 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   const [isLinkingPlans, setIsLinkingPlans] = useState(false);
   const [razorpayTestResult, setRazorpayTestResult] = useState<any>(null);
   const [razorpayFeedback, setRazorpayFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Manual Pro Plan Activation State
+  const [manualProModalOpen, setManualProModalOpen] = useState(false);
+  const [manualProTargetBusiness, setManualProTargetBusiness] = useState<BusinessSubscription | null>(null);
+  const [manualProPaymentRef, setManualProPaymentRef] = useState('');
+  const [manualProReason, setManualProReason] = useState('Payment verified, manual activation due to Razorpay network issue');
+  const [manualProDurationDays, setManualProDurationDays] = useState(30);
+  const [isActivatingManualPro, setIsActivatingManualPro] = useState(false);
+
+  // Support Staff Accounts State
+  const [staffMembers, setStaffMembers] = useState<any[]>([]);
+  const [isLoadingStaff, setIsLoadingStaff] = useState(false);
+  const [addStaffModalOpen, setAddStaffModalOpen] = useState(false);
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState<'SUPPORT_ENGINEER' | 'BILLING_SPECIALIST' | 'CUSTOMER_SUCCESS'>('SUPPORT_ENGINEER');
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
 
   // Stats & MRR
   const [stats, setStats] = useState<any>(null);
@@ -506,6 +531,115 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
     });
   };
 
+  const fetchStaffMembers = async () => {
+    try {
+      setIsLoadingStaff(true);
+      const res = await fetch('/api/admin/staff');
+      if (res.ok) {
+        const json = await res.json();
+        setStaffMembers(json.staff || []);
+      }
+    } catch (err) {
+      console.error('Error fetching staff members:', err);
+    } finally {
+      setIsLoadingStaff(false);
+    }
+  };
+
+  const handleAddStaffSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStaffName.trim() || !newStaffEmail.trim()) {
+      alert('Staff name and email are required.');
+      return;
+    }
+    try {
+      setIsSavingStaff(true);
+      const res = await fetch('/api/admin/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newStaffName.trim(),
+          email: newStaffEmail.trim(),
+          phone: newStaffPhone.trim() || undefined,
+          role: newStaffRole,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setAddStaffModalOpen(false);
+        setNewStaffName('');
+        setNewStaffEmail('');
+        setNewStaffPhone('');
+        await fetchStaffMembers();
+        alert('Support staff account added successfully!');
+      } else {
+        alert(json.error || 'Failed to add staff member');
+      }
+    } catch {
+      alert('Error adding staff member');
+    } finally {
+      setIsSavingStaff(false);
+    }
+  };
+
+  const handleRemoveStaff = async (id: string) => {
+    if (!confirm('Are you sure you want to remove this support staff member?')) return;
+    try {
+      const res = await fetch(`/api/admin/staff?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        await fetchStaffMembers();
+      } else {
+        const j = await res.json();
+        alert(j.error || 'Failed to remove staff member');
+      }
+    } catch {
+      alert('Error removing staff member');
+    }
+  };
+
+  const handleOpenManualActivatePro = (sub: BusinessSubscription) => {
+    setManualProTargetBusiness(sub);
+    setManualProPaymentRef(`pay_manual_${Date.now().toString(36)}`);
+    setManualProReason('Payment verified in Razorpay, manual activation due to network issue');
+    setManualProDurationDays(30);
+    setManualProModalOpen(true);
+  };
+
+  const handleManualActivateProSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualProTargetBusiness) return;
+    try {
+      setIsActivatingManualPro(true);
+      const res = await fetch(`/api/admin/subscribers/${manualProTargetBusiness.business_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'manual_activate_pro',
+          paymentReference: manualProPaymentRef.trim(),
+          reason: manualProReason.trim(),
+          durationDays: manualProDurationDays,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setManualProModalOpen(false);
+        alert(json.message || 'QuoteFlow Pro activated successfully!');
+        await fetchSubscribers();
+        if (selectedDrawerBusiness?.business_id === manualProTargetBusiness.business_id) {
+          handleOpenDrawer(manualProTargetBusiness);
+        }
+      } else {
+        alert(json.error || 'Failed to activate QuoteFlow Pro');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error activating Pro plan');
+    } finally {
+      setIsActivatingManualPro(false);
+    }
+  };
+
   const loadAll = async () => {
     setIsLoading(true);
     await Promise.all([
@@ -513,6 +647,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
       fetchSubscribers(),
       fetchPromotions(),
       fetchTickets(),
+      fetchStaffMembers(),
       fetchAuditLogs(),
       fetchRazorpayConfig(),
     ]);
@@ -687,6 +822,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
           { id: 'subscribers', label: `Subscribers (${subscriberTotal})`, icon: Users },
           { id: 'offers', label: 'Offers & Promotions', icon: Tag },
           { id: 'tickets', label: `Support Tickets (${tickets.length})${tickets.filter((t) => t.status === 'unread' || t.status === 'open').length > 0 ? ` • ${tickets.filter((t) => t.status === 'unread' || t.status === 'open').length} New` : ''}`, icon: LifeBuoy },
+          { id: 'staff', label: `Support Staff (${staffMembers.length})`, icon: UserCheck },
           { id: 'razorpay', label: 'Razorpay & Plans', icon: CreditCard },
           { id: 'audit', label: 'Admin Audit Log', icon: ShieldCheck },
         ].map((tab) => {
@@ -840,18 +976,6 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 placeholder="Search by business name, email, phone, country, or ID..."
                 className="pl-9 text-xs"
               />
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleOpenCleanupModal}
-                className="text-xs gap-1.5 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span>Clean Test Data</span>
-              </Button>
             </div>
           </div>
 
@@ -1174,6 +1298,15 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                               </strong>
                             </div>
                             <div><span className="text-slate-400">Interval:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">Monthly (₹99)</strong></div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => handleOpenManualActivatePro(selectedDrawerBusiness)}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold gap-1.5 mt-2 h-7.5 shadow-xs"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Activate QuoteFlow Pro (Manual)</span>
+                            </Button>
                           </div>
                         </div>
 
@@ -1282,7 +1415,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 </div>
 
                 {/* Sticky Footer */}
-                <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex items-center justify-between sticky bottom-0 z-10">
+                <div className="px-6 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex items-center justify-between sticky bottom-0 z-10 gap-2 flex-wrap">
                   <Button
                     size="sm"
                     variant="outline"
@@ -1292,44 +1425,74 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                     Close Drawer
                   </Button>
 
-                  <Button
-                    size="sm"
-                    onClick={() => handleOpenApplyOffer(selectedDrawerBusiness)}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold gap-1.5 shadow-xs"
-                  >
-                    <Tag className="h-3.5 w-3.5" />
-                    <span>Apply Special Offer</span>
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenManualActivatePro(selectedDrawerBusiness)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold gap-1.5 shadow-xs"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Activate Pro Plan (Manual)</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenApplyOffer(selectedDrawerBusiness)}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold gap-1.5 shadow-xs"
+                    >
+                      <Tag className="h-3.5 w-3.5" />
+                      <span>Apply Special Offer</span>
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* APPLY OFFER MODAL (Requirements 27, 28, 44) */}
+          {/* APPLY OFFER MODAL (Redesigned with Mac UI & Segmented Controls) */}
           {applyOfferModalOpen && offerTargetBusiness && (
             <Modal
               isOpen={applyOfferModalOpen}
               onClose={() => setApplyOfferModalOpen(false)}
-              title={`Apply Offer to ${offerTargetBusiness.organization?.name || 'Business'}`}
+              title={`Apply Promotion • ${offerTargetBusiness.organization?.name || 'Business'}`}
             >
               <form onSubmit={handleApplyOfferSubmit} className="space-y-4 p-4 text-xs">
+                {/* Segmented Offer Type Selector */}
                 <div>
-                  <label className="font-semibold block mb-1">Offer Type</label>
-                  <select
-                    value={offerType}
-                    onChange={(e) => setOfferType(e.target.value as any)}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs font-medium"
-                  >
-                    <option value="percentage">Percentage Discount (e.g. 20% off)</option>
-                    <option value="fixed">Fixed Amount Discount (e.g. ₹30 off)</option>
-                    <option value="free_months">Free Months (100% free billing)</option>
-                    <option value="special_rate">Special Monthly Rate (e.g. ₹49/month)</option>
-                  </select>
+                  <label className="font-semibold block mb-1.5 text-slate-700 dark:text-slate-300">
+                    Offer Type
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60">
+                    {[
+                      { id: 'percentage', label: 'Percentage', icon: Percent, desc: '% Off' },
+                      { id: 'fixed', label: 'Fixed Off', icon: BadgePercent, desc: '₹ Off' },
+                      { id: 'free_months', label: 'Free Months', icon: Gift, desc: '100% Free' },
+                      { id: 'special_rate', label: 'Special Rate', icon: Zap, desc: 'Flat Rate' },
+                    ].map((t) => {
+                      const Icon = t.icon;
+                      const isSel = offerType === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setOfferType(t.id as any)}
+                          className={`flex flex-col items-center justify-center p-2 rounded-lg text-center transition-all ${
+                            isSel
+                              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-xs border border-slate-200 dark:border-slate-700'
+                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4 mb-1" />
+                          <span className="text-[11px] leading-tight">{t.label}</span>
+                          <span className="text-[9px] text-slate-400 font-normal">{t.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-semibold block mb-1">
+                    <label className="font-semibold block mb-1 text-slate-700 dark:text-slate-300">
                       {offerType === 'percentage'
                         ? 'Discount Percentage (%)'
                         : offerType === 'fixed'
@@ -1338,68 +1501,104 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                         ? 'Number of Free Months'
                         : 'Special Monthly Rate (₹)'}
                     </label>
-                    <Input
-                      type="number"
-                      value={offerValue}
-                      onChange={(e) => setOfferValue(Number(e.target.value))}
-                      required
-                      min={1}
-                    />
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        value={offerValue}
+                        onChange={(e) => setOfferValue(Number(e.target.value))}
+                        required
+                        min={1}
+                        className="font-mono text-xs pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
+                        {offerType === 'percentage' ? '%' : offerType === 'free_months' ? 'Mo' : '₹'}
+                      </span>
+                    </div>
                   </div>
 
                   <div>
-                    <label className="font-semibold block mb-1">Duration (Billing Cycles / Months)</label>
-                    <Input
-                      type="number"
-                      value={offerDuration}
-                      onChange={(e) => setOfferDuration(Number(e.target.value))}
-                      required
-                      min={1}
-                      max={12}
-                    />
+                    <label className="font-semibold block mb-1 text-slate-700 dark:text-slate-300">
+                      Duration (Billing Cycles)
+                    </label>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 6, 12].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setOfferDuration(m)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                            offerDuration === m
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          {m}m
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
                 <div>
-                  <label className="font-semibold block mb-1">Internal Reason / Approval Note</label>
+                  <label className="font-semibold block mb-1 text-slate-700 dark:text-slate-300">
+                    Reason / Approval Note
+                  </label>
                   <Input
                     value={offerReason}
                     onChange={(e) => setOfferReason(e.target.value)}
                     required
                     placeholder="e.g. Founder promotional incentive or partner credit"
+                    className="text-xs"
                   />
                 </div>
 
-                {/* Live Preview Box */}
-                <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
-                  <span className="font-bold text-indigo-900 dark:text-indigo-200 block text-xs">
-                    Live Calculation Preview
-                  </span>
-                  <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5">
-                    <div>Original Rate: <span className="line-through text-slate-400">₹99.00 / month</span></div>
-                    <div>
-                      Adjusted Rate:{' '}
-                      <strong className="text-emerald-600 dark:text-emerald-400 font-bold text-sm">
-                        {offerType === 'percentage'
-                          ? `₹${Math.round(99 * (1 - Math.min(100, offerValue) / 100))}.00 / month`
-                          : offerType === 'fixed'
-                          ? `₹${Math.max(0, 99 - offerValue)}.00 / month`
-                          : offerType === 'free_months'
-                          ? '₹0.00 / month'
-                          : `₹${offerValue}.00 / month`}
-                      </strong>
+                {/* Live Mac Preview Card */}
+                {(() => {
+                  const adjustedRate =
+                    offerType === 'percentage'
+                      ? Math.round(99 * (1 - Math.min(100, offerValue) / 100))
+                      : offerType === 'fixed'
+                      ? Math.max(0, 99 - offerValue)
+                      : offerType === 'free_months'
+                      ? 0
+                      : offerValue;
+                  const monthlySavings = Math.max(0, 99 - adjustedRate);
+                  const totalSavings = monthlySavings * offerDuration;
+
+                  return (
+                    <div className="p-3.5 rounded-xl bg-gradient-to-br from-indigo-50/80 to-purple-50/80 dark:from-indigo-950/40 dark:to-purple-950/30 border border-indigo-200 dark:border-indigo-800/60 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                          <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
+                          <span>Live Calculation Preview</span>
+                        </span>
+                        <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                          Save ₹{totalSavings} Total
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800">
+                          <span className="text-[10px] text-slate-400 block">Original</span>
+                          <span className="text-xs line-through text-slate-500 font-bold">₹99/mo</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30">
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block font-semibold">New Price</span>
+                          <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">₹{adjustedRate}/mo</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800">
+                          <span className="text-[10px] text-slate-400 block">Duration</span>
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{offerDuration} month(s)</span>
+                        </div>
+                      </div>
                     </div>
-                    <div>Duration: <strong>{offerDuration} billing cycle(s)</strong></div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Safety Guarantee */}
-                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 text-[10px] text-slate-500 space-y-0.5">
-                  <p className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                    <span>Safety Check: Future Cycles Only</span>
-                  </p>
-                  <p>This offer applies strictly to upcoming renewals and will never alter past captured payments. All adjustments are logged to the Admin Audit Log.</p>
+                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 text-[10px] text-slate-500 flex items-start gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <span>Future Billing Cycles Only: Past captured payments are never modified. All adjustments are logged to the Admin Audit Log.</span>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
@@ -1419,59 +1618,207 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             </Modal>
           )}
 
-          {/* CLEANUP TEST DATA CONFIRMATION MODAL (Requirement 31) */}
-          {cleanupModalOpen && (
+          {/* MANUAL ACTIVATE PRO MODAL */}
+          {manualProModalOpen && manualProTargetBusiness && (
             <Modal
-              isOpen={cleanupModalOpen}
-              onClose={() => setCleanupModalOpen(false)}
-              title="Clean Synthetic & Test Accounts"
+              isOpen={manualProModalOpen}
+              onClose={() => setManualProModalOpen(false)}
+              title="Manual QuoteFlow Pro Activation"
             >
-              <div className="space-y-4 p-4 text-xs">
-                {isLoadingCleanupInfo ? (
-                  <div className="py-6 flex items-center justify-center gap-2 text-slate-400">
-                    <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-                    <span>Scanning for test accounts...</span>
+              <form onSubmit={handleManualActivateProSubmit} className="space-y-4 p-4 text-xs">
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 flex items-start gap-2.5">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 text-[11px] leading-relaxed">
+                    <p className="font-bold text-xs">Instant Pro Plan Activation (₹99/Month)</p>
+                    <p>
+                      Use this option when payment was credited in your Razorpay/bank account but the automated webhook failed, or when assisting a subscriber during network downtime.
+                    </p>
                   </div>
-                ) : (
-                  <>
-                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 space-y-1">
-                      <p className="font-bold flex items-center gap-1.5 text-xs">
-                        <AlertTriangle className="h-4 w-4" />
-                        <span>Ready to clean {cleanupAccounts.length} test accounts</span>
-                      </p>
-                      <p className="text-[11px] leading-relaxed">
-                        This action will soft-delete synthetic demo and test accounts created during quality assurance.
-                      </p>
-                    </div>
+                </div>
 
-                    {/* Strict Live Account Protection Notice */}
-                    <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 space-y-1">
-                      <p className="font-bold flex items-center gap-1.5 text-xs">
-                        <ShieldCheck className="h-4 w-4" />
-                        <span>Real Payment Accounts Strictly Protected</span>
-                      </p>
-                      <p className="text-[11px] leading-relaxed">
-                        Real customer accounts like <strong>Pozone</strong> and any account with verified live payment records are permanently locked and will NEVER be deleted.
-                      </p>
-                    </div>
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Target Business</span>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">
+                    {manualProTargetBusiness.organization?.name || manualProTargetBusiness.business_id}
+                  </p>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    ID: {manualProTargetBusiness.business_id}
+                  </p>
+                </div>
 
-                    <div className="flex justify-end gap-2 pt-2">
-                      <Button type="button" variant="outline" size="sm" onClick={() => setCleanupModalOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Payment Reference / Razorpay Pay ID / UPI UTR
+                  </label>
+                  <Input
+                    type="text"
+                    value={manualProPaymentRef}
+                    onChange={(e) => setManualProPaymentRef(e.target.value)}
+                    required
+                    placeholder="e.g. pay_ROXWv9m0b8cR6p or UPI-123456789012"
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Found in your Razorpay Dashboard &rarr; Transactions or bank statement.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Plan Duration (Days)
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { days: 30, label: '30 Days (1 Mo)' },
+                      { days: 60, label: '60 Days (2 Mo)' },
+                      { days: 90, label: '90 Days (3 Mo)' },
+                      { days: 365, label: '365 Days (1 Yr)' },
+                    ].map((d) => (
+                      <button
+                        key={d.days}
                         type="button"
-                        size="sm"
-                        disabled={isCleaningUp || cleanupAccounts.length === 0}
-                        onClick={handleConfirmCleanup}
-                        className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                        onClick={() => setManualProDurationDays(d.days)}
+                        className={`p-2 rounded-lg text-xs font-semibold border transition-all text-center ${
+                          manualProDurationDays === d.days
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                        }`}
                       >
-                        {isCleaningUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Delete ${cleanupAccounts.length} Test Accounts`}
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </div>
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Reason / Verification Note
+                  </label>
+                  <Input
+                    type="text"
+                    value={manualProReason}
+                    onChange={(e) => setManualProReason(e.target.value)}
+                    required
+                    placeholder="e.g. Razorpay webhook timeout; verified payment credited"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setManualProModalOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isActivatingManualPro}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
+                  >
+                    {isActivatingManualPro ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>Confirm &amp; Activate Pro</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          )}
+
+          {/* ADD SUPPORT STAFF MODAL */}
+          {addStaffModalOpen && (
+            <Modal
+              isOpen={addStaffModalOpen}
+              onClose={() => setAddStaffModalOpen(false)}
+              title="Add Support Staff Account"
+            >
+              <form onSubmit={handleAddStaffSubmit} className="space-y-4 p-4 text-xs">
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Staff Member Full Name
+                  </label>
+                  <Input
+                    type="text"
+                    value={newStaffName}
+                    onChange={(e) => setNewStaffName(e.target.value)}
+                    required
+                    placeholder="e.g. Rahul Sharma"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Staff Email Address
+                  </label>
+                  <Input
+                    type="email"
+                    value={newStaffEmail}
+                    onChange={(e) => setNewStaffEmail(e.target.value)}
+                    required
+                    placeholder="e.g. rahul.support@quoteflow.in"
+                    className="text-xs"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    This email will be authorized to access developer support tickets.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Phone / WhatsApp Number (Optional)
+                  </label>
+                  <Input
+                    type="tel"
+                    value={newStaffPhone}
+                    onChange={(e) => setNewStaffPhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-semibold block text-slate-700 dark:text-slate-300">
+                    Role &amp; Responsibilities
+                  </label>
+                  <select
+                    value={newStaffRole}
+                    onChange={(e) => setNewStaffRole(e.target.value as any)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs font-medium"
+                  >
+                    <option value="SUPPORT_ENGINEER">Support Engineer (Ticket Resolution &amp; Chat)</option>
+                    <option value="BILLING_SPECIALIST">Billing Specialist (Invoices &amp; Plan Verification)</option>
+                    <option value="CUSTOMER_SUCCESS">Customer Success &amp; Onboarding</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAddStaffModalOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isSavingStaff}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                  >
+                    {isSavingStaff ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save Staff Account'}
+                  </Button>
+                </div>
+              </form>
             </Modal>
           )}
         </div>
@@ -1828,190 +2175,126 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             )}
           </div>
 
-          {/* Admin WhatsApp Style Interactive Support Modal */}
+          {/* Admin Floating Chat Widget (Right Side Down - Matching Client Portal) */}
           {activeAdminTicket && (
-            <Modal
-              isOpen={Boolean(activeAdminTicket)}
+            <SupportChatFloatingWidget
+              ticket={activeAdminTicket}
               onClose={() => setActiveAdminTicket(null)}
-              title=""
-            >
-              <div className="flex flex-col h-[85vh] -m-6 overflow-hidden rounded-2xl">
-                {/* WhatsApp Style Top Bar */}
-                <div className="bg-[#005c4b] dark:bg-[#202c33] text-white p-4 flex items-center justify-between gap-3 shadow-md shrink-0">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-10 w-10 rounded-full bg-[#00a884] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
-                      {((activeAdminTicket as any).business_name || 'B').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-bold text-sm truncate text-white">
-                          {(activeAdminTicket as any).business_name ||
-                            (activeAdminTicket.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a'
-                              ? 'Pozone'
-                              : activeAdminTicket.business_id)}
-                        </h3>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/20 text-white font-mono">
-                          {activeAdminTicket.ticket_number}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-emerald-100/80 flex items-center gap-1.5 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        <span>WhatsApp Live Bridge</span>
-                        {((activeAdminTicket as any).business_phone || activeAdminTicket.callback_phone) && (
-                          <span>• {((activeAdminTicket as any).business_phone || activeAdminTicket.callback_phone)}</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Status Toggle Buttons in WhatsApp Header */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateTicketStatus('unread')}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
-                        activeAdminTicket.status === 'unread' || activeAdminTicket.status === 'open'
-                          ? 'bg-rose-500 text-white shadow-xs'
-                          : 'bg-white/10 text-white/80 hover:bg-white/20'
-                      }`}
-                    >
-                      Unread
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateTicketStatus('in_process')}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
-                        activeAdminTicket.status === 'in_process' || activeAdminTicket.status === 'in_progress'
-                          ? 'bg-sky-500 text-white shadow-xs'
-                          : 'bg-white/10 text-white/80 hover:bg-white/20'
-                      }`}
-                    >
-                      In Process
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateTicketStatus('resolved')}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
-                        activeAdminTicket.status === 'resolved' || activeAdminTicket.status === 'closed'
-                          ? 'bg-emerald-500 text-white shadow-xs'
-                          : 'bg-white/10 text-white/80 hover:bg-white/20'
-                      }`}
-                    >
-                      Resolved ✓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveAdminTicket(null)}
-                      className="text-white/70 hover:text-white p-1 text-sm font-bold ml-1"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-
-                {/* Call Back Banner if requested */}
-                {activeAdminTicket.callback_requested && (
-                  <div className="bg-amber-500 text-slate-900 px-4 py-2 text-xs flex items-center justify-between font-medium shrink-0">
-                    <div className="flex items-center gap-2">
-                      <PhoneCall className="h-4 w-4 shrink-0 text-slate-900" />
-                      <span>
-                        Customer requested call back: <strong>{activeAdminTicket.callback_phone}</strong>
-                      </span>
-                    </div>
-                    {activeAdminTicket.callback_phone && (
-                      <a
-                        href={`tel:${activeAdminTicket.callback_phone}`}
-                        className="px-2.5 py-0.5 rounded bg-slate-900 text-white text-[11px] font-bold hover:bg-slate-800"
-                      >
-                        Call Now
-                      </a>
-                    )}
-                  </div>
-                )}
-
-                {/* WhatsApp Messages Wallpaper Canvas */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#efeae2] dark:bg-[#0b141a]">
-                  {/* Date chip */}
-                  <div className="flex justify-center">
-                    <span className="bg-white/80 dark:bg-[#182229] text-slate-600 dark:text-slate-300 text-[10px] px-3 py-1 rounded-md shadow-xs font-semibold uppercase tracking-wider">
-                      {activeAdminTicket.subject}
-                    </span>
-                  </div>
-
-                  {/* Message Bubbles */}
-                  {activeAdminTicket.messages?.map((m) => {
-                    const isDev = m.sender_type === 'developer';
-                    return (
-                      <div
-                        key={m.id}
-                        className={`flex flex-col ${isDev ? 'items-end' : 'items-start'}`}
-                      >
-                        <div
-                          className={`max-w-[80%] rounded-2xl p-3 shadow-xs space-y-1 ${
-                            isDev
-                              ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-xs'
-                              : 'bg-white dark:bg-[#202c33] text-slate-900 dark:text-slate-100 rounded-tl-xs'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span
-                              className={`text-[10px] font-bold ${
-                                isDev
-                                  ? 'text-emerald-700 dark:text-emerald-300'
-                                  : 'text-[#008069] dark:text-[#25d366]'
-                              }`}
-                            >
-                              {m.sender_name || (isDev ? 'QuoteFlow Engineer' : 'Customer')}
-                            </span>
-                          </div>
-                          <p className="whitespace-pre-wrap text-xs leading-relaxed">{m.message}</p>
-                          <div className="flex items-center justify-end gap-1 pt-0.5 text-[9px] text-slate-400 dark:text-slate-300">
-                            <span>
-                              {new Date(m.created_at).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                            {isDev && <CheckCheck className="h-3 w-3 text-sky-500" />}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div ref={chatBottomRef} />
-                </div>
-
-                {/* WhatsApp Style Reply Input Footer */}
-                <div className="bg-[#f0f2f5] dark:bg-[#202c33] p-3 flex items-center gap-2 border-t border-slate-200 dark:border-slate-800 shrink-0">
-                  <input
-                    type="text"
-                    value={adminReplyMessage}
-                    onChange={(e) => setAdminReplyMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendAdminReply();
-                      }
-                    }}
-                    placeholder="Type official reply to customer... (Press Enter to send)"
-                    className="bg-white dark:bg-[#2a3942] rounded-full px-4 py-2.5 text-xs text-slate-900 dark:text-white flex-1 focus:outline-none placeholder:text-slate-400 border border-slate-200 dark:border-slate-700"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSendAdminReply}
-                    disabled={isSendingAdminReply || !adminReplyMessage.trim()}
-                    className="h-10 w-10 rounded-full bg-[#00a884] hover:bg-[#008f6f] text-white flex items-center justify-center shrink-0 shadow-md transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    {isSendingAdminReply ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4 ml-0.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </Modal>
+              senderType="developer"
+              senderName="QuoteFlow Engineer"
+              senderUserId="developer-admin"
+              onTicketUpdated={(updated) => {
+                setActiveAdminTicket(updated);
+                setTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+              }}
+            />
           )}
+        </div>
+      )}
+
+      {/* TAB: SUPPORT STAFF & TEAM */}
+      {activeTab === 'staff' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <UserCheck className="h-4 w-4 text-indigo-500" />
+                <span>Support Staff &amp; Team Management</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Manage internal support staff accounts authorized to review and reply to customer tickets.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setAddStaffModalOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold gap-1.5 shadow-xs shrink-0"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              <span>Add Staff Account</span>
+            </Button>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+            {isLoadingStaff ? (
+              <div className="py-12 flex items-center justify-center gap-2 text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                <span className="text-xs">Loading support staff accounts...</span>
+              </div>
+            ) : staffMembers.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 space-y-2">
+                <Users className="h-8 w-8 mx-auto text-slate-300 dark:text-slate-700" />
+                <p className="text-xs font-medium">No secondary staff accounts registered yet.</p>
+                <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                  Master Developer Admin (m.subesh@outlook.com) is currently handling all support operations.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setAddStaffModalOpen(true)}
+                  className="text-xs gap-1.5 mt-2"
+                >
+                  <UserPlus className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>Add First Staff Account</span>
+                </Button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold">
+                    <tr>
+                      <th className="px-4 py-3">Staff Member</th>
+                      <th className="px-4 py-3">Email Address</th>
+                      <th className="px-4 py-3">Phone</th>
+                      <th className="px-4 py-3">Role</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Added Date</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {staffMembers.map((staff) => (
+                      <tr key={staff.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 font-bold flex items-center justify-center text-[11px]">
+                            {staff.name.charAt(0).toUpperCase()}
+                          </div>
+                          <span>{staff.name}</span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300 font-mono text-[11px]">{staff.email}</td>
+                        <td className="px-4 py-3 text-slate-500">{staff.phone || '—'}</td>
+                        <td className="px-4 py-3">
+                          <Badge className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-[10px]">
+                            {staff.role === 'SUPPORT_ENGINEER' ? 'Support Engineer' : staff.role === 'BILLING_SPECIALIST' ? 'Billing Specialist' : 'Customer Success'}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Active
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-400 text-[11px]">
+                          {new Date(staff.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveStaff(staff.id)}
+                            className="h-7 px-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-[11px]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            <span>Remove</span>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -2075,9 +2358,25 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Public Key ID</span>
-              <p className="text-lg font-mono font-bold text-slate-900 dark:text-white pt-1">
-                {razorpayConfig?.keyId || 'Not Set'}
-              </p>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <p className="text-sm font-mono font-bold text-slate-900 dark:text-white truncate">
+                  {razorpayConfig?.keyId
+                    ? (showOverviewKeyId
+                        ? razorpayConfig.keyId
+                        : `${razorpayConfig.keyId.slice(0, 8)}••••••••••••`)
+                    : 'Not Set'}
+                </p>
+                {razorpayConfig?.keyId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowOverviewKeyId(!showOverviewKeyId)}
+                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    title={showOverviewKeyId ? 'Hide Key ID' : 'Show Key ID'}
+                  >
+                    {showOverviewKeyId ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                )}
+              </div>
               <p className="text-[11px] text-slate-500">Exposed safely to browser for modal</p>
             </div>
 
@@ -2300,13 +2599,21 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                 <div className="relative">
                   <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input
-                    type="text"
+                    type={showKeyId ? 'text' : 'password'}
                     placeholder="rzp_test_... or rzp_live_..."
                     value={razorpayKeyId}
                     onChange={(e) => setRazorpayKeyId(e.target.value)}
-                    className="pl-9 font-mono text-xs"
+                    className="pl-9 pr-10 font-mono text-xs"
                     required
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyId(!showKeyId)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                    aria-label={showKeyId ? 'Hide Key ID' : 'Show Key ID'}
+                  >
+                    {showKeyId ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
                 </div>
                 <p className="text-[11px] text-slate-400">
                   From Razorpay Dashboard &rarr; Account &amp; Settings &rarr; API Keys.

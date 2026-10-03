@@ -40,6 +40,7 @@ import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quot
 import { createAdminClient } from '@/lib/supabase/service-role';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import crypto from 'crypto';
 import { cleanPhoneNumber, getDefaultCountryCode, splitPhoneNumber, formatPhoneNumber } from '@/lib/country-codes';
 
@@ -342,6 +343,7 @@ class QuoteFlowStore {
     mode?: 'test' | 'live';
     current_test_invoice_counter?: number;
     current_test_quotation_counter?: number;
+    brand_color?: string | null;
   }> {
     try {
       const p = this.getOrgSettingsFilePath();
@@ -356,6 +358,7 @@ class QuoteFlowStore {
           mode?: 'test' | 'live';
           current_test_invoice_counter?: number;
           current_test_quotation_counter?: number;
+          brand_color?: string | null;
         }> = {};
         for (const [key, val] of Object.entries(parsed)) {
           if (val && typeof val === 'object') {
@@ -381,6 +384,9 @@ class QuoteFlowStore {
               ...(typeof (val as any).current_test_quotation_counter === 'number'
                 ? { current_test_quotation_counter: (val as any).current_test_quotation_counter }
                 : {}),
+              ...(typeof (val as any).brand_color === 'string' || (val as any).brand_color === null
+                ? { brand_color: (val as any).brand_color }
+                : {}),
             };
           }
         }
@@ -404,6 +410,7 @@ class QuoteFlowStore {
         ...(data.mode !== undefined ? { mode: data.mode } : {}),
         ...(data.current_test_invoice_counter !== undefined ? { current_test_invoice_counter: data.current_test_invoice_counter } : {}),
         ...(data.current_test_quotation_counter !== undefined ? { current_test_quotation_counter: data.current_test_quotation_counter } : {}),
+        ...(data.brand_color !== undefined ? { brand_color: data.brand_color } : {}),
       };
       fs.writeFileSync(this.getOrgSettingsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
     } catch {}
@@ -1733,6 +1740,7 @@ class QuoteFlowStore {
             default_show_bank_details: effectivePayment.default_show_bank_details ?? (data as any).default_show_bank_details ?? true,
             default_show_upi_details: effectivePayment.default_show_upi_details ?? (data as any).default_show_upi_details ?? true,
             default_show_crypto_details: effectivePayment.default_show_crypto_details ?? (data as any).default_show_crypto_details ?? false,
+            brand_color: localSettings.brand_color || (data as any).brand_color || '#4f46e5',
           } as Organization;
           this.organizations.set(data.id, fullOrg);
           return fullOrg;
@@ -1783,6 +1791,7 @@ class QuoteFlowStore {
         default_show_bank_details: localPayment.default_show_bank_details ?? cached.default_show_bank_details ?? true,
         default_show_upi_details: localPayment.default_show_upi_details ?? cached.default_show_upi_details ?? true,
         default_show_crypto_details: localPayment.default_show_crypto_details ?? cached.default_show_crypto_details ?? false,
+        brand_color: localSettings.brand_color || cached.brand_color || '#4f46e5',
       } as Organization;
     }
     return null;
@@ -2000,6 +2009,24 @@ class QuoteFlowStore {
           this.organizations.set(orgId, fullSaved);
           return fullSaved;
         }
+      // Permanent Cloud Persistence: Save in Supabase notifications table
+      try {
+        await supabase.from('notifications').upsert({
+          id: `settings_${orgId}`,
+          organization_id: orgId,
+          title: `ORG_SETTINGS:${orgId}`,
+          message: JSON.stringify({
+            brand_color: updated.brand_color,
+            mode: updated.mode,
+            invoice_prefix: updated.invoice_prefix,
+            invoice_start_number: updated.invoice_start_number,
+            current_invoice_counter: updated.current_invoice_counter,
+            require_full_payment_for_invoice: updated.require_full_payment_for_invoice,
+          }),
+          type: 'ORG_SETTINGS',
+          is_read: true,
+        });
+      } catch {}
       }
     } catch (err) {
       console.error('Failed to sync organization to Supabase:', err);
@@ -7471,11 +7498,24 @@ class QuoteFlowStore {
 
   // ---- SUPPORT TICKETS ----
   private getSupportTicketsFilePath(): string {
-    const dir = path.join(process.cwd(), 'data');
-    if (!fs.existsSync(dir)) {
-      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    try {
+      const dir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const testFile = path.join(dir, '.test-' + Date.now());
+      fs.writeFileSync(testFile, '1');
+      fs.unlinkSync(testFile);
+      return path.join(dir, 'support-tickets.json');
+    } catch {
+      const tmpDir = path.join(os.tmpdir(), 'quoteflow-admin');
+      try {
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+      } catch {}
+      return path.join(tmpDir, 'support-tickets.json');
     }
-    return path.join(dir, 'support-tickets.json');
   }
 
   private loadSupportTicketsFromFile(): Record<string, SupportTicket> {
@@ -7496,7 +7536,27 @@ class QuoteFlowStore {
   }
 
   public async getNextTicketNumber(): Promise<number> {
-    this.ticketCounter += 1;
+    const fileData = this.loadSupportTicketsFromFile();
+    const existingCount = Object.keys(fileData).length;
+    const inMemCount = this.supportTickets.size;
+    let maxNum = Math.max(existingCount, inMemCount, this.ticketCounter);
+
+    for (const t of Object.values(fileData)) {
+      if (t.ticket_number) {
+        const parts = t.ticket_number.split('-');
+        const n = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      }
+    }
+    for (const t of this.supportTickets.values()) {
+      if (t.ticket_number) {
+        const parts = t.ticket_number.split('-');
+        const n = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      }
+    }
+
+    this.ticketCounter = maxNum + 1;
     return this.ticketCounter;
   }
 
@@ -7570,7 +7630,6 @@ class QuoteFlowStore {
 
     let all = Array.from(ticketMap.values()).filter((t) => {
       if (t.deleted_at) return false;
-      if (!params?.businessId && (t.business_id?.startsWith('test_') || t.business_id?.startsWith('test-'))) return false;
       return true;
     });
 

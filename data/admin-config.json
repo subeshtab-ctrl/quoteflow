@@ -7,5 +7,6 @@
   "razorpayKeySecret": null,
   "razorpayPlanIdPromo99": "plan_Tj1uiAIYxdedEa",
   "razorpayPlanIdStandard199": "plan_Tj1vAzUPVDv51g",
-  "razorpayMode": "live"
+  "razorpayMode": "live",
+  "staffMembers": []
 }

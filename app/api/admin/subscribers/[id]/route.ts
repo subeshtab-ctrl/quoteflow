@@ -59,6 +59,18 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    if (body.action === 'manual_activate_pro') {
+      const result = await subscriptionService.manuallyActivateProPlan({
+        businessId,
+        paymentReference: body.paymentReference,
+        reason: body.reason,
+        durationDays: body.durationDays ? Number(body.durationDays) : 30,
+        adminUserId: 'developer-admin',
+        adminEmail: 'm.subesh@outlook.com',
+      });
+      return NextResponse.json(result);
+    }
+
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

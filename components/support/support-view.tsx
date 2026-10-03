@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
+import { SupportChatFloatingWidget } from '@/components/support/support-chat-floating-widget';
 import {
   LifeBuoy,
   Plus,
@@ -59,15 +60,17 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchTickets = async () => {
+  const fetchTickets = async (isBackground = false) => {
     try {
-      setIsLoading(true);
+      if (!isBackground && tickets.length === 0) {
+        setIsLoading(true);
+      }
       const params = new URLSearchParams();
       if (selectedStatus !== 'all') params.set('status', selectedStatus);
       if (selectedCategory !== 'all') params.set('category', selectedCategory);
       if (searchQuery) params.set('search', searchQuery);
 
-      const res = await fetch(`/api/support/tickets?${params.toString()}`);
+      const res = await fetch(`/api/support/tickets?${params.toString()}`, { cache: 'no-store' });
       const json = await res.json();
       if (res.ok) {
         setTickets(json.tickets || []);
@@ -75,49 +78,31 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
     } catch {
       console.error('Failed to load tickets');
     } finally {
-      setIsLoading(false);
+      if (!isBackground) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchTickets();
+    fetchTickets(false);
     const interval = setInterval(() => {
-      fetchTickets();
-      if (activeTicket?.id) {
-        fetch(`/api/support/tickets/${activeTicket.id}`)
-          .then((r) => r.json())
-          .then((j) => {
-            if (j.ticket) {
-              setActiveTicket((prev) => {
-                if (!prev || prev.id !== j.ticket.id) return j.ticket;
-                const prevCount = prev.messages?.length || 0;
-                const newCount = j.ticket.messages?.length || 0;
-                if (newCount !== prevCount || j.ticket.status !== prev.status) {
-                  return j.ticket;
-                }
-                return prev;
-              });
-            }
-          })
-          .catch(() => {});
-      }
-    }, 3000);
+      fetchTickets(true);
+    }, 4000);
     return () => clearInterval(interval);
-  }, [selectedStatus, selectedCategory, searchQuery, activeTicket?.id]);
+  }, [selectedStatus, selectedCategory, searchQuery]);
 
-  const loadTicketDetails = async (ticketId: string) => {
-    try {
-      setIsLoadingActiveTicket(true);
-      const res = await fetch(`/api/support/tickets/${ticketId}`);
-      const json = await res.json();
-      if (res.ok) {
-        setActiveTicket(json.ticket);
-      }
-    } catch {
-      console.error('Error loading ticket details');
-    } finally {
-      setIsLoadingActiveTicket(false);
+  const loadTicketDetails = (ticketId: string) => {
+    const existing = tickets.find((t) => t.id === ticketId);
+    if (existing) {
+      setActiveTicket(existing);
     }
+    fetch(`/api/support/tickets/${ticketId}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.ticket) setActiveTicket(j.ticket);
+      })
+      .catch(() => {});
   };
 
   const handleFileUpload = async (file: File, isReply = false) => {
@@ -565,179 +550,17 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
         </Modal>
       )}
 
-      {/* Ticket Details & Chat Modal */}
+      {/* Floating Bottom-Right Support Chat Widget (Identical to Client Portal Chat) */}
       {activeTicket && (
-        <Modal
-          isOpen={Boolean(activeTicket)}
+        <SupportChatFloatingWidget
+          ticket={activeTicket}
           onClose={() => setActiveTicket(null)}
-          title={`Ticket ${activeTicket.ticket_number}`}
-        >
-          <div className="space-y-4 p-4 text-xs max-h-[80vh] flex flex-col">
-            {/* Ticket Header Details */}
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-900 dark:text-white text-sm">
-                  {activeTicket.subject}
-                </span>
-                <span className="font-semibold text-slate-400 text-[11px]">
-                  {activeTicket.category} • {activeTicket.priority} Priority
-                </span>
-              </div>
-              <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500">Status:</span>
-                  <Badge
-                    variant="outline"
-                    className={`font-bold uppercase text-[10px] ${
-                      activeTicket.status === 'resolved' || activeTicket.status === 'closed'
-                        ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
-                        : ''
-                    }`}
-                  >
-                    {activeTicket.status === 'resolved' ? 'Solved' : activeTicket.status.replace(/_/g, ' ')}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-2">
-                  {activeTicket.status !== 'resolved' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] text-emerald-600 hover:text-emerald-700 border-emerald-300"
-                      onClick={() => handleUpdateStatus('resolved')}
-                    >
-                      Mark Solved
-                    </Button>
-                  )}
-                  {activeTicket.status !== 'closed' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] text-slate-600 hover:text-slate-700"
-                      onClick={() => handleUpdateStatus('closed')}
-                    >
-                      Close Ticket
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {activeTicket.callback_requested && (
-                <div className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                  <PhoneCall className="h-3.5 w-3.5 shrink-0" />
-                  <span>Call Back Requested: <strong>{activeTicket.callback_phone}</strong> (Support alerted)</span>
-                </div>
-              )}
-
-              {(activeTicket.status === 'resolved' || activeTicket.status === 'closed') && (
-                <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>
-                    <strong>Issue Solved:</strong> This ticket has been resolved by our developer support staff.
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Conversation Thread */}
-            <div className="flex-1 overflow-y-auto space-y-3 p-2 min-h-[200px] max-h-[350px]">
-              {activeTicket.messages?.map((m) => {
-                const isDev = m.sender_type === 'developer';
-                return (
-                  <div
-                    key={m.id}
-                    className={`flex flex-col ${isDev ? 'items-start' : 'items-end'}`}
-                  >
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-1 px-1">
-                      <span className="font-bold text-slate-600 dark:text-slate-300">
-                        {m.sender_name || (isDev ? 'QuoteFlow Engineer' : 'Customer')}
-                      </span>
-                      <span>• {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                    <div
-                      className={`max-w-[85%] rounded-2xl px-4 py-2.5 shadow-2xs leading-relaxed ${
-                        isDev
-                          ? 'bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-slate-900 dark:text-slate-100 rounded-tl-xs'
-                          : 'bg-indigo-600 text-white rounded-tr-xs'
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{m.message}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Attachments in thread */}
-            {activeTicket.attachments && activeTicket.attachments.length > 0 && (
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">Attachments:</span>
-                <div className="flex flex-wrap gap-2">
-                  {activeTicket.attachments.map((att) => (
-                    <a
-                      key={att.id}
-                      href={att.storage_path}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] hover:bg-slate-200 transition-colors"
-                    >
-                      <Download className="h-3 w-3 text-indigo-500" />
-                      <span>{att.file_name}</span>
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Reply Input */}
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-              <Textarea
-                rows={2}
-                value={replyMessage}
-                onChange={(e) => setReplyMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendReply();
-                  }
-                }}
-                placeholder="Type your response to developer support... (Press Enter to send)"
-                className="text-xs"
-              />
-              <div className="flex items-center justify-between">
-                <input
-                  type="file"
-                  ref={replyFileInputRef}
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleFileUpload(f, true);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => replyFileInputRef.current?.click()}
-                  disabled={isUploadingFile}
-                  className="h-7 text-xs gap-1.5 text-slate-500"
-                >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span>Attach</span>
-                </Button>
-
-                <Button
-                  size="sm"
-                  onClick={handleSendReply}
-                  disabled={isSendingReply || !replyMessage.trim()}
-                  className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold gap-1.5"
-                >
-                  {isSendingReply ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                  <span>Send Reply</span>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Modal>
+          senderType="business"
+          onTicketUpdated={(updated) => {
+            setActiveTicket(updated);
+            setTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+          }}
+        />
       )}
     </div>
   );

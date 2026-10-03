@@ -49,6 +49,7 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
 
   return (
     <div
+      id="quoteflow-dashboard-root"
       className="flex min-h-screen bg-slate-50/60 dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 transition-colors"
       style={{ '--brand-color': brandColor } as React.CSSProperties}
     >
@@ -58,6 +59,7 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
         logoUrl={auth.organization.logo_url || undefined}
         mode={auth.organization.mode || 'live'}
         userRole={auth.role}
+        initialSubStatus={subscriptionAccess?.isPaid ? 'pro' : 'trial'}
         className="hidden md:flex shrink-0 sticky top-0 h-screen"
       />
 

@@ -316,15 +316,15 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
           <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8 text-xs text-slate-400 pt-2 mb-16">
             <span className="flex items-center gap-1.5">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              No credit card required
-            </span>
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
               Instant cloud deployment
             </span>
             <span className="flex items-center gap-1.5">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
               Bank-grade SHA-256 signatures
+            </span>
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              Real-time audit certificates
             </span>
           </div>
 
@@ -402,10 +402,16 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                       <Receipt className="h-3.5 w-3.5" />
                       <span>Create Invoice</span>
                     </div>
-                    <div className="px-3 py-1.5 rounded-lg bg-white/[0.05] text-slate-200 border border-white/[0.08] font-medium flex items-center gap-1.5">
+                    <a
+                      href="/api/public/pdf?sample=true"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-slate-200 border border-white/[0.08] font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Preview restricted sample PDF specimen"
+                    >
                       <Download className="h-3.5 w-3.5" />
-                      <span>PDF</span>
-                    </div>
+                      <span>Sample PDF</span>
+                    </a>
                     <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium flex items-center gap-1.5">
                       <Share2 className="h-3.5 w-3.5" />
                       <span>Client Link</span>
@@ -986,7 +992,15 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                       </div>
                       <div className="flex items-center justify-between text-xs text-indigo-400 font-semibold pt-1">
                         <span>Vector Quality</span>
-                        <span className="text-slate-400 font-normal">248 KB</span>
+                        <a
+                          href="/api/public/pdf?sample=true"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-[11px] transition-colors"
+                        >
+                          <Download className="h-3 w-3" />
+                          <span>Sample PDF</span>
+                        </a>
                       </div>
                     </div>
 
@@ -1015,7 +1029,15 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                       </div>
                       <div className="flex items-center justify-between text-xs text-purple-400 font-semibold pt-1">
                         <span>Tax Certified</span>
-                        <span className="text-slate-400 font-normal">312 KB</span>
+                        <a
+                          href="/api/public/pdf?sample=invoice"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 text-[11px] transition-colors"
+                        >
+                          <Download className="h-3 w-3" />
+                          <span>Sample Invoice PDF</span>
+                        </a>
                       </div>
                     </div>
                   </div>
