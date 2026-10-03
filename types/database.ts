@@ -116,8 +116,16 @@ export interface Organization {
   deleted_at?: string | null;
   deleted_by?: string | null;
   deletion_reason?: string | null;
+  email_role?: 'owner' | 'staff';
+  members?: BusinessSubscriptionMember[];
   created_at: string;
   updated_at: string;
+}
+
+export interface BusinessSubscriptionMember {
+  email: string;
+  role: 'owner' | 'staff';
+  name?: string;
 }
 
 export interface Profile {
@@ -612,6 +620,8 @@ export interface BusinessSubscription {
   // Hydrated references
   plan?: SubscriptionPlan;
   organization?: Organization;
+  email_role?: 'owner' | 'staff';
+  members?: BusinessSubscriptionMember[];
 }
 
 export interface SubscriptionPayment {

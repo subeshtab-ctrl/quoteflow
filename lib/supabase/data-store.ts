@@ -6668,7 +6668,35 @@ class QuoteFlowStore {
     return sub;
   }
 
+  private async hydrateSubscriptionMembers(sub: BusinessSubscription): Promise<BusinessSubscription> {
+    try {
+      const membersMap = await this.getOrganizationMembersMap();
+      const orgMembers = membersMap.get(sub.business_id) || [];
+      const orgEmail = sub.organization?.email?.toLowerCase()?.trim() || '';
+
+      let primaryRole: 'owner' | 'staff' = 'owner';
+      const matched = orgMembers.find((m) => m.email.toLowerCase().trim() === orgEmail);
+      if (matched) {
+        primaryRole = matched.role;
+      } else {
+        const isStaffInvite = Array.from(membersMap.values()).some((list) =>
+          list.some((m) => m.email.toLowerCase().trim() === orgEmail && m.role === 'staff')
+        );
+        if (isStaffInvite) primaryRole = 'staff';
+      }
+
+      sub.email_role = primaryRole;
+      sub.members = orgMembers;
+      if (sub.organization) {
+        sub.organization.email_role = primaryRole;
+        sub.organization.members = orgMembers;
+      }
+    } catch {}
+    return sub;
+  }
+
   public async getBusinessSubscription(businessId: string): Promise<BusinessSubscription | null> {
+    let result: BusinessSubscription | null = null;
     const admin = createAdminClient();
     if (admin) {
       try {
@@ -6680,38 +6708,46 @@ class QuoteFlowStore {
         if (data && !error) {
           const sub = this.hydrateSubscriptionPlan(data);
           this.subscriptions.set(businessId, sub);
-          return sub;
+          result = sub;
         }
       } catch {}
 
-      // Robust Cloud Fallback: Check persistent storage in Supabase notifications table
-      try {
-        const { data: cloudRow } = await admin
-          .from('notifications')
-          .select('message')
-          .eq('organization_id', businessId)
-          .eq('type', 'BUSINESS_SUBSCRIPTION')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (cloudRow?.message) {
-          const parsed = JSON.parse(cloudRow.message);
-          const sub = this.hydrateSubscriptionPlan(parsed);
-          this.subscriptions.set(businessId, sub);
-          return sub;
-        }
-      } catch {}
+      if (!result) {
+        // Robust Cloud Fallback: Check persistent storage in Supabase notifications table
+        try {
+          const { data: cloudRow } = await admin
+            .from('notifications')
+            .select('message')
+            .eq('organization_id', businessId)
+            .eq('type', 'BUSINESS_SUBSCRIPTION')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (cloudRow?.message) {
+            const parsed = JSON.parse(cloudRow.message);
+            const sub = this.hydrateSubscriptionPlan(parsed);
+            this.subscriptions.set(businessId, sub);
+            result = sub;
+          }
+        } catch {}
+      }
     }
 
-    if (this.subscriptions.has(businessId)) {
-      return this.hydrateSubscriptionPlan(this.subscriptions.get(businessId)!);
+    if (!result && this.subscriptions.has(businessId)) {
+      result = this.hydrateSubscriptionPlan(this.subscriptions.get(businessId)!);
     }
 
-    const fileData = this.loadSubscriptionsFromFile();
-    if (fileData[businessId]) {
-      const sub = this.hydrateSubscriptionPlan(fileData[businessId]);
-      this.subscriptions.set(businessId, sub);
-      return sub;
+    if (!result) {
+      const fileData = this.loadSubscriptionsFromFile();
+      if (fileData[businessId]) {
+        const sub = this.hydrateSubscriptionPlan(fileData[businessId]);
+        this.subscriptions.set(businessId, sub);
+        result = sub;
+      }
+    }
+
+    if (result) {
+      return await this.hydrateSubscriptionMembers(result);
     }
 
     return null;
@@ -6854,6 +6890,92 @@ class QuoteFlowStore {
       fileLogs[businessId] = list;
       this.saveReminderLogsToFile(fileLogs);
     }
+  }
+
+  public async getOrganizationMembersMap(): Promise<Map<string, Array<{ email: string; role: 'owner' | 'staff'; name?: string }>>> {
+    const map = new Map<string, Array<{ email: string; role: 'owner' | 'staff'; name?: string }>>();
+
+    // 1. Load team invitations from data/invitations.json
+    try {
+      const invPath = path.join(process.cwd(), 'data', 'invitations.json');
+      if (fs.existsSync(invPath)) {
+        const invs = JSON.parse(fs.readFileSync(invPath, 'utf-8')) || {};
+        for (const inv of Object.values(invs) as any[]) {
+          if (inv && inv.organizationId && inv.email) {
+            const list = map.get(inv.organizationId) || [];
+            const role: 'owner' | 'staff' = (inv.role || '').toUpperCase() === 'STAFF' ? 'staff' : 'owner';
+            if (!list.some((m) => m.email.toLowerCase().trim() === inv.email.toLowerCase().trim())) {
+              list.push({ email: inv.email.trim(), role, name: inv.fullName });
+            }
+            map.set(inv.organizationId, list);
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Load developer support staff from admin-config.json
+    try {
+      const cfgPath = path.join(process.cwd(), 'data', 'admin-config.json');
+      if (fs.existsSync(cfgPath)) {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) || {};
+        const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
+        if (Array.isArray(cfg.staffMembers)) {
+          for (const s of cfg.staffMembers) {
+            if (s && s.email) {
+              const list = map.get(DEFAULT_ORG_ID) || [];
+              if (!list.some((m) => m.email.toLowerCase().trim() === s.email.toLowerCase().trim())) {
+                list.push({ email: s.email.trim(), role: 'staff', name: s.name });
+              }
+              map.set(DEFAULT_ORG_ID, list);
+            }
+          }
+        }
+      }
+    } catch {}
+
+    // 3. Supabase organization_members & auth users
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const [membersRes, usersRes] = await Promise.all([
+          admin.from('organization_members').select('organization_id, user_id, role, is_active'),
+          admin.auth.admin.listUsers().catch(() => ({ data: { users: [] } })),
+        ]);
+
+        const userMap = new Map<string, { email: string; name?: string }>();
+        if (usersRes.data?.users) {
+          for (const u of usersRes.data.users) {
+            if (u.id && u.email) {
+              userMap.set(u.id, {
+                email: u.email,
+                name: (u.user_metadata?.full_name as string) || (u.user_metadata?.name as string),
+              });
+            }
+          }
+        }
+
+        if (membersRes.data) {
+          for (const m of membersRes.data) {
+            const userInfo = userMap.get(m.user_id);
+            if (userInfo && userInfo.email && m.organization_id) {
+              const list = map.get(m.organization_id) || [];
+              const role: 'owner' | 'staff' = (m.role || '').toUpperCase() === 'STAFF' ? 'staff' : 'owner';
+              const existingIdx = list.findIndex((x) => x.email.toLowerCase().trim() === userInfo.email.toLowerCase().trim());
+              if (existingIdx >= 0) {
+                list[existingIdx].role = role;
+              } else {
+                list.push({ email: userInfo.email.trim(), role, name: userInfo.name });
+              }
+              map.set(m.organization_id, list);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not query organization_members from Supabase:', err);
+      }
+    }
+
+    return map;
   }
 
   public async getAllSubscribers(filters?: {
@@ -7056,6 +7178,31 @@ class QuoteFlowStore {
       pozoneSub.promotional_cycles_completed = 1;
     }
 
+    // 4b. Hydrate Organization Member Roles (Owner vs Staff)
+    const membersMap = await this.getOrganizationMembersMap();
+    for (const sub of subMap.values()) {
+      const orgMembers = membersMap.get(sub.business_id) || [];
+      const orgEmail = sub.organization?.email?.toLowerCase()?.trim() || '';
+
+      let primaryRole: 'owner' | 'staff' = 'owner';
+      const matched = orgMembers.find((m) => m.email.toLowerCase().trim() === orgEmail);
+      if (matched) {
+        primaryRole = matched.role;
+      } else {
+        const isStaffInvite = Array.from(membersMap.values()).some((list) =>
+          list.some((m) => m.email.toLowerCase().trim() === orgEmail && m.role === 'staff')
+        );
+        if (isStaffInvite) primaryRole = 'staff';
+      }
+
+      sub.email_role = primaryRole;
+      sub.members = orgMembers;
+      if (sub.organization) {
+        sub.organization.email_role = primaryRole;
+        sub.organization.members = orgMembers;
+      }
+    }
+
     let all = Array.from(subMap.values()).filter((s) => {
       if (s.deleted_at) return false;
       if (s.business_id.startsWith('test_') || s.business_id.startsWith('test-')) return false;
@@ -7107,7 +7254,7 @@ class QuoteFlowStore {
       }
     }
 
-    // 6. Apply Search Query (across name, email, phone, country, business_id)
+    // 6. Apply Search Query (across name, email, phone, country, business_id, role)
     if (filters?.search) {
       const q = filters.search.toLowerCase();
       all = all.filter(
@@ -7118,7 +7265,9 @@ class QuoteFlowStore {
           (s.organization?.phone || '').toLowerCase().includes(q) ||
           (s.organization?.country || '').toLowerCase().includes(q) ||
           (s.razorpay_subscription_id || '').toLowerCase().includes(q) ||
-          (s.last_payment_id || '').toLowerCase().includes(q)
+          (s.last_payment_id || '').toLowerCase().includes(q) ||
+          (s.email_role || '').toLowerCase().includes(q) ||
+          (s.members || []).some((m) => m.email.toLowerCase().includes(q) || m.role.toLowerCase().includes(q))
       );
     }
 

@@ -276,6 +276,56 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
     }
   };
 
+  const getEmailRole = (email?: string | null, sub?: BusinessSubscription): 'owner' | 'staff' => {
+    if (!email) return 'owner';
+    const norm = email.toLowerCase().trim();
+
+    // 1. Explicit members array on subscriber
+    if (sub?.members && Array.isArray(sub.members)) {
+      const found = sub.members.find((m) => m.email.toLowerCase().trim() === norm);
+      if (found?.role) return found.role;
+    }
+
+    // 2. Explicit email_role on subscriber or organization
+    if (sub?.email_role && sub?.organization?.email?.toLowerCase().trim() === norm) {
+      return sub.email_role;
+    }
+    if ((sub?.organization as any)?.email_role && sub?.organization?.email?.toLowerCase().trim() === norm) {
+      return (sub?.organization as any).email_role;
+    }
+
+    // 3. Registered developer support staff accounts
+    if (staffMembers && Array.isArray(staffMembers)) {
+      if (staffMembers.some((sm) => sm.email?.toLowerCase().trim() === norm)) {
+        return 'staff';
+      }
+    }
+
+    // 4. Default to owner for organization primary email
+    return 'owner';
+  };
+
+  const renderEmailWithRole = (email?: string | null, sub?: BusinessSubscription, forceRole?: 'owner' | 'staff') => {
+    if (!email) return <span className="text-slate-400">—</span>;
+    const role = forceRole || getEmailRole(email, sub);
+    const isStaff = role === 'staff';
+
+    return (
+      <span className="inline-flex items-center gap-1.5 flex-wrap">
+        <span className="font-mono text-slate-700 dark:text-slate-300">{email}</span>
+        <span
+          className={`text-[10px] font-semibold lowercase tracking-tight ${
+            isStaff
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-emerald-600 dark:text-emerald-400'
+          }`}
+        >
+          ({isStaff ? 'staff' : 'owner'})
+        </span>
+      </span>
+    );
+  };
+
   const fetchStats = async () => {
     try {
       const res = await fetch('/api/admin/stats');
@@ -1060,7 +1110,20 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
                         {/* 2. Email */}
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                          {s.organization?.email || '—'}
+                          <div className="space-y-1">
+                            <div>{renderEmailWithRole(s.organization?.email, s, s.email_role || 'owner')}</div>
+                            {s.members
+                              ?.filter(
+                                (m) =>
+                                  m.email.toLowerCase().trim() !==
+                                  (s.organization?.email || '').toLowerCase().trim()
+                              )
+                              .map((m) => (
+                                <div key={m.email} className="text-[11px] opacity-90">
+                                  {renderEmailWithRole(m.email, s, m.role)}
+                                </div>
+                              ))}
+                          </div>
                         </td>
 
                         {/* 3. Phone */}
@@ -1247,7 +1310,40 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                             <span>Settings Profile</span>
                           </span>
                           <div className="space-y-1.5 text-[11px] pt-1">
-                            <div><span className="text-slate-400">Email:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.email || '—'}</strong></div>
+                            <div>
+                              <span className="text-slate-400">Email:</span>
+                              <span className="ml-1 font-semibold">
+                                {renderEmailWithRole(
+                                  selectedDrawerBusiness.organization?.email,
+                                  selectedDrawerBusiness,
+                                  selectedDrawerBusiness.email_role || 'owner'
+                                )}
+                              </span>
+                            </div>
+                            {selectedDrawerBusiness.members &&
+                              selectedDrawerBusiness.members.filter(
+                                (m) =>
+                                  m.email.toLowerCase().trim() !==
+                                  (selectedDrawerBusiness.organization?.email || '').toLowerCase().trim()
+                              ).length > 0 && (
+                                <div className="pt-1 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                                    Team Members
+                                  </span>
+                                  {selectedDrawerBusiness.members
+                                    .filter(
+                                      (m) =>
+                                        m.email.toLowerCase().trim() !==
+                                        (selectedDrawerBusiness.organization?.email || '').toLowerCase().trim()
+                                    )
+                                    .map((m) => (
+                                      <div key={m.email} className="flex items-center justify-between text-[11px]">
+                                        {renderEmailWithRole(m.email, selectedDrawerBusiness, m.role)}
+                                        {m.name && <span className="text-slate-400 text-[10px]">{m.name}</span>}
+                                      </div>
+                                    ))}
+                                </div>
+                            )}
                             <div><span className="text-slate-400">Phone:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.phone || '—'}</strong></div>
                             <div><span className="text-slate-400">Address:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{[selectedDrawerBusiness.organization?.address_line1, selectedDrawerBusiness.organization?.city, selectedDrawerBusiness.organization?.state, selectedDrawerBusiness.organization?.postal_code, selectedDrawerBusiness.organization?.country].filter(Boolean).join(', ') || '—'}</strong></div>
                             <div><span className="text-slate-400">Website:</span> <strong className="text-slate-800 dark:text-slate-200 ml-1">{selectedDrawerBusiness.organization?.website || '—'}</strong></div>
