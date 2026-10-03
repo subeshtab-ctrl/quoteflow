@@ -75,11 +75,6 @@ export function BillingView({ initialData }: BillingViewProps) {
   // Transaction Detail Modal state (Requirement 14)
   const [selectedTransaction, setSelectedTransaction] = useState<SubscriptionPayment | null>(null);
 
-  // Test Mode Simulation Modal state
-  const [mockSimulationModalOpen, setMockSimulationModalOpen] = useState(false);
-  const [mockCheckoutData, setMockCheckoutData] = useState<any>(null);
-  const [isSimulatingPayment, setIsSimulatingPayment] = useState(false);
-
   const fetchBillingData = async () => {
     try {
       setIsLoading(true);
@@ -148,17 +143,16 @@ export function BillingView({ initialData }: BillingViewProps) {
 
       const { checkout } = json;
 
-      // In mock simulation mode (no live Razorpay keys configured yet)
+      // Validate Razorpay checkout data
       if (
         checkout.isMock ||
         !checkout.keyId ||
         checkout.keyId.includes('placeholder') ||
         checkout.subscriptionId?.startsWith('sub_mock_')
       ) {
-        setMockCheckoutData(checkout);
-        setMockSimulationModalOpen(true);
-        setIsProcessingCheckout(false);
-        return;
+        throw new Error(
+          'Online payment gateway is currently unavailable. If you have already made payment or transferred funds, please contact your developer administrator to manually activate QuoteFlow Pro.'
+        );
       }
 
       // 2. Load Razorpay script
@@ -232,7 +226,7 @@ export function BillingView({ initialData }: BillingViewProps) {
       rzp.on('payment.failed', function (resp: any) {
         setFeedbackMsg({
           type: 'error',
-          text: `Payment failed: ${resp.error?.description || 'Authorization declined'}`,
+          text: `Payment failed: ${resp.error?.description || 'Authorization declined'}. If payment was credited, your developer administrator can manually activate QuoteFlow Pro.`,
         });
         setIsProcessingCheckout(false);
       });
@@ -241,38 +235,6 @@ export function BillingView({ initialData }: BillingViewProps) {
     } catch (err: any) {
       setFeedbackMsg({ type: 'error', text: err.message || 'Error launching payment modal' });
       setIsProcessingCheckout(false);
-    }
-  };
-
-  const handleSimulateTestPayment = async () => {
-    if (!mockCheckoutData) return;
-    try {
-      setIsSimulatingPayment(true);
-      const mockPayId = `pay_mock_${Date.now()}`;
-      const mockSig = `mock_sig_${Date.now()}`;
-      const res = await fetch('/api/verify-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          razorpay_subscription_id: mockCheckoutData.subscriptionId,
-          razorpay_payment_id: mockPayId,
-          razorpay_signature: mockSig,
-        }),
-      });
-      const dataRes = await res.json();
-      if (!res.ok) throw new Error(dataRes.error || 'Failed to simulate payment');
-
-      setFeedbackMsg({
-        type: 'success',
-        text: 'Payment of ₹99.00 verified! QuoteFlow Pro is now active.',
-      });
-      setMockSimulationModalOpen(false);
-      router.refresh();
-      await fetchBillingData();
-    } catch (err: any) {
-      setFeedbackMsg({ type: 'error', text: err.message || 'Error simulating test payment' });
-    } finally {
-      setIsSimulatingPayment(false);
     }
   };
 
@@ -765,87 +727,95 @@ export function BillingView({ initialData }: BillingViewProps) {
           </p>
         </div>
 
-        {data?.payments && data.payments.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold">
-                <tr>
-                  <th className="px-5 py-3">Date</th>
-                  <th className="px-5 py-3">Amount</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Payment Reference</th>
-                  <th className="px-5 py-3">Description</th>
-                  <th className="px-5 py-3 text-right">Details</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {data.payments.map((p) => {
-                  const txDate = p.paid_at
-                    ? new Date(p.paid_at).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })
-                    : new Date(p.created_at).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      });
-                  const isSuccess = p.status === 'captured' || p.status === 'authorized';
+        {(() => {
+          const verifiedPayments = (data?.payments || []).filter(
+            (p) => !p.razorpay_payment_id?.startsWith('pay_mock_') && !p.id?.startsWith('pay_mock_')
+          );
+          if (verifiedPayments.length === 0) {
+            return (
+              <div className="p-8 text-center text-slate-400 text-xs">
+                No transactions recorded yet. Your verified payment receipts will appear here.
+              </div>
+            );
+          }
+          return (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold">
+                  <tr>
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">Amount</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Payment Reference</th>
+                    <th className="px-5 py-3">Description</th>
+                    <th className="px-5 py-3 text-right">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {verifiedPayments.map((p) => {
+                    const txDate = p.paid_at
+                      ? new Date(p.paid_at).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })
+                      : new Date(p.created_at).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        });
+                    const isSuccess = p.status === 'captured' || p.status === 'authorized';
 
-                  return (
-                    <tr
-                      key={p.id}
-                      onClick={() => setSelectedTransaction(p)}
-                      className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 cursor-pointer"
-                    >
-                      <td className="px-5 py-3.5 text-slate-800 dark:text-slate-200 font-medium">
-                        {txDate}
-                      </td>
-                      <td className="px-5 py-3.5 font-bold text-slate-900 dark:text-slate-100">
-                        ₹{(p.amount / 100).toFixed(2)}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            isSuccess
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                          }`}
-                        >
-                          {isSuccess ? 'Paid' : 'Failed'}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 font-mono text-slate-500">
-                        {p.razorpay_payment_id || 'PAY-REF'}
-                      </td>
-                      <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
-                        QuoteFlow Pro Monthly Subscription
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedTransaction(p);
-                          }}
-                          className="text-indigo-600 hover:text-indigo-700 h-7 text-xs px-2"
-                        >
-                          View
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="p-8 text-center text-slate-400 text-xs">
-            No transactions recorded yet. Your first payment receipt will appear here.
-          </div>
-        )}
+                    return (
+                      <tr
+                        key={p.id}
+                        onClick={() => setSelectedTransaction(p)}
+                        className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 cursor-pointer"
+                      >
+                        <td className="px-5 py-3.5 text-slate-800 dark:text-slate-200 font-medium">
+                          {txDate}
+                        </td>
+                        <td className="px-5 py-3.5 font-bold text-slate-900 dark:text-slate-100">
+                          ₹{(p.amount / 100).toFixed(2)}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              isSuccess
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                            }`}
+                          >
+                            {isSuccess ? 'Paid' : 'Failed'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 font-mono text-slate-500">
+                          {p.razorpay_payment_id || 'PAY-REF'}
+                        </td>
+                        <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
+                          QuoteFlow Pro Monthly Subscription
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTransaction(p);
+                            }}
+                            className="text-indigo-600 hover:text-indigo-700 h-7 text-xs px-2"
+                          >
+                            View
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Transaction Detail Modal (Requirement 14) */}
@@ -1004,45 +974,6 @@ export function BillingView({ initialData }: BillingViewProps) {
           isOpen={supportModalOpen}
           onClose={() => setSupportModalOpen(false)}
         />
-      )}
-
-      {/* Test Mode Simulation Modal */}
-      {mockSimulationModalOpen && mockCheckoutData && (
-        <Modal
-          isOpen={mockSimulationModalOpen}
-          onClose={() => setMockSimulationModalOpen(false)}
-          title="Payment Simulation (Development Mode)"
-        >
-          <div className="p-5 space-y-4 text-xs">
-            <p className="text-slate-600 dark:text-slate-300">
-              In test mode, simulate completing the ₹99 QuoteFlow Pro payment to verify backend activation:
-            </p>
-
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 font-mono text-[11px] space-y-1">
-              <p>Plan: QuoteFlow Pro (₹99/mo)</p>
-              <p>Amount: ₹99.00</p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setMockSimulationModalOpen(false)}
-                className="text-xs"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleSimulateTestPayment}
-                disabled={isSimulatingPayment}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
-              >
-                {isSimulatingPayment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Complete Test Payment (₹99)'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
       )}
     </div>
   );

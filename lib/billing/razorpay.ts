@@ -110,6 +110,7 @@ export class RazorpayService {
   }
 
   public isConfigured(): boolean {
+    this.reloadCredentials();
     return Boolean(
       this.keyId &&
       this.keySecret &&
@@ -309,7 +310,7 @@ export class RazorpayService {
     const period = params.period || 'monthly';
     const interval = params.interval || 1;
 
-    if (process.env.VITEST || process.env.NODE_ENV === 'test' || !this.isConfigured()) {
+    if (process.env.VITEST || process.env.NODE_ENV === 'test') {
       return {
         id: `plan_mock_${params.amount}_${Date.now()}`,
         entity: 'plan',
@@ -323,6 +324,10 @@ export class RazorpayService {
           description: params.description,
         },
       };
+    }
+
+    if (!this.isConfigured()) {
+      throw new Error('Razorpay API credentials are not configured.');
     }
 
     const res = await fetch(`${this.baseUrl}/plans`, {
@@ -361,10 +366,11 @@ export class RazorpayService {
     startAt?: number; // UNIX timestamp
     notes?: Record<string, string>;
   }): Promise<RazorpaySubscriptionResponse> {
+    this.reloadCredentials();
     const totalCount = params.totalCount || 60; // 5 years monthly default
     const customerNotify = params.customerNotify !== undefined ? params.customerNotify : 1;
 
-    if (process.env.VITEST || process.env.NODE_ENV === 'test' || !this.isConfigured()) {
+    if (process.env.VITEST || process.env.NODE_ENV === 'test') {
       const subId = `sub_mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       return {
         id: subId,
@@ -669,8 +675,8 @@ export class RazorpayService {
       return false;
     }
 
-    // In mock mode (no real keys configured in Vercel), accept simulated signature
-    if (!this.isConfigured() && params.signature.startsWith('mock_sig_')) {
+    // In mock mode (strictly for automated test environments), accept simulated signature
+    if ((process.env.VITEST || process.env.NODE_ENV === 'test') && params.signature.startsWith('mock_sig_')) {
       return true;
     }
 

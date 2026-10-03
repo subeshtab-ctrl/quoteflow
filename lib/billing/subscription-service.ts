@@ -423,6 +423,11 @@ export class SubscriptionService {
     }
 
     if (!rzpPlanId) {
+      if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+        throw new Error(
+          'QuoteFlow Pro plan ID is not configured. Please configure Plan ID in Developer Dashboard or contact support.'
+        );
+      }
       rzpPlanId = `plan_mock_${targetPlan.slug}_${targetPlan.amount}`;
     }
 

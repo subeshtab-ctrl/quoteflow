@@ -26,6 +26,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (
+      (razorpay_payment_id.startsWith('pay_mock_') || razorpay_signature.startsWith('mock_sig_')) &&
+      !process.env.VITEST &&
+      process.env.NODE_ENV !== 'test'
+    ) {
+      return NextResponse.json(
+        { error: 'Simulated mock payments are disabled. Real payment through Razorpay or manual admin activation required.' },
+        { status: 400 }
+      );
+    }
+
     // 1. Subscription Verification Flow
     if (razorpay_subscription_id) {
       const isValid = razorpayService.verifySubscriptionSignature({
