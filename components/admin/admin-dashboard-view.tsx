@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   BusinessSubscription,
   SupportTicket,
@@ -54,6 +54,9 @@ import {
   ShieldAlert,
   Sun,
   Moon,
+  CheckCheck,
+  MessageCircle,
+  ExternalLink,
 } from 'lucide-react';
 
 export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark' } = {}) {
@@ -123,6 +126,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   const [activeAdminTicket, setActiveAdminTicket] = useState<SupportTicket | null>(null);
   const [adminReplyMessage, setAdminReplyMessage] = useState('');
   const [isSendingAdminReply, setIsSendingAdminReply] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
@@ -489,8 +493,36 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   }, [subStatusFilter, subSearch, subPage]);
 
   useEffect(() => {
+    if (activeAdminTicket?.messages?.length) {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activeAdminTicket?.messages?.length]);
+
+  useEffect(() => {
     fetchTickets();
-  }, [ticketStatusFilter]);
+    const interval = setInterval(() => {
+      fetchTickets();
+      if (activeAdminTicket?.id) {
+        fetch(`/api/support/tickets/${activeAdminTicket.id}`)
+          .then((r) => r.json())
+          .then((j) => {
+            if (j.ticket) {
+              setActiveAdminTicket((prev) => {
+                if (!prev || prev.id !== j.ticket.id) return j.ticket;
+                const prevCount = prev.messages?.length || 0;
+                const newCount = j.ticket.messages?.length || 0;
+                if (newCount !== prevCount || j.ticket.status !== prev.status) {
+                  return j.ticket;
+                }
+                return prev;
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [ticketStatusFilter, activeAdminTicket?.id]);
 
   const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -547,14 +579,17 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: adminReplyMessage,
+          message: adminReplyMessage.trim(),
         }),
       });
       if (res.ok) {
         setAdminReplyMessage('');
         const refreshed = await fetch(`/api/support/tickets/${activeAdminTicket.id}`);
         const rJson = await refreshed.json();
-        if (rJson.ticket) setActiveAdminTicket(rJson.ticket);
+        if (rJson.ticket) {
+          setActiveAdminTicket(rJson.ticket);
+          setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
         await fetchTickets();
       }
     } catch {
@@ -564,21 +599,27 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
     }
   };
 
-  const handleUpdateTicketStatus = async (status: string) => {
-    if (!activeAdminTicket) return;
+  const handleUpdateStatusForTicket = async (ticketId: string, status: string) => {
     try {
-      const res = await fetch(`/api/support/tickets/${activeAdminTicket.id}`, {
+      const res = await fetch(`/api/support/tickets/${ticketId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
       if (res.ok) {
-        const refreshed = await fetch(`/api/support/tickets/${activeAdminTicket.id}`);
-        const rJson = await refreshed.json();
-        if (rJson.ticket) setActiveAdminTicket(rJson.ticket);
+        if (activeAdminTicket && activeAdminTicket.id === ticketId) {
+          const refreshed = await fetch(`/api/support/tickets/${ticketId}`);
+          const rJson = await refreshed.json();
+          if (rJson.ticket) setActiveAdminTicket(rJson.ticket);
+        }
         await fetchTickets();
       }
     } catch {}
+  };
+
+  const handleUpdateTicketStatus = async (status: string) => {
+    if (!activeAdminTicket) return;
+    await handleUpdateStatusForTicket(activeAdminTicket.id, status);
   };
 
   return (
@@ -610,7 +651,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
           { id: 'overview', label: 'Overview & MRR', icon: TrendingUp },
           { id: 'subscribers', label: `Subscribers (${subscriberTotal})`, icon: Users },
           { id: 'offers', label: 'Offers & Promotions', icon: Tag },
-          { id: 'tickets', label: `Support Tickets (${tickets.length})`, icon: LifeBuoy },
+          { id: 'tickets', label: `Support Tickets (${tickets.length})${tickets.filter((t) => t.status === 'unread' || t.status === 'open').length > 0 ? ` • ${tickets.filter((t) => t.status === 'unread' || t.status === 'open').length} New` : ''}`, icon: LifeBuoy },
           { id: 'razorpay', label: 'Razorpay & Plans', icon: CreditCard },
           { id: 'audit', label: 'Admin Audit Log', icon: ShieldCheck },
         ].map((tab) => {
@@ -827,7 +868,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                               <div className="space-y-0.5 min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-bold text-slate-900 dark:text-slate-100 hover:text-indigo-600 transition-colors">
-                                    {s.organization?.name || 'Unnamed Business'}
+                                    {s.organization?.name || (s as any).business_name || (isPozone ? 'Pozone' : 'Registered Business')}
                                   </span>
                                   {isPozone && (
                                     <Badge className="bg-emerald-600 text-white text-[9px] font-bold">
@@ -1461,154 +1502,411 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
         </div>
       )}
 
-      {/* TAB 4: SUPPORT TICKETS */}
+      {/* TAB 4: SUPPORT TICKETS (WhatsApp Communication Hub) */}
       {activeTab === 'tickets' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              All Business Support Tickets
-            </span>
-            <select
-              value={ticketStatusFilter}
-              onChange={(e) => setTicketStatusFilter(e.target.value)}
-              className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs"
-            >
-              <option value="all">All Statuses</option>
-              <option value="open">Open</option>
-              <option value="in_progress">In Progress</option>
-              <option value="waiting_for_customer">Waiting for Customer</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
-            </select>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs divide-y divide-slate-100 dark:divide-slate-800">
-            {tickets.map((t) => (
-              <div
-                key={t.id}
-                onClick={async () => {
-                  const res = await fetch(`/api/support/tickets/${t.id}`);
-                  const j = await res.json();
-                  if (j.ticket) setActiveAdminTicket(j.ticket);
-                }}
-                className="p-5 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs font-bold text-indigo-600">{t.ticket_number}</span>
-                    <Badge variant="outline" className="text-[10px] uppercase font-semibold">{t.category}</Badge>
-                    <span className="text-[10px] font-bold text-amber-700">{t.priority}</span>
-                    {t.callback_requested && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-bold">
-                        <PhoneCall className="h-3 w-3" />
-                        <span>Call Back: {t.callback_phone}</span>
-                      </span>
-                    )}
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{t.subject}</h4>
-                  <p className="text-xs text-slate-400">Business: {t.business_id}</p>
-                </div>
-                <div>
-                  {t.status === 'resolved' ? (
-                    <Badge className="bg-emerald-600 text-white text-[10px] uppercase font-bold gap-1">
-                      <CheckCircle2 className="h-3 w-3" />
-                      <span>Solved</span>
-                    </Badge>
-                  ) : (
-                    <Badge className="text-[10px] uppercase font-bold self-start md:self-center">{t.status}</Badge>
+          {/* Header & Status Filter Pills */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 mr-2">
+                Live Help Desk:
+              </span>
+              {[
+                { id: 'all', label: `All Tickets (${tickets.length})` },
+                {
+                  id: 'unread',
+                  label: `New / Unread (${tickets.filter((t) => t.status === 'unread' || t.status === 'open' || t.status === 'new').length})`,
+                  highlight: tickets.filter((t) => t.status === 'unread' || t.status === 'open' || t.status === 'new').length > 0,
+                },
+                {
+                  id: 'in_process',
+                  label: `In Process (${tickets.filter((t) => t.status === 'in_process' || t.status === 'in_progress' || t.status === 'waiting_for_customer').length})`,
+                },
+                {
+                  id: 'resolved',
+                  label: `Resolved (${tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length})`,
+                },
+              ].map((pill) => (
+                <button
+                  key={pill.id}
+                  onClick={() => setTicketStatusFilter(pill.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    ticketStatusFilter === pill.id
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : pill.highlight
+                      ? 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/60'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {pill.highlight && pill.id !== ticketStatusFilter && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
                   )}
-                </div>
-              </div>
-            ))}
+                  <span>{pill.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Live WhatsApp Sync</span>
+              </span>
+            </div>
           </div>
 
-          {/* Admin Ticket Inspection & Conversation Modal */}
+          {/* Tickets List */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs divide-y divide-slate-100 dark:divide-slate-800">
+            {tickets.length === 0 ? (
+              <div className="p-12 text-center text-slate-400">
+                <LifeBuoy className="h-8 w-8 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
+                <p className="font-semibold text-slate-700 dark:text-slate-300">No support tickets found</p>
+                <p className="text-xs text-slate-400 mt-1">Customer support inquiries will appear here in real time.</p>
+              </div>
+            ) : (
+              tickets.map((t) => {
+                const isPozone = t.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a';
+                const businessName =
+                  (t as any).business_name || (isPozone ? 'Pozone' : t.business_id);
+                const businessEmail =
+                  (t as any).business_email || t.creator_email || '—';
+                const businessPhone =
+                  (t as any).business_phone || t.callback_phone || '';
+                const isUnread = t.status === 'unread' || t.status === 'open';
+                const isInProcess =
+                  t.status === 'in_process' || t.status === 'in_progress';
+                const isResolved =
+                  t.status === 'resolved' || t.status === 'closed';
+
+                const lastMsg =
+                  t.messages && t.messages.length > 0
+                    ? t.messages[t.messages.length - 1]
+                    : null;
+
+                return (
+                  <div
+                    key={t.id}
+                    onClick={async () => {
+                      const res = await fetch(`/api/support/tickets/${t.id}`);
+                      const j = await res.json();
+                      if (j.ticket) setActiveAdminTicket(j.ticket);
+                    }}
+                    className={`p-5 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                      isUnread ? 'bg-rose-50/30 dark:bg-rose-950/20' : ''
+                    }`}
+                  >
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      {/* Business & Ticket Info */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-base text-slate-900 dark:text-slate-100 hover:text-indigo-600 transition-colors">
+                          {businessName}
+                        </span>
+                        {isPozone && (
+                          <Badge className="bg-emerald-600 text-white text-[9px] font-bold">
+                            Verified Paid
+                          </Badge>
+                        )}
+                        <span className="font-mono text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                          {t.ticket_number}
+                        </span>
+                        <Badge variant="outline" className="text-[10px] uppercase font-semibold">
+                          {t.category}
+                        </Badge>
+                        {t.callback_requested && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[10px] font-bold">
+                            <PhoneCall className="h-3 w-3" />
+                            <span>Call Back: {t.callback_phone}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Subject & Latest Message */}
+                      <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-200">
+                        {t.subject}
+                      </h4>
+                      {lastMsg && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                          <strong className="text-slate-700 dark:text-slate-300">
+                            {lastMsg.sender_name || (lastMsg.sender_type === 'developer' ? 'Developer' : 'Customer')}:
+                          </strong>{' '}
+                          {lastMsg.message}
+                        </p>
+                      )}
+
+                      {/* Contact metadata */}
+                      <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
+                        <span>Email: <strong className="text-slate-600 dark:text-slate-300">{businessEmail}</strong></span>
+                        {businessPhone && (
+                          <span>Phone: <strong className="text-slate-600 dark:text-slate-300">{businessPhone}</strong></span>
+                        )}
+                        <span>Received: {new Date(t.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+
+                    {/* Status Badges & Quick Action Buttons */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 shrink-0">
+                      {/* Current Status Pill */}
+                      {isUnread && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/30 text-xs font-bold animate-pulse">
+                          <span className="w-2 h-2 rounded-full bg-rose-500" />
+                          <span>New / Unread</span>
+                        </span>
+                      )}
+                      {isInProcess && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/10 text-sky-500 border border-sky-500/30 text-xs font-bold">
+                          <span>In Process</span>
+                        </span>
+                      )}
+                      {isResolved && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 text-xs font-bold">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>Resolved</span>
+                        </span>
+                      )}
+
+                      {/* Fast Status Change Actions */}
+                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUpdateStatusForTicket(t.id, 'unread');
+                          }}
+                          title="Mark as Unread"
+                          className={`px-2 py-1 rounded text-[10px] font-bold transition-colors ${
+                            isUnread
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          Unread
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUpdateStatusForTicket(t.id, 'in_process');
+                          }}
+                          title="Mark as In Process"
+                          className={`px-2 py-1 rounded text-[10px] font-bold transition-colors ${
+                            isInProcess
+                              ? 'bg-sky-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          In Process
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUpdateStatusForTicket(t.id, 'resolved');
+                          }}
+                          title="Mark as Resolved"
+                          className={`px-2 py-1 rounded text-[10px] font-bold transition-colors ${
+                            isResolved
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          Resolved ✓
+                        </button>
+                      </div>
+
+                      {/* Open WhatsApp Chat Button */}
+                      <Button
+                        size="sm"
+                        className="bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold gap-1.5 shadow-xs"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        <span>Chat</span>
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Admin WhatsApp Style Interactive Support Modal */}
           {activeAdminTicket && (
-            <Modal isOpen={Boolean(activeAdminTicket)} onClose={() => setActiveAdminTicket(null)} title={`Developer Support: ${activeAdminTicket.ticket_number}`}>
-              <div className="space-y-4 p-4 text-xs max-h-[85vh] flex flex-col">
+            <Modal
+              isOpen={Boolean(activeAdminTicket)}
+              onClose={() => setActiveAdminTicket(null)}
+              title=""
+            >
+              <div className="flex flex-col h-[85vh] -m-6 overflow-hidden rounded-2xl">
+                {/* WhatsApp Style Top Bar */}
+                <div className="bg-[#005c4b] dark:bg-[#202c33] text-white p-4 flex items-center justify-between gap-3 shadow-md shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-10 w-10 rounded-full bg-[#00a884] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
+                      {((activeAdminTicket as any).business_name || 'B').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-sm truncate text-white">
+                          {(activeAdminTicket as any).business_name ||
+                            (activeAdminTicket.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a'
+                              ? 'Pozone'
+                              : activeAdminTicket.business_id)}
+                        </h3>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/20 text-white font-mono">
+                          {activeAdminTicket.ticket_number}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-emerald-100/80 flex items-center gap-1.5 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>WhatsApp Live Bridge</span>
+                        {((activeAdminTicket as any).business_phone || activeAdminTicket.callback_phone) && (
+                          <span>• {((activeAdminTicket as any).business_phone || activeAdminTicket.callback_phone)}</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status Toggle Buttons in WhatsApp Header */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateTicketStatus('unread')}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                        activeAdminTicket.status === 'unread' || activeAdminTicket.status === 'open'
+                          ? 'bg-rose-500 text-white shadow-xs'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      Unread
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateTicketStatus('in_process')}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                        activeAdminTicket.status === 'in_process' || activeAdminTicket.status === 'in_progress'
+                          ? 'bg-sky-500 text-white shadow-xs'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      In Process
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateTicketStatus('resolved')}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${
+                        activeAdminTicket.status === 'resolved' || activeAdminTicket.status === 'closed'
+                          ? 'bg-emerald-500 text-white shadow-xs'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      Resolved ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveAdminTicket(null)}
+                      className="text-white/70 hover:text-white p-1 text-sm font-bold ml-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
                 {/* Call Back Banner if requested */}
                 {activeAdminTicket.callback_requested && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-center justify-between gap-3">
+                  <div className="bg-amber-500 text-slate-900 px-4 py-2 text-xs flex items-center justify-between font-medium shrink-0">
                     <div className="flex items-center gap-2">
-                      <PhoneCall className="h-4 w-4 shrink-0 text-amber-400" />
+                      <PhoneCall className="h-4 w-4 shrink-0 text-slate-900" />
                       <span>
-                        Customer requested call back: <strong className="text-white font-mono">{activeAdminTicket.callback_phone}</strong>
+                        Customer requested call back: <strong>{activeAdminTicket.callback_phone}</strong>
                       </span>
                     </div>
                     {activeAdminTicket.callback_phone && (
                       <a
                         href={`tel:${activeAdminTicket.callback_phone}`}
-                        className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] shrink-0"
+                        className="px-2.5 py-0.5 rounded bg-slate-900 text-white text-[11px] font-bold hover:bg-slate-800"
                       >
-                        Call Number
+                        Call Now
                       </a>
                     )}
                   </div>
                 )}
 
-                {/* Solved Status Banner */}
-                {activeAdminTicket.status === 'resolved' && (
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                    <span>
-                      <strong>Issue Solved:</strong> This ticket is marked as solved and visible as solved to the customer.
+                {/* WhatsApp Messages Wallpaper Canvas */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#efeae2] dark:bg-[#0b141a]">
+                  {/* Date chip */}
+                  <div className="flex justify-center">
+                    <span className="bg-white/80 dark:bg-[#182229] text-slate-600 dark:text-slate-300 text-[10px] px-3 py-1 rounded-md shadow-xs font-semibold uppercase tracking-wider">
+                      {activeAdminTicket.subject}
                     </span>
                   </div>
-                )}
 
-                {/* Hydrated Business Context for Billing/Subscription/Payment tickets */}
-                {activeAdminTicket.subscription_context && (
-                  <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 space-y-1">
-                    <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200 font-bold">
-                      <CreditCard className="h-4 w-4" />
-                      <span>Authorized Billing Context</span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-300">
-                      <div>Plan: <strong className="text-slate-900 dark:text-white">{activeAdminTicket.subscription_context.plan_name}</strong></div>
-                      <div>Status: <strong className="text-slate-900 dark:text-white">{activeAdminTicket.subscription_context.subscription_status}</strong></div>
-                      <div>Failures: <strong className="text-slate-900 dark:text-white">{activeAdminTicket.subscription_context.payment_failure_count}</strong></div>
-                      <div>Period End: <strong className="text-slate-900 dark:text-white">{activeAdminTicket.subscription_context.current_period_end ? new Date(activeAdminTicket.subscription_context.current_period_end).toLocaleDateString() : 'N/A'}</strong></div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between border-b pb-2 flex-wrap gap-2">
-                  <span className="font-bold text-sm text-slate-900 dark:text-white">{activeAdminTicket.subject}</span>
-                  <div className="flex items-center gap-1.5">
-                    <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleUpdateTicketStatus('in_progress')}>In Progress</Button>
-                    <Button
-                      size="sm"
-                      className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white font-semibold gap-1"
-                      onClick={() => handleUpdateTicketStatus('resolved')}
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span>{activeAdminTicket.status === 'resolved' ? 'Solved ✓' : 'Mark as Solved'}</span>
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-7 text-[10px] text-slate-600" onClick={() => handleUpdateTicketStatus('closed')}>Close</Button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[300px]">
+                  {/* Message Bubbles */}
                   {activeAdminTicket.messages?.map((m) => {
                     const isDev = m.sender_type === 'developer';
                     return (
-                      <div key={m.id} className={`flex flex-col ${isDev ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[10px] text-slate-400 mb-0.5">{m.sender_name || (isDev ? 'Developer' : 'Customer')}</span>
-                        <div className={`p-3 rounded-xl max-w-[85%] ${isDev ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'}`}>
-                          <p className="whitespace-pre-wrap">{m.message}</p>
+                      <div
+                        key={m.id}
+                        className={`flex flex-col ${isDev ? 'items-end' : 'items-start'}`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-2xl p-3 shadow-xs space-y-1 ${
+                            isDev
+                              ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-xs'
+                              : 'bg-white dark:bg-[#202c33] text-slate-900 dark:text-slate-100 rounded-tl-xs'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span
+                              className={`text-[10px] font-bold ${
+                                isDev
+                                  ? 'text-emerald-700 dark:text-emerald-300'
+                                  : 'text-[#008069] dark:text-[#25d366]'
+                              }`}
+                            >
+                              {m.sender_name || (isDev ? 'QuoteFlow Engineer' : 'Customer')}
+                            </span>
+                          </div>
+                          <p className="whitespace-pre-wrap text-xs leading-relaxed">{m.message}</p>
+                          <div className="flex items-center justify-end gap-1 pt-0.5 text-[9px] text-slate-400 dark:text-slate-300">
+                            <span>
+                              {new Date(m.created_at).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                            {isDev && <CheckCheck className="h-3 w-3 text-sky-500" />}
+                          </div>
                         </div>
                       </div>
                     );
                   })}
+                  <div ref={chatBottomRef} />
                 </div>
 
-                <div className="pt-2 border-t space-y-2">
-                  <Textarea rows={2} value={adminReplyMessage} onChange={(e) => setAdminReplyMessage(e.target.value)} placeholder="Type official developer reply to customer..." className="text-xs" />
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={handleSendAdminReply} disabled={isSendingAdminReply || !adminReplyMessage.trim()} className="bg-indigo-600 text-white font-semibold">
-                      {isSendingAdminReply ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Send Reply to Business'}
-                    </Button>
-                  </div>
+                {/* WhatsApp Style Reply Input Footer */}
+                <div className="bg-[#f0f2f5] dark:bg-[#202c33] p-3 flex items-center gap-2 border-t border-slate-200 dark:border-slate-800 shrink-0">
+                  <input
+                    type="text"
+                    value={adminReplyMessage}
+                    onChange={(e) => setAdminReplyMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendAdminReply();
+                      }
+                    }}
+                    placeholder="Type official reply to customer... (Press Enter to send)"
+                    className="bg-white dark:bg-[#2a3942] rounded-full px-4 py-2.5 text-xs text-slate-900 dark:text-white flex-1 focus:outline-none placeholder:text-slate-400 border border-slate-200 dark:border-slate-700"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendAdminReply}
+                    disabled={isSendingAdminReply || !adminReplyMessage.trim()}
+                    className="h-10 w-10 rounded-full bg-[#00a884] hover:bg-[#008f6f] text-white flex items-center justify-center shrink-0 shadow-md transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isSendingAdminReply ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4 ml-0.5" />
+                    )}
+                  </button>
                 </div>
               </div>
             </Modal>

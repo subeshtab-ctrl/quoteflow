@@ -7,7 +7,13 @@ import { store } from '@/lib/supabase/data-store';
 import { SettingsClientView } from '@/components/settings/settings-client-view';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ tab?: string }>;
+}) {
+  const resolvedParams = searchParams ? await searchParams : {};
+  const tab = resolvedParams.tab || 'general';
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
   const organization = await store.getOrganization(orgId);
@@ -19,6 +25,7 @@ export default async function SettingsPage() {
         currentUserRole={auth?.role || 'OWNER'}
         currentUserId={auth?.userId || ''}
         currentUserEmail={auth?.email || ''}
+        initialTab={tab}
       />
     </DashboardLayout>
   );

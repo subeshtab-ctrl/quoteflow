@@ -4,20 +4,26 @@ import { Invoice } from '@/types/database';
 import { formatCurrency } from '@/lib/quotations/calculations';
 import { format } from 'date-fns';
 
+import { registerPdfFonts } from '@/lib/pdf/font-loader';
+import { parseLogoUrl } from '@/lib/utils/logo';
+
 /**
- * Helper to fetch and convert any image (WebP, PNG, JPEG, SVG) to a PNG base64 data URI using sharp
+ * Helper to fetch and convert any image (WebP, PNG, JPEG, SVG) to a PNG base64 data URI using sharp,
+ * supporting Instagram-style circular masking.
  */
 async function loadLogoImage(logoUrl: string | null | undefined): Promise<{ base64: string } | null> {
   if (!logoUrl) return null;
   try {
-    const rawPath = logoUrl.split(/[?#]/)[0];
+    const logoConfig = parseLogoUrl(logoUrl);
+    const rawPath = logoConfig.cleanUrl || logoUrl.split(/[?#]/)[0];
     let buffer: Buffer | null = null;
 
     if (rawPath.startsWith('data:image/')) {
-      return { base64: rawPath };
-    }
-
-    if (rawPath.startsWith('http://') || rawPath.startsWith('https://')) {
+      const base64Data = rawPath.split(',')[1];
+      if (base64Data) {
+        buffer = Buffer.from(base64Data, 'base64');
+      }
+    } else if (rawPath.startsWith('http://') || rawPath.startsWith('https://')) {
       const res = await fetch(rawPath);
       if (res.ok) {
         buffer = Buffer.from(await res.arrayBuffer());
@@ -35,10 +41,28 @@ async function loadLogoImage(logoUrl: string | null | undefined): Promise<{ base
     if (buffer) {
       try {
         const sharp = (await import('sharp')).default;
-        const pngBuf = await sharp(buffer).png().toBuffer();
-        return {
-          base64: `data:image/png;base64,${pngBuf.toString('base64')}`,
-        };
+        const meta = await sharp(buffer).metadata();
+        const dim = Math.min(meta.width || 256, meta.height || 256, 400);
+
+        // Circular masking (Instagram profile style)
+        if (logoConfig.shape === 'circle') {
+          const circleMaskSvg = Buffer.from(
+            `<svg width="${dim}" height="${dim}"><circle cx="${dim / 2}" cy="${dim / 2}" r="${dim / 2}" fill="#fff" /></svg>`
+          );
+          const pngBuf = await sharp(buffer)
+            .resize(dim, dim, { fit: 'cover' })
+            .composite([{ input: circleMaskSvg, blend: 'dest-in' }])
+            .png()
+            .toBuffer();
+          return {
+            base64: `data:image/png;base64,${pngBuf.toString('base64')}`,
+          };
+        } else {
+          const pngBuf = await sharp(buffer).png().toBuffer();
+          return {
+            base64: `data:image/png;base64,${pngBuf.toString('base64')}`,
+          };
+        }
       } catch (convErr) {
         const ext = rawPath.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
         return {
@@ -78,6 +102,9 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     unit: 'mm',
     format: 'a4',
   });
+
+  const fontsLoaded = registerPdfFonts(doc);
+  const fontName = fontsLoaded ? 'Roboto' : 'helvetica';
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -163,7 +190,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   let compY = headerStartY;
   if (logoData) {
     doc.addImage(logoData.base64, 'PNG', margin, headerStartY, 13, 13);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(15);
     doc.setTextColor(15, 23, 42); // slate-900
     doc.text(org.name || 'QuoteFlow Workspace', margin + 16, headerStartY + 5.5);
@@ -173,12 +200,12 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     const initials = getCompanyInitials(org.name);
     doc.setFillColor(79, 70, 229);
     doc.roundedRect(margin, headerStartY, 12, 12, 2.5, 2.5, 'F');
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(9);
     doc.setTextColor(255, 255, 255);
     doc.text(initials, margin + 6, headerStartY + 8, { align: 'center' });
 
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(15);
     doc.setTextColor(15, 23, 42);
     doc.text(org.name || 'QuoteFlow Workspace', margin + 15, headerStartY + 5.5);
@@ -186,7 +213,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   // Address lines below company name
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139); // slate-500
 
@@ -209,7 +236,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   compY += 3.8;
 
   if (org.gst_vat_number) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setTextColor(51, 65, 85);
     const taxLabel = currency === 'INR' ? 'GSTIN' : (currency === 'AED' ? 'TRN' : 'Tax ID');
     doc.text(`${taxLabel}: ${org.gst_vat_number}`, margin, compY);
@@ -218,17 +245,17 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   // Right Header: TAX INVOICE + Invoice # + Dates
   let rightY = headerStartY;
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(79, 70, 229); // brand indigo
   doc.text('TAX INVOICE', pageWidth - margin, rightY + 3, { align: 'right' });
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(20);
   doc.setTextColor(15, 23, 42);
   doc.text(invoice.invoice_number, pageWidth - margin, rightY + 11.5, { align: 'right' });
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
   doc.text(`Invoice Date: ${formatDate(invoice.issue_date)}`, pageWidth - margin, rightY + 17, { align: 'right' });
@@ -239,7 +266,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   if (invoice.po_number) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setTextColor(51, 65, 85);
     doc.text(`PO #: ${invoice.po_number}`, pageWidth - margin, nextDateY, { align: 'right' });
     nextDateY += 4.5;
@@ -278,19 +305,19 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   // Left: Billed To
   let cardLeftY = cardY + 5;
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(7);
   doc.setTextColor(148, 163, 184); // slate-400
   doc.text('BILLED TO', margin + 5, cardLeftY);
   cardLeftY += 4.5;
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(10);
   doc.setTextColor(15, 23, 42);
   doc.text(customerName, margin + 5, cardLeftY);
   cardLeftY += 4;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
 
@@ -306,43 +333,43 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   if (hasTaxNumber) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setTextColor(51, 65, 85);
     doc.text(`Tax ID / GST: ${customer.tax_number}`, margin + 5, cardLeftY);
   }
 
   // Right: Settlement Status
   let cardRightY = cardY + 5;
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(7);
   doc.setTextColor(148, 163, 184);
   doc.text('SETTLEMENT STATUS', pageWidth - margin - 5, cardRightY, { align: 'right' });
   cardRightY += 3.5;
 
-  // Status Badge Pill
-  let badgeLabel = '● Pending';
+  // Status Badge Pill (Clear text without Unicode bullets to prevent font encoding artifacts)
+  let badgeLabel = 'PENDING';
   let badgeFill = [254, 243, 199]; // amber-100
   let badgeText = [146, 64, 14];   // amber-800
 
   if (isPaid) {
-    badgeLabel = '● Paid';
+    badgeLabel = 'PAID';
     badgeFill = [209, 250, 229];   // emerald-100
     badgeText = [6, 95, 70];       // emerald-800
   } else if (invoice.status === 'ISSUED') {
-    badgeLabel = '● Issued';
+    badgeLabel = 'ISSUED';
     badgeFill = [239, 246, 255];   // blue-50
     badgeText = [29, 78, 216];     // blue-700
   } else if (invoice.status === 'OVERDUE') {
-    badgeLabel = '● Overdue';
+    badgeLabel = 'OVERDUE';
     badgeFill = [254, 226, 226];   // rose-100
     badgeText = [185, 28, 28];     // rose-700
   } else if (invoice.status === 'CANCELLED') {
-    badgeLabel = '● Cancelled';
+    badgeLabel = 'CANCELLED';
     badgeFill = [241, 245, 249];   // slate-100
     badgeText = [71, 85, 105];     // slate-600
   }
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(7.5);
   const badgeWidth = Math.max(22, doc.getTextWidth(badgeLabel) + 6);
   const badgeHeight = 5;
@@ -355,7 +382,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   cardRightY += badgeHeight + 3;
 
   if (isPaid && invoice.paid_at) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(8);
     doc.setTextColor(5, 150, 105); // emerald-600
     doc.text(`Settled in full on ${formatDate(invoice.paid_at)}`, pageWidth - margin - 5, cardRightY, { align: 'right' });
@@ -363,7 +390,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   if (invoice.payment_method) {
-    doc.setFont('helvetica', 'italic');
+    doc.setFont(fontName, 'italic');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
     const methodStr = invoice.payment_method.replace(/_/g, ' ');
@@ -398,9 +425,13 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     startY: tableStartY,
     margin: { left: margin, right: margin },
     theme: 'plain',
+    styles: {
+      font: fontName,
+    },
     headStyles: {
       fillColor: [255, 255, 255],
       textColor: [148, 163, 184], // slate-400
+      font: fontName,
       fontStyle: 'bold',
       fontSize: 7.5,
       lineWidth: { bottom: 0.25 },
@@ -409,6 +440,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     },
     bodyStyles: {
       textColor: [51, 65, 85], // slate-700
+      font: fontName,
       fontSize: 8,
       lineWidth: { bottom: 0.15 },
       lineColor: [241, 245, 249], // slate-100
@@ -454,13 +486,13 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   let leftCurY = finalTableY + 5;
   if (hasNotes) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(51, 65, 85);
     doc.text('NOTES', margin, leftCurY);
     leftCurY += 4;
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
     const notesLines = doc.splitTextToSize(invoice.notes!.trim(), 90);
@@ -469,13 +501,13 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   if (hasTerms) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(51, 65, 85);
     doc.text('PAYMENT TERMS', margin, leftCurY);
     leftCurY += 4;
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
     const termsLines = doc.splitTextToSize(invoice.terms_conditions!.trim(), 90);
@@ -490,18 +522,18 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   let rightCurY = finalTableY + 5;
 
   // Subtotal
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
   doc.text('Subtotal', totalsX, rightCurY);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text(formatCurrency(invoice.subtotal, currency), rightX, rightCurY, { align: 'right' });
   rightCurY += 5;
 
   // Discount
   if ((invoice.discount_amount || 0) > 0) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(5, 150, 105); // emerald-600
     doc.text('Discount', totalsX, rightCurY);
@@ -512,21 +544,21 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   // Tax Breakdown
   if (invoice.tax_breakdown && invoice.tax_breakdown.length > 0) {
     for (const tb of invoice.tax_breakdown) {
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(100, 116, 139);
       doc.text(tb.label, totalsX, rightCurY);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setTextColor(15, 23, 42);
       doc.text(formatCurrency(tb.amount, currency), rightX, rightCurY, { align: 'right' });
       rightCurY += 5;
     }
   } else {
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
     doc.text('Tax Total', totalsX, rightCurY);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setTextColor(15, 23, 42);
     doc.text(formatCurrency(invoice.tax_amount, currency), rightX, rightCurY, { align: 'right' });
     rightCurY += 5;
@@ -539,11 +571,11 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   rightCurY += 3.5;
 
   // Total Amount
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
   doc.text('Total Amount', totalsX, rightCurY);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(12);
   doc.setTextColor(79, 70, 229); // brand indigo
   doc.text(formatCurrency(invoice.grand_total, currency), rightX, rightCurY, { align: 'right' });
@@ -551,7 +583,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   // Amount Paid (only show if advance / partial payment and not paid in full)
   if (!isPaid && invoice.paid_amount !== undefined && Number(invoice.paid_amount) > 0) {
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(5, 150, 105);
     const paidLabel = `Amount Paid${invoice.advance_percentage ? ` (${invoice.advance_percentage}% Advance)` : ''}`;
@@ -567,13 +599,13 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.line(totalsX, rightCurY - 1, rightX, rightCurY - 1);
     rightCurY += 3.5;
 
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(9);
     doc.setTextColor(15, 23, 42);
     doc.text('Remaining Balance Due', totalsX, rightCurY);
 
     const bal = Number(invoice.balance_amount);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(10);
     doc.setTextColor(217, 119, 6); // amber-600
     doc.text(formatCurrency(bal, currency), rightX, rightCurY, { align: 'right' });
@@ -583,7 +615,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   // Mode of payment
   if (invoice.payment_method) {
     rightCurY += 1;
-    doc.setFont('helvetica', 'italic');
+    doc.setFont(fontName, 'italic');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
     const methodStr = invoice.payment_method.replace(/_/g, ' ');
@@ -600,7 +632,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.setLineWidth(0.2);
     doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
 
-    doc.setFont('helvetica', 'italic');
+    doc.setFont(fontName, 'italic');
     doc.setFontSize(7.5);
     doc.setTextColor(148, 163, 184);
     doc.text(org.invoice_footer, pageWidth / 2, footerY, { align: 'center' });
@@ -615,13 +647,13 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
       // Top test banner
       doc.setFillColor(245, 158, 11); // Amber 500
       doc.rect(0, 0, pageWidth, 5.5, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(255, 255, 255);
       doc.text('TEST DOCUMENT — NOT A REAL INVOICE', pageWidth / 2, 3.8, { align: 'center' });
 
       // Watermark in center
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setFontSize(36);
       doc.setTextColor(220, 220, 225);
       doc.text('TEST DOCUMENT', pageWidth / 2, pageHeight / 2 - 8, {
@@ -640,14 +672,14 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
       // Top cancelled banner
       doc.setFillColor(225, 29, 72); // Rose 600
       doc.rect(0, 0, pageWidth, 5.5, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(255, 255, 255);
       const cancelText = `${isVoid ? 'VOIDED' : 'CANCELLED'} INVOICE${invoice.cancellation_reason ? ` — Reason: ${invoice.cancellation_reason.substring(0, 80)}` : ''}`;
       doc.text(cancelText, pageWidth / 2, 3.8, { align: 'center' });
 
       // Diagonal watermark
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setFontSize(52);
       doc.setTextColor(248, 113, 113); // Light red
       doc.text(isVoid ? 'VOID' : 'CANCELLED', pageWidth / 2, pageHeight / 2, {

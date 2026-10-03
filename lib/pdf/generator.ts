@@ -4,6 +4,8 @@ import { Quotation } from '@/types/database';
 import { formatCurrency } from '@/lib/quotations/calculations';
 import { format } from 'date-fns';
 
+import { registerPdfFonts, loadPdfLogoImage } from '@/lib/pdf/font-loader';
+
 /**
  * Generate a PDF document buffer for a quotation
  */
@@ -14,6 +16,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     unit: 'mm',
     format: 'a4',
   });
+
+  const fontsLoaded = registerPdfFonts(doc);
+  const fontName = fontsLoaded ? 'Roboto' : 'helvetica';
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -84,32 +89,24 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
 
   // 2. Company Logo, Name & Title
   let compY = 18;
-  if (org.logo_url) {
+  const logoData = await loadPdfLogoImage(org.logo_url);
+  if (logoData) {
     try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const rawPath = org.logo_url.split(/[?#]/)[0];
-      const cleanUrl = rawPath.startsWith('/') ? rawPath.substring(1) : rawPath;
-      const logoPath = path.join(process.cwd(), 'public', cleanUrl);
-      if (fs.existsSync(logoPath)) {
-        const imgBuffer = fs.readFileSync(logoPath);
-        const ext = (logoPath.toLowerCase().endsWith('.png') ? 'PNG' : 'JPEG') as 'PNG' | 'JPEG';
-        const base64Img = `data:image/${ext.toLowerCase()};base64,${imgBuffer.toString('base64')}`;
-        doc.addImage(base64Img, ext, margin, compY - 4, 30, 14);
-        compY += 16;
-      }
+      const logoDim = 14;
+      doc.addImage(logoData.base64, 'PNG', margin, compY - 4, logoDim, logoDim);
+      compY += logoDim + 2;
     } catch (e) {
       // Graceful fallback to text header
     }
   }
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(16);
   doc.setTextColor(30, 41, 59); // Slate-800
   doc.text(org.name || 'QuoteFlow', margin, compY);
   compY += 5;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139); // Slate-500
   const compLines: string[] = [
@@ -125,17 +122,17 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   });
 
   // 3. Document Title & Details (Right aligned)
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(22);
   doc.setTextColor(79, 70, 229);
   doc.text('QUOTATION', pageWidth - margin, 18, { align: 'right' });
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(9.5);
   doc.setTextColor(30, 41, 59);
   doc.text(`Quotation #: ${quotation.quotation_number}`, pageWidth - margin, 26, { align: 'right' });
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
   doc.text(`Issue Date: ${format(new Date(quotation.issue_date || Date.now()), 'dd MMM yyyy')}`, pageWidth - margin, 31, { align: 'right' });
@@ -151,7 +148,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.setFillColor(statusColor[0], statusColor[1], statusColor[2]);
   doc.roundedRect(pageWidth - margin - 32, 40, 32, 6, 1.5, 1.5, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(7.5);
   doc.text(status, pageWidth - margin - 16, 44.2, { align: 'center' });
 
@@ -160,7 +157,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     doc.setFillColor(16, 185, 129); // Emerald 500
     doc.roundedRect(pageWidth - margin - 60, 40, 25, 6, 1.5, 1.5, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(7.5);
     doc.text('✓ PAID', pageWidth - margin - 47.5, 44.2, { align: 'center' });
   }
@@ -171,17 +168,17 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.setDrawColor(226, 232, 240); // slate-200
   doc.roundedRect(margin, clientBoxY, pageWidth - margin * 2, 26, 2, 2, 'FD');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
   doc.text('PREPARED FOR:', margin + 4, clientBoxY + 6);
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(10);
   doc.setTextColor(15, 23, 42);
   doc.text(customer.company_name ? `${customer.name} (${customer.company_name})` : customer.name, margin + 4, clientBoxY + 12);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
   doc.text(`Email: ${customer.email} ${customer.phone ? `| Phone: ${customer.phone}` : ''}`, margin + 4, clientBoxY + 17);
@@ -206,15 +203,20 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     head: [['#', 'Item & Description', 'Qty', 'Unit', 'Unit Price', 'Tax', 'Line Total']],
     body: tableData,
     theme: 'plain',
+    styles: {
+      font: fontName,
+    },
     headStyles: {
       fillColor: [241, 245, 249],
       textColor: [30, 41, 59],
+      font: fontName,
       fontSize: 8.5,
       fontStyle: 'bold',
       cellPadding: 3,
     },
     bodyStyles: {
       textColor: [51, 65, 85],
+      font: fontName,
       fontSize: 8.5,
       cellPadding: 3.5,
     },
@@ -237,7 +239,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   const summaryX = pageWidth - margin - 75;
 
   doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setTextColor(100, 116, 139);
 
   doc.text('Subtotal:', summaryX, finalY);
@@ -261,7 +263,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   // Grand Total Highlight
   doc.setFillColor(238, 242, 255); // Brand 50
   doc.roundedRect(summaryX - 4, curY - 1, 79, 9, 1.5, 1.5, 'F');
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(10.5);
   doc.setTextColor(67, 56, 202); // Brand 700
   doc.text('Grand Total:', summaryX, curY + 5);
@@ -312,20 +314,20 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
       notesY = margin + 10;
     }
 
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(30, 41, 59);
     doc.text('PAYMENT DETAILS & INSTRUCTIONS:', margin, notesY);
     notesY += 4.5;
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(71, 85, 105);
 
     if (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && quotation.advance_percentage > 0) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.text(`• Advance Required: ${quotation.advance_percentage}% to commence work`, margin, notesY);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
       notesY += 4;
     }
 
@@ -336,9 +338,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
 
     // Bank Details in PDF
     if (showBank && (bankInfo?.bank_name || bankInfo?.account_number)) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.text(`• Bank Remittance: ${bankInfo.bank_name || 'Bank Transfer'}`, margin, notesY);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
       notesY += 3.8;
 
       let bankLine = '';
@@ -362,9 +364,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     // UPI Details & Embed QR Code in PDF
     let hasQrRendered = false;
     if (showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.text(`• UPI Payment (India): ${upiInfo.upi_id || ''}${upiInfo.payee_name ? ` (${upiInfo.payee_name})` : ''}`, margin, notesY);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
       notesY += 3.8;
 
       if (upiInfo.qr_code_url) {
@@ -382,9 +384,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
 
     // Crypto Details & Embed QR in PDF
     if (showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url)) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.text(`• Crypto Payment: ${cryptoInfo.currency || 'USDT'} (${cryptoInfo.network || 'TRC20'})`, margin, notesY);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
       notesY += 3.8;
 
       if (cryptoInfo.wallet_address) {
@@ -411,29 +413,47 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     }
 
     if (quotation.paid_amount && quotation.paid_amount > 0) {
-      doc.setFont('helvetica', 'italic');
+      doc.setFont(fontName, 'italic');
       doc.text(
         `• Recorded Payment: ${formatCurrency(quotation.paid_amount, quotation.currency)} paid (${quotation.payment_status || 'PARTIAL'})`,
         margin,
         notesY
       );
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
       notesY += 4;
     }
 
     notesY += 3;
   }
 
-  if (quotation.terms_conditions || quotation.notes) {
-    doc.setFont('helvetica', 'bold');
+  const hasQuotationNotes = Boolean(quotation.notes && quotation.notes.trim().length > 0);
+  const hasQuotationTerms = Boolean(quotation.terms_conditions && quotation.terms_conditions.trim().length > 0);
+
+  if (hasQuotationNotes) {
+    doc.setFont(fontName, 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text('Notes:', margin, notesY);
+
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    const notesText = quotation.notes!.trim();
+    const splitNotes = doc.splitTextToSize(notesText, 105);
+    doc.text(splitNotes, margin, notesY + 4.5);
+    notesY += splitNotes.length * 3.5 + 4;
+  }
+
+  if (hasQuotationTerms) {
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(30, 41, 59);
     doc.text('Terms & Conditions:', margin, notesY);
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    const terms = quotation.terms_conditions || 'Standard terms apply.';
+    const terms = quotation.terms_conditions!.trim();
     const splitTerms = doc.splitTextToSize(terms, 105);
     doc.text(splitTerms, margin, notesY + 4.5);
     notesY += splitTerms.length * 3.5 + 4;
@@ -448,12 +468,12 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     doc.setDrawColor(187, 247, 208); // Green 200
     doc.roundedRect(pageWidth - margin - 85, sigBoxY, 85, 34, 2, 2, 'FD');
 
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setFontSize(8);
     doc.setTextColor(22, 101, 52); // Green 800
     doc.text('✓ DIGITALLY APPROVED & SIGNED', pageWidth - margin - 80, sigBoxY + 6);
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(51, 65, 85);
     doc.text(`Signer: ${sig.signer_name}`, pageWidth - margin - 80, sigBoxY + 12);
@@ -465,7 +485,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   }
 
   // 9. Document Footer
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   const compName = org.name || 'our company';
   const footerText = (org.invoice_footer || `Thank you for partnering with ${compName}.`).replace(/The Mining Future/gi, compName);
@@ -480,13 +500,13 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
       // Top test banner
       doc.setFillColor(245, 158, 11); // Amber 500
       doc.rect(0, 0, pageWidth, 5.5, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(255, 255, 255);
       doc.text('TEST DOCUMENT — NOT A REAL QUOTATION', pageWidth / 2, 3.8, { align: 'center' });
 
       // Watermark in center
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       doc.setFontSize(36);
       doc.setTextColor(220, 220, 225);
       doc.text('TEST DOCUMENT', pageWidth / 2, pageHeight / 2 - 8, {

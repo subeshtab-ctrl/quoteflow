@@ -42,6 +42,7 @@ import {
   GraduationCap,
   BookOpen,
   ArrowRight,
+  LifeBuoy,
 } from 'lucide-react';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
 import { ThemeSegmentedControl } from '@/components/theme/theme-toggle';
@@ -56,19 +57,34 @@ import {
 } from '@/lib/utils/logo';
 import { COUNTRIES, getCountryProfile } from '@/lib/tax/country-config';
 import { TrainingGuideModal } from '@/components/training/training-guide-modal';
+import { SupportView } from '@/components/support/support-view';
 
 export function SettingsClientView({
   initialOrganization,
   currentUserRole = 'OWNER',
   currentUserId = '',
   currentUserEmail = '',
+  initialTab = 'general',
 }: {
   initialOrganization: Organization;
   currentUserRole?: string;
   currentUserId?: string;
   currentUserEmail?: string;
+  initialTab?: string;
 }) {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'general' | 'support'>(
+    initialTab === 'support' ? 'support' : 'general'
+  );
+
+  useEffect(() => {
+    if (initialTab === 'support') {
+      setActiveTab('support');
+    } else if (initialTab === 'general') {
+      setActiveTab('general');
+    }
+  }, [initialTab]);
+
   const [org, setOrg] = useState<Organization>(initialOrganization);
   const initialParsed = parseLogoUrl(initialOrganization.logo_url);
   const [logoShape, setLogoShape] = useState<LogoShape>(initialParsed.shape);
@@ -627,67 +643,133 @@ export function SettingsClientView({
 
   return (
     <div className="space-y-6 max-w-4xl transition-colors">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100">
-          Organization & Quotation Settings
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Customize your company profile, brand logo & theme color, team members, currency, and defaults.
-        </p>
+      {/* Top Tab Switcher */}
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('general');
+            router.push('/settings?tab=general', { scroll: false });
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'general'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Building className="h-4 w-4" />
+          <span>Organization & Defaults</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('support');
+            router.push('/settings?tab=support', { scroll: false });
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'support'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <LifeBuoy className="h-4 w-4" />
+          <span>Customer Support & Help Desk</span>
+        </button>
       </div>
 
-      {successMsg && (
-        <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-4 text-xs font-semibold text-emerald-800 dark:text-emerald-300 animate-fadeIn">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          <span>{successMsg}</span>
+      {activeTab === 'support' ? (
+        <div className="space-y-6">
+          <SupportView />
         </div>
-      )}
-
-      {errorMsg && (
-        <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-4 text-xs font-semibold text-rose-700 dark:text-rose-300">
-          {errorMsg}
-        </div>
-      )}
-
-      {currentUserRole === 'STAFF' && (
-        <div className="flex items-center gap-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-4 text-xs font-medium text-amber-800 dark:text-amber-300">
-          <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
+      ) : (
+        <>
           <div>
-            <p className="font-semibold text-amber-900 dark:text-amber-200">Signed in as Staff</p>
-            <p className="text-amber-700 dark:text-amber-400 mt-0.5">
-              You have read-only access to Organization Settings. Adding staff and modifying company settings requires an Owner or Admin account.
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100">
+              Organization & Quotation Settings
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              Customize your company profile, brand logo & theme color, team members, currency, and defaults.
             </p>
           </div>
-        </div>
-      )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Subscription & Billing Quick Card */}
-        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100">
-                Subscription & SaaS Billing
-              </h3>
-              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
-                Razorpay Verified
-              </span>
+          {successMsg && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-4 text-xs font-semibold text-emerald-800 dark:text-emerald-300 animate-fadeIn">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <span>{successMsg}</span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              Manage your QuoteFlow plans (30-day Free Trial, ₹99/mo Promotional Offer, and ₹199/mo Standard), view payment receipts, or update recurring billing.
-            </p>
-          </div>
-          <Link href="/billing">
-            <Button
-              type="button"
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-xs shrink-0"
-            >
-              <span>Manage Subscription & Billing</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Button>
-          </Link>
-        </div>
+          )}
+
+          {errorMsg && (
+            <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-4 text-xs font-semibold text-rose-700 dark:text-rose-300">
+              {errorMsg}
+            </div>
+          )}
+
+          {currentUserRole === 'STAFF' && (
+            <div className="flex items-center gap-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-4 text-xs font-medium text-amber-800 dark:text-amber-300">
+              <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
+              <div>
+                <p className="font-semibold text-amber-900 dark:text-amber-200">Signed in as Staff</p>
+                <p className="text-amber-700 dark:text-amber-400 mt-0.5">
+                  You have read-only access to Organization Settings. Adding staff and modifying company settings requires an Owner or Admin account.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Quick Cards Grid: Subscription/Billing + Customer Support */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Subscription & Billing Quick Card */}
+              <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 p-5 shadow-xs flex flex-col justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                      Subscription & SaaS Billing
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Manage your QuoteFlow plans (30-day Free Trial and ₹99/month Pro plan), view payment receipts, or update recurring billing.
+                  </p>
+                </div>
+                <Link href="/billing">
+                  <Button
+                    type="button"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-xs"
+                  >
+                    <span>Manage Subscription & Billing</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              </div>
+
+              {/* Customer Support & Help Desk Quick Card */}
+              <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-slate-50 dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-slate-900 p-5 shadow-xs flex flex-col justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <LifeBuoy className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                      Customer Support & Ticket History
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    View support ticket history (Pending, In Process, Resolved), create new tickets, and chat directly with developer engineers.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('support');
+                    router.push('/settings?tab=support', { scroll: false });
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs gap-1.5 shadow-xs"
+                >
+                  <span>Open Support Desk & History</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
 
         {/* Operating Environment Mode Card */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
@@ -2148,6 +2230,8 @@ export function SettingsClientView({
           </Button>
         </div>
       </form>
+    </>
+  )}
 
       {/* Add Staff Member Modal (Direct Password Setup Only) */}
       {isAddStaffOpen && (

@@ -137,6 +137,21 @@ export function InvoiceBuilder({
     initialInvoice?.payment_terms || 'Net 30 Days'
   );
 
+  const [paymentMethod, setPaymentMethod] = useState<string>(
+    initialInvoice?.payment_method || 'Bank Transfer (NEFT / RTGS / IMPS)'
+  );
+
+  const PAYMENT_MODES = [
+    'Bank Transfer (NEFT / RTGS / IMPS)',
+    'UPI / QR Code',
+    'Credit / Debit Card',
+    'Cash',
+    'Cheque / Demand Draft',
+    'Net Banking',
+    'Online Payment Gateway',
+    'Other',
+  ];
+
   const [isInterstate, setIsInterstate] = useState<boolean>(false);
 
   // Initial Items
@@ -477,6 +492,7 @@ export function InvoiceBuilder({
         due_date: dueDate,
         currency,
         payment_terms: paymentTerms,
+        payment_method: paymentMethod,
         notes: (notes || '').trim(),
         terms_conditions: (terms || '').trim(),
         attachments,
@@ -836,6 +852,36 @@ export function InvoiceBuilder({
                   <option value="Net 30 Days">Net 30 Days</option>
                   <option value="Net 60 Days">Net 60 Days</option>
                 </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Payment Mode
+                </label>
+                <select
+                  value={PAYMENT_MODES.includes(paymentMethod) ? paymentMethod : 'Other'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val !== 'Other') setPaymentMethod(val);
+                    else setPaymentMethod('Other');
+                  }}
+                  className="w-full h-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-800 dark:text-slate-200"
+                >
+                  {PAYMENT_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode}
+                    </option>
+                  ))}
+                </select>
+                {!PAYMENT_MODES.slice(0, -1).includes(paymentMethod) && (
+                  <input
+                    type="text"
+                    value={paymentMethod === 'Other' ? '' : paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value || 'Other')}
+                    placeholder="Specify custom mode..."
+                    className="mt-1 w-full h-8 px-2.5 rounded-lg border border-slate-200 text-xs"
+                  />
+                )}
               </div>
             </div>
 

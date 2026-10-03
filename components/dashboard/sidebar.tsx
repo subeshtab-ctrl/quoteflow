@@ -69,7 +69,6 @@ export function DashboardSidebar({
     { name: 'Products & Services', href: '/products', icon: Package },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
     { name: 'Subscription & Billing', href: '/billing', icon: CreditCard },
-    { name: 'Support', href: '/support', icon: LifeBuoy },
     { name: 'Training & Guides', href: '/training', icon: GraduationCap },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];

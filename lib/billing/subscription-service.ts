@@ -1093,7 +1093,7 @@ export class SubscriptionService {
       subject: params.subject,
       category: params.category,
       priority: params.priority,
-      status: 'open',
+      status: (params as any).status || 'open',
       description: params.description,
       assigned_to: null,
       created_at: now,
@@ -1183,7 +1183,7 @@ export class SubscriptionService {
     if (params.senderType === 'developer') {
       ticket.status = 'waiting_for_customer';
     } else if (params.senderType === 'business') {
-      ticket.status = 'in_progress';
+      ticket.status = 'unread'; // Immediately alerts developer in Developer Dashboard like WhatsApp unread message
     }
     ticket.updated_at = now;
     await store.saveSupportTicket(ticket);

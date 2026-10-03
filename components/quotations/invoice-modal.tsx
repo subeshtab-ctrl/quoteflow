@@ -79,7 +79,80 @@ export function InvoiceModal({
   );
   const [poNumber, setPoNumber] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('Net 30 Days');
-  const [paymentMode, setPaymentMode] = useState('Electronic Funds Transfer / UPI');
+  const [paymentMode, setPaymentMode] = useState('Bank Transfer (NEFT / RTGS / IMPS)');
+
+  const PAYMENT_MODES = [
+    'Bank Transfer (NEFT / RTGS / IMPS)',
+    'UPI / QR Code',
+    'Credit / Debit Card',
+    'Cash',
+    'Cheque / Demand Draft',
+    'Net Banking',
+    'Online Payment Gateway',
+    'Other',
+  ];
+
+  const handleDueDatePresetChange = (preset: string) => {
+    if (preset === 'Due on Receipt') {
+      setPaymentTerms('Due on Receipt');
+      setDueDate(invoiceDate);
+    } else if (preset === 'Net 7 Days') {
+      const d = new Date(invoiceDate);
+      d.setDate(d.getDate() + 7);
+      setDueDate(d.toISOString().split('T')[0]);
+      setPaymentTerms('Net 7 Days');
+    } else if (preset === 'Net 15 Days') {
+      const d = new Date(invoiceDate);
+      d.setDate(d.getDate() + 15);
+      setDueDate(d.toISOString().split('T')[0]);
+      setPaymentTerms('Net 15 Days');
+    } else if (preset === 'Net 30 Days') {
+      const d = new Date(invoiceDate);
+      d.setDate(d.getDate() + 30);
+      setDueDate(d.toISOString().split('T')[0]);
+      setPaymentTerms('Net 30 Days');
+    } else if (preset === 'Net 45 Days') {
+      const d = new Date(invoiceDate);
+      d.setDate(d.getDate() + 45);
+      setDueDate(d.toISOString().split('T')[0]);
+      setPaymentTerms('Net 45 Days');
+    } else if (preset === 'Net 60 Days') {
+      const d = new Date(invoiceDate);
+      d.setDate(d.getDate() + 60);
+      setDueDate(d.toISOString().split('T')[0]);
+      setPaymentTerms('Net 60 Days');
+    }
+  };
+
+  const handleCustomDueDateChange = (newDue: string) => {
+    setDueDate(newDue);
+    if (!newDue || newDue === invoiceDate) {
+      setPaymentTerms('Due on Receipt');
+    } else {
+      const start = new Date(invoiceDate).getTime();
+      const end = new Date(newDue).getTime();
+      const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
+      if (diffDays > 0) {
+        setPaymentTerms(`Net ${diffDays} Days`);
+      } else {
+        setPaymentTerms('Due on Receipt');
+      }
+    }
+  };
+
+  const handleInvoiceDateChange = (newDate: string) => {
+    setInvoiceDate(newDate);
+    if (paymentTerms === 'Due on Receipt') {
+      setDueDate(newDate);
+    } else if (paymentTerms.startsWith('Net ') && paymentTerms.endsWith(' Days')) {
+      const days = parseInt(paymentTerms.replace('Net ', '').replace(' Days', ''), 10);
+      if (!isNaN(days) && days > 0) {
+        const d = new Date(newDate);
+        d.setDate(d.getDate() + days);
+        setDueDate(d.toISOString().split('T')[0]);
+      }
+    }
+  };
 
   // Payment Tracking State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -115,6 +188,7 @@ export function InvoiceModal({
               if (match.due_date) setDueDate(match.due_date.split('T')[0]);
               if (match.po_number) setPoNumber(match.po_number);
               if (match.payment_terms) setPaymentTerms(match.payment_terms);
+              if (match.payment_method) setPaymentMode(match.payment_method);
               if (typeof match.notes === 'string') setInvoiceNotes(match.notes);
               if (typeof match.terms_conditions === 'string') setInvoiceTerms(match.terms_conditions);
               if (match.items && match.items.length > 0) {
@@ -374,6 +448,7 @@ export function InvoiceModal({
         due_date: dueDate,
         currency: currency,
         payment_terms: paymentTerms,
+        payment_method: paymentMode,
         notes: (invoiceNotes || '').trim(),
         terms_conditions: (invoiceTerms || '').trim(),
         discount_type: discountType,
@@ -598,44 +673,101 @@ export function InvoiceModal({
                     </span>
                   </div>
                 </div>
+
                 <Input
                   label="Invoice Date *"
                   type="date"
                   value={invoiceDate}
-                  onChange={(e) => {
-                    setInvoiceDate(e.target.value);
-                    if (paymentTerms === 'Due on Receipt') setDueDate(e.target.value);
-                  }}
+                  onChange={(e) => handleInvoiceDateChange(e.target.value)}
                   required
                 />
-                {paymentTerms !== 'Due on Receipt' && (
-                  <Input
-                    label="Due Date *"
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Due Date Option
+                  </label>
+                  <select
+                    value={
+                      paymentTerms === 'Due on Receipt'
+                        ? 'Due on Receipt'
+                        : ['Net 7 Days', 'Net 15 Days', 'Net 30 Days', 'Net 45 Days', 'Net 60 Days'].includes(paymentTerms)
+                        ? paymentTerms
+                        : 'Custom Date'
+                    }
+                    onChange={(e) => handleDueDatePresetChange(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="Due on Receipt">No Due Date (Due on Receipt)</option>
+                    <option value="Net 7 Days">Net 7 Days</option>
+                    <option value="Net 15 Days">Net 15 Days</option>
+                    <option value="Net 30 Days">Net 30 Days</option>
+                    <option value="Net 45 Days">Net 45 Days</option>
+                    <option value="Net 60 Days">Net 60 Days</option>
+                    <option value="Custom Date">Custom Date</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Due Date *
+                  </label>
+                  <input
                     type="date"
                     value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
+                    disabled={paymentTerms === 'Due on Receipt'}
+                    onChange={(e) => handleCustomDueDateChange(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
                     required
                   />
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Input
-                  label="PO / Work Order Ref"
-                  value={poNumber}
-                  onChange={(e) => setPoNumber(e.target.value)}
-                  placeholder="e.g. PO-2026-9021"
-                />
+                  {paymentTerms === 'Due on Receipt' && (
+                    <span className="text-[10px] text-slate-400 font-medium">Due upon receipt of invoice</span>
+                  )}
+                </div>
+
                 <Input
                   label="Payment Terms"
                   value={paymentTerms}
                   onChange={(e) => setPaymentTerms(e.target.value)}
                   placeholder="e.g. Net 30 Days"
                 />
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Payment Mode
+                  </label>
+                  <select
+                    value={PAYMENT_MODES.includes(paymentMode) ? paymentMode : 'Other'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val !== 'Other') setPaymentMode(val);
+                      else setPaymentMode('Other');
+                    }}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {PAYMENT_MODES.map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode}
+                      </option>
+                    ))}
+                  </select>
+                  {!PAYMENT_MODES.slice(0, -1).includes(paymentMode) && (
+                    <input
+                      type="text"
+                      value={paymentMode === 'Other' ? '' : paymentMode}
+                      onChange={(e) => setPaymentMode(e.target.value || 'Other')}
+                      placeholder="Specify custom mode..."
+                      className="mt-1 w-full h-8 px-2.5 rounded-lg border border-slate-200 text-xs"
+                    />
+                  )}
+                </div>
+
                 <Input
-                  label="Payment Mode"
-                  value={paymentMode}
-                  onChange={(e) => setPaymentMode(e.target.value)}
-                  placeholder="e.g. Electronic Funds Transfer / UPI"
+                  label="PO / Work Order Ref"
+                  value={poNumber}
+                  onChange={(e) => setPoNumber(e.target.value)}
+                  placeholder="e.g. PO-2026-9021"
                 />
               </div>
             </div>
@@ -1145,19 +1277,19 @@ export function InvoiceModal({
                     <p className="text-slate-600 mt-0.5 leading-relaxed">{invoiceNotes}</p>
                   </div>
                 )}
-                {invoiceTerms && (
+                {Boolean(invoiceTerms && invoiceTerms.trim()) && (
                   <div>
                     <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
                       Terms & Conditions:
                     </span>
                     <p className="text-slate-500 mt-0.5 whitespace-pre-line leading-relaxed text-[11px]">
-                      {invoiceTerms}
+                      {invoiceTerms.trim()}
                     </p>
                   </div>
                 )}
-                {(quotation.payment_method || quotation.payment_notes) && (
+                {paymentMode && (
                   <p className="text-[11px] text-slate-500 italic font-serif pt-1">
-                    Mode of Payment: {quotation.payment_method?.replace(/_/g, ' ') || 'Bank Transfer'}{quotation.payment_notes ? ` • Ref/Txn No: ${quotation.payment_notes}` : ''}
+                    Mode of Payment: {paymentMode.replace(/_/g, ' ')}{quotation.payment_notes ? ` • Ref/Txn No: ${quotation.payment_notes}` : ''}
                   </p>
                 )}
               </div>

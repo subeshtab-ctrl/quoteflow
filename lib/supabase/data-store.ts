@@ -6848,19 +6848,47 @@ class QuoteFlowStore {
       orgMap.set(POZONE_ORG_ID, pozoneOrg);
     }
 
-    // 2. Fetch existing subscriptions from file & memory
+    // 2. Fetch existing subscriptions from file & memory (ONLY for real registered orgs)
     const fileSubs = this.loadSubscriptionsFromFile();
     const subMap = new Map<string, BusinessSubscription>();
     for (const s of Object.values(fileSubs)) {
-      if (!s.deleted_at) subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+      if (
+        !s.deleted_at &&
+        !s.business_id.startsWith('test_') &&
+        !s.business_id.startsWith('test-')
+      ) {
+        const org = orgMap.get(s.business_id);
+        if (org || s.business_id === POZONE_ORG_ID) {
+          subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+        }
+      }
     }
     for (const s of this.subscriptions.values()) {
-      if (!s.deleted_at) subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+      if (
+        !s.deleted_at &&
+        !s.business_id.startsWith('test_') &&
+        !s.business_id.startsWith('test-')
+      ) {
+        const org = orgMap.get(s.business_id);
+        if (org || s.business_id === POZONE_ORG_ID) {
+          subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+        }
+      }
     }
 
-    // 3. Ensure EVERY registered organization has an authoritative subscription record
+    // 3. Ensure EVERY legitimate registered organization has an authoritative subscription record
     for (const org of orgMap.values()) {
       if (org.deleted_at) continue;
+      // Strictly exclude synthetic test ids and dummy records
+      if (
+        org.id.startsWith('test_') ||
+        org.id.startsWith('test-') ||
+        !org.name ||
+        org.name.toLowerCase() === 'unnamed business' ||
+        org.name.toLowerCase().startsWith('test_')
+      ) {
+        continue;
+      }
 
       let sub = subMap.get(org.id);
       if (!sub) {
@@ -6947,7 +6975,17 @@ class QuoteFlowStore {
       pozoneSub.promotional_cycles_completed = 1;
     }
 
-    let all = Array.from(subMap.values()).filter((s) => !s.deleted_at);
+    let all = Array.from(subMap.values()).filter((s) => {
+      if (s.deleted_at) return false;
+      if (s.business_id.startsWith('test_') || s.business_id.startsWith('test-')) return false;
+      const org = orgMap.get(s.business_id);
+      if (!org && s.business_id !== POZONE_ORG_ID) return false;
+      const orgName = org?.name || s.organization?.name || '';
+      if (!orgName || orgName.toLowerCase() === 'unnamed business' || orgName.toLowerCase().startsWith('test_')) {
+        return false;
+      }
+      return true;
+    });
 
     // 5. Apply Status Filters
     if (filters?.status && filters.status !== 'all') {
@@ -7442,7 +7480,16 @@ class QuoteFlowStore {
       } catch {}
     }
 
-    let all = Array.from(ticketMap.values());
+    let all = Array.from(ticketMap.values()).filter((t) => {
+      if (t.deleted_at) return false;
+      if (t.business_id?.startsWith('test_') || t.business_id?.startsWith('test-')) return false;
+      if (t.subject === 'Inquiry regarding GST invoice rounding' || t.subject === 'Billing inquiry with callback') return false;
+      return true;
+    });
+
+    const orgs = await this.getAllOrganizations();
+    const orgLookup = new Map<string, Organization>();
+    orgs.forEach((o) => orgLookup.set(o.id, o));
 
     for (const t of all) {
       const inMemMsgs = this.supportTicketMessages.get(t.id) || [];
@@ -7453,6 +7500,16 @@ class QuoteFlowStore {
       t.messages = Array.from(msgMap.values()).sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       );
+
+      const org = orgLookup.get(t.business_id);
+      if (org) {
+        (t as any).business_name = org.name;
+        (t as any).business_email = org.email;
+        (t as any).business_phone = org.phone;
+      } else if (t.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a') {
+        (t as any).business_name = 'Pozone';
+        (t as any).business_email = 'exodusventures.wll@gmail.com';
+      }
     }
 
     if (params?.businessId) {
@@ -7464,7 +7521,16 @@ class QuoteFlowStore {
       );
     }
     if (params?.status && params.status !== 'all') {
-      all = all.filter((t) => t.status === params.status);
+      const st = params.status.toLowerCase();
+      if (st === 'unread' || st === 'new') {
+        all = all.filter((t) => t.status === 'open' || t.status === 'unread' || t.status === 'new');
+      } else if (st === 'in_process' || st === 'in_progress') {
+        all = all.filter((t) => t.status === 'in_progress' || t.status === 'in_process' || t.status === 'waiting_for_customer');
+      } else if (st === 'resolved' || st === 'solved') {
+        all = all.filter((t) => t.status === 'resolved' || t.status === 'closed');
+      } else {
+        all = all.filter((t) => t.status === params.status);
+      }
     }
     if (params?.category && params.category !== 'all') {
       all = all.filter((t) => t.category === params.category);
@@ -7478,7 +7544,8 @@ class QuoteFlowStore {
         (t) =>
           t.ticket_number.toLowerCase().includes(q) ||
           t.subject.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q)
+          t.description.toLowerCase().includes(q) ||
+          ((t as any).business_name || '').toLowerCase().includes(q)
       );
     }
     return all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

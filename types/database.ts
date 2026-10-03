@@ -747,7 +747,10 @@ export type SupportTicketPriority = 'Low' | 'Normal' | 'High' | 'Urgent';
 
 export type SupportTicketStatus =
   | 'open'
+  | 'unread'
+  | 'new'
   | 'in_progress'
+  | 'in_process'
   | 'waiting_for_customer'
   | 'resolved'
   | 'closed';

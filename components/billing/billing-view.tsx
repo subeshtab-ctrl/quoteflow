@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { SupportHelpModal } from '@/components/support/support-help-modal';
+import Link from 'next/link';
 import {
   CheckCircle2,
   AlertCircle,
@@ -27,6 +28,7 @@ import {
   Lock,
   ExternalLink,
   Zap,
+  ArrowLeft,
 } from 'lucide-react';
 
 declare global {
@@ -335,7 +337,18 @@ export function BillingView({ initialData }: BillingViewProps) {
     : '—';
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-12 selection:bg-indigo-500 selection:text-white">
+    <div className="max-w-5xl mx-auto space-y-6 pb-12 selection:bg-indigo-500 selection:text-white">
+      {/* Back Button */}
+      <div>
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 transition-colors group px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+        >
+          <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+          <span>Back to Dashboard</span>
+        </Link>
+      </div>
+
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

@@ -81,7 +81,29 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
 
   useEffect(() => {
     fetchTickets();
-  }, [selectedStatus, selectedCategory, searchQuery]);
+    const interval = setInterval(() => {
+      fetchTickets();
+      if (activeTicket?.id) {
+        fetch(`/api/support/tickets/${activeTicket.id}`)
+          .then((r) => r.json())
+          .then((j) => {
+            if (j.ticket) {
+              setActiveTicket((prev) => {
+                if (!prev || prev.id !== j.ticket.id) return j.ticket;
+                const prevCount = prev.messages?.length || 0;
+                const newCount = j.ticket.messages?.length || 0;
+                if (newCount !== prevCount || j.ticket.status !== prev.status) {
+                  return j.ticket;
+                }
+                return prev;
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selectedStatus, selectedCategory, searchQuery, activeTicket?.id]);
 
   const loadTicketDetails = async (ticketId: string) => {
     try {
@@ -231,46 +253,71 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
         </Button>
       </div>
 
-      {/* Filters Bar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search tickets by #ID, subject, or description..."
-            className="pl-9 text-xs"
-          />
+      {/* Filters Bar & Status Pills */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          {[
+            { id: 'all', label: `All Tickets (${tickets.length})` },
+            {
+              id: 'unread',
+              label: `Pending / Unread (${tickets.filter((t) => t.status === 'unread' || t.status === 'open' || t.status === 'new').length})`,
+              highlight: tickets.filter((t) => t.status === 'unread' || t.status === 'open' || t.status === 'new').length > 0,
+            },
+            {
+              id: 'in_process',
+              label: `In Process (${tickets.filter((t) => t.status === 'in_process' || t.status === 'in_progress' || t.status === 'waiting_for_customer').length})`,
+            },
+            {
+              id: 'resolved',
+              label: `Resolved (${tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length})`,
+            },
+          ].map((pill) => (
+            <button
+              key={pill.id}
+              onClick={() => setSelectedStatus(pill.id)}
+              className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                selectedStatus === pill.id
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : pill.highlight
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/60'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              {pill.highlight && pill.id !== selectedStatus && (
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+              )}
+              <span>{pill.label}</span>
+            </button>
+          ))}
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto">
-          <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200"
-          >
-            <option value="all">All Statuses</option>
-            <option value="open">Open</option>
-            <option value="in_progress">In Progress</option>
-            <option value="waiting_for_customer">Waiting on You</option>
-            <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
-          </select>
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search tickets by #ID, subject, or description..."
+              className="pl-9 text-xs"
+            />
+          </div>
 
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200"
-          >
-            <option value="all">All Categories</option>
-            <option value="Billing">Billing</option>
-            <option value="Subscription">Subscription</option>
-            <option value="Quote">Quote</option>
-            <option value="Invoice">Invoice</option>
-            <option value="Technical Issue">Technical Issue</option>
-            <option value="Bug Report">Bug Report</option>
-            <option value="Feature Request">Feature Request</option>
-          </select>
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200"
+            >
+              <option value="all">All Categories</option>
+              <option value="Billing">Billing</option>
+              <option value="Subscription">Subscription</option>
+              <option value="Quote">Quote</option>
+              <option value="Invoice">Invoice</option>
+              <option value="Technical Issue">Technical Issue</option>
+              <option value="Bug Report">Bug Report</option>
+              <option value="Feature Request">Feature Request</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -319,19 +366,31 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
 
                 <div className="flex items-center gap-4 shrink-0 text-xs">
                   <span
-                    className={`px-2.5 py-1 rounded-full font-bold uppercase text-[10px] ${
-                      t.status === 'open'
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
-                        : t.status === 'in_progress'
-                        ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                    className={`px-2.5 py-1 rounded-full font-bold uppercase text-[10px] flex items-center gap-1 ${
+                      t.status === 'unread' || t.status === 'open'
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                        : t.status === 'in_process' || t.status === 'in_progress'
+                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
                         : t.status === 'waiting_for_customer'
                         ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                        : t.status === 'resolved'
+                        : t.status === 'resolved' || t.status === 'closed'
                         ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                         : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                     }`}
                   >
-                    {t.status.replace(/_/g, ' ')}
+                    {t.status === 'unread' || t.status === 'open' ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                        <span>Pending</span>
+                      </>
+                    ) : t.status === 'resolved' ? (
+                      <>
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span>Resolved</span>
+                      </>
+                    ) : (
+                      t.status.replace(/_/g, ' ')
+                    )}
                   </span>
                   <span className="text-slate-400 text-[11px]">
                     {new Date(t.created_at).toLocaleDateString()}
@@ -635,7 +694,13 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
                 rows={2}
                 value={replyMessage}
                 onChange={(e) => setReplyMessage(e.target.value)}
-                placeholder="Type your response to developer support..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendReply();
+                  }
+                }}
+                placeholder="Type your response to developer support... (Press Enter to send)"
                 className="text-xs"
               />
               <div className="flex items-center justify-between">

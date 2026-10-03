@@ -103,5 +103,32 @@
     "default_show_bank_details": true,
     "default_show_upi_details": true,
     "default_show_crypto_details": false
+  },
+  "test-org-1791019017607": {
+    "default_bank_details": null,
+    "default_upi_details": null,
+    "default_crypto_details": null,
+    "default_payment_display_mode": "BOTH",
+    "default_show_bank_details": true,
+    "default_show_upi_details": true,
+    "default_show_crypto_details": false
+  },
+  "test-org-1791019254212": {
+    "default_bank_details": null,
+    "default_upi_details": null,
+    "default_crypto_details": null,
+    "default_payment_display_mode": "BOTH",
+    "default_show_bank_details": true,
+    "default_show_upi_details": true,
+    "default_show_crypto_details": false
+  },
+  "test-org-1791019462344": {
+    "default_bank_details": null,
+    "default_upi_details": null,
+    "default_crypto_details": null,
+    "default_payment_display_mode": "BOTH",
+    "default_show_bank_details": true,
+    "default_show_upi_details": true,
+    "default_show_crypto_details": false
   }
 }
