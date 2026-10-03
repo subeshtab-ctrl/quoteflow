@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
+import { subscriptionService } from '@/lib/billing/subscription-service';
 import { CustomerFormSchema } from '@/lib/validations/quotation';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
@@ -16,6 +17,19 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
     const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
+    // Enforce subscription restriction after 3-day grace period
+    const access = await subscriptionService.getBusinessSubscriptionAccess(orgId);
+    if (!access.allowed || access.isRestricted) {
+      return NextResponse.json(
+        {
+          error: 'Your ₹99 subscription payment is overdue. Please complete payment to restore full QuoteFlow access.',
+          code: 'SUBSCRIPTION_RESTRICTED',
+          access,
+        },
+        { status: 402 }
+      );
+    }
     const body = await req.json();
     const validated = CustomerFormSchema.parse(body);
 

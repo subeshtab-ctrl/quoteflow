@@ -225,21 +225,6 @@ export default function AdminPage() {
             <span>{hasPassword ? 'Change Password' : 'Set Password'}</span>
           </Button>
 
-          <Link href="/dashboard">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`text-xs gap-1.5 ${
-                theme === 'dark'
-                  ? 'border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200'
-                  : 'border-slate-200 bg-white hover:bg-slate-100 text-slate-700 shadow-xs'
-              }`}
-            >
-              <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
-              <span>Customer App</span>
-            </Button>
-          </Link>
-
           <Button
             variant="destructive"
             size="sm"

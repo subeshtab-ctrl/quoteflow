@@ -250,3 +250,123 @@ export function generateQuotationRejectedEmail(params: {
     html,
   };
 }
+
+/**
+ * 7/5/3/1 Day Trial Reminder Email Template
+ */
+export function generateTrialReminderEmail(params: {
+  companyName: string;
+  daysRemaining: number;
+  trialEndsAt?: string;
+  trialEndDate?: string;
+  subscribeUrl: string;
+}): EmailPayload {
+  const subject = `⚠️ Your QuoteFlow free trial ends in ${params.daysRemaining} days — ₹99/month`;
+  const rawDate = params.trialEndsAt || params.trialEndDate || '';
+  const parsedDate = new Date(rawDate);
+  const formattedDate = isNaN(parsedDate.getTime()) ? rawDate : parsedDate.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px;">
+        <div style="max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <div style="display: inline-block; background: #4f46e5; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px;">
+            QuoteFlow Trial Reminder
+          </div>
+          <h2 style="margin: 0 0 12px 0; font-size: 22px; font-weight: 800; color: #1e1b4b;">
+            Your Free Trial Ends in ${params.daysRemaining} ${params.daysRemaining === 1 ? 'Day' : 'Days'}
+          </h2>
+          <p style="font-size: 14px; color: #475569; line-height: 1.6;">
+            Hello <strong>${params.companyName}</strong>,<br><br>
+            Your 30-day free trial on QuoteFlow will conclude on <strong>${formattedDate}</strong>.
+            To keep creating estimates, quotations, commercial tax invoices, and tracking client approvals without interruption, subscribe to QuoteFlow Pro for just <strong>₹99 / month</strong>.
+          </p>
+          <div style="background: #f1f5f9; border-radius: 12px; padding: 18px; margin: 24px 0; text-align: center;">
+            <p style="margin: 0 0 6px 0; font-size: 13px; color: #64748b;">Plan: <strong>QuoteFlow Pro</strong></p>
+            <p style="margin: 0; font-size: 26px; font-weight: 800; color: #0f172a;">₹99 <span style="font-size: 14px; font-weight: normal; color: #64748b;">/ month</span></p>
+          </div>
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="${params.subscribeUrl}" style="display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 14px;">
+              Subscribe for ₹99/month
+            </a>
+          </div>
+          <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+            You can start your subscription anytime during your trial. Your card will not be debited until your free trial ends.
+          </p>
+        </div>
+      </body>
+    </html>
+  `;
+
+  return {
+    to: '',
+    fromName: 'QuoteFlow Billing',
+    subject,
+    html,
+  };
+}
+
+/**
+ * Payment Due & Grace Period Reminder Email Template (Day 1, Day 2, Day 3)
+ */
+export function generatePaymentDueEmail(params: {
+  companyName: string;
+  dueDate: string;
+  overdueDays?: number;
+  payUrl: string;
+}): EmailPayload {
+  const isOverdue = typeof params.overdueDays === 'number' && params.overdueDays > 0;
+  const isFinal = params.overdueDays === 3;
+
+  const subject = isFinal
+    ? `🚨 Final payment reminder: Your ₹99 QuoteFlow payment is 3 days overdue`
+    : isOverdue
+    ? `⚠️ Payment overdue: Your ₹99 QuoteFlow payment is ${params.overdueDays} ${params.overdueDays === 1 ? 'day' : 'days'} overdue`
+    : `⚠️ Payment Due: ₹99 QuoteFlow payment is due on ${params.dueDate}`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px;">
+        <div style="max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0;">
+          <div style="display: inline-block; background: ${isFinal ? '#dc2626' : '#d97706'}; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; margin-bottom: 16px;">
+            ${isFinal ? 'Final Reminder' : isOverdue ? 'Payment Overdue' : 'Payment Due'}
+          </div>
+          <h2 style="margin: 0 0 12px 0; font-size: 22px; font-weight: 800; color: #0f172a;">
+            ${isFinal ? 'Account Restrictions Pending' : isOverdue ? 'Please Pay to Avoid Interruption' : '₹99 Subscription Payment Due'}
+          </h2>
+          <p style="font-size: 14px; color: #475569; line-height: 1.6;">
+            Hello <strong>${params.companyName}</strong>,<br><br>
+            ${isFinal
+              ? 'Your ₹99 QuoteFlow payment is now 3 days overdue. Please complete payment today to avoid temporary account restrictions on creating new quotes and invoices.'
+              : isOverdue
+              ? `Your ₹99 QuoteFlow payment is ${params.overdueDays} ${params.overdueDays === 1 ? 'day' : 'days'} overdue. Your 3-day grace period is currently active so you can continue using QuoteFlow, but please pay now to keep your account active.`
+              : `Your ₹99 payment for QuoteFlow Pro is due on <strong>${params.dueDate}</strong>. Please complete payment to maintain active service.`
+            }
+          </p>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${params.payUrl}" style="display: inline-block; background: ${isFinal ? '#dc2626' : '#4f46e5'}; color: #ffffff !important; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 14px;">
+              Pay ₹99 Now
+            </a>
+          </div>
+          <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+            All your historical estimates, invoices, and reports will always remain safely preserved and accessible.
+          </p>
+        </div>
+      </body>
+    </html>
+  `;
+
+  return {
+    to: '',
+    fromName: 'QuoteFlow Billing',
+    subject,
+    html,
+  };
+}
+

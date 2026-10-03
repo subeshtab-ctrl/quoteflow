@@ -68,5 +68,47 @@
     "processing_error": null,
     "created_at": "2026-10-02T15:49:48.274Z",
     "processed_at": "2026-10-02T15:49:48.274Z"
+  },
+  "evt_test_idempotent_1791003451728": {
+    "id": "635b8647-f1a2-47d5-aede-6b8629412eb5",
+    "event_id": "evt_test_idempotent_1791003451728",
+    "event_type": "subscription.charged",
+    "razorpay_subscription_id": "sub_test_dup",
+    "razorpay_payment_id": "pay_test_dup",
+    "payload": {
+      "test": true
+    },
+    "processed": true,
+    "processing_error": null,
+    "created_at": "2026-10-03T04:57:31.728Z",
+    "processed_at": "2026-10-03T04:57:31.728Z"
+  },
+  "evt_test_idempotent_1791003664975": {
+    "id": "e027ff4d-4827-47b1-ba88-e4ab97925fa6",
+    "event_id": "evt_test_idempotent_1791003664975",
+    "event_type": "subscription.charged",
+    "razorpay_subscription_id": "sub_test_dup",
+    "razorpay_payment_id": "pay_test_dup",
+    "payload": {
+      "test": true
+    },
+    "processed": true,
+    "processing_error": null,
+    "created_at": "2026-10-03T05:01:04.975Z",
+    "processed_at": "2026-10-03T05:01:04.975Z"
+  },
+  "evt_test_idempotent_1791003830296": {
+    "id": "009baeaa-457b-4392-bfc2-3293d8927903",
+    "event_id": "evt_test_idempotent_1791003830296",
+    "event_type": "subscription.charged",
+    "razorpay_subscription_id": "sub_test_dup",
+    "razorpay_payment_id": "pay_test_dup",
+    "payload": {
+      "test": true
+    },
+    "processed": true,
+    "processing_error": null,
+    "created_at": "2026-10-03T05:03:50.296Z",
+    "processed_at": "2026-10-03T05:03:50.296Z"
   }
 }

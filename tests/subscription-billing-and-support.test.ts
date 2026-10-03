@@ -40,38 +40,36 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       expect(access.planName).toBe('QuoteFlow Free Trial');
     });
 
-    it('server-side expires trial when trial date is in the past without deleting data', async () => {
+    it('server-side expires trial and restricts access after trial + 3-day grace period without deleting data', async () => {
       const expiredBizId = crypto.randomUUID();
       const trialSub = await subscriptionService.startFreeTrial(expiredBizId);
-      // Simulate expired trial date
-      trialSub.trial_end_at = new Date(Date.now() - 86400000).toISOString();
+      // Simulate expired trial date past 3-day grace period
+      trialSub.trial_end_at = new Date(Date.now() - 5 * 86400000).toISOString();
+      trialSub.grace_period_end_at = new Date(Date.now() - 2 * 86400000).toISOString();
+      trialSub.status = 'payment_overdue';
       await store.saveBusinessSubscription(trialSub);
 
       const access = await subscriptionService.getBusinessSubscriptionAccess(expiredBizId);
-      expect(access.status).toBe('expired');
-      expect(access.isExpired).toBe(true);
+      expect(access.isRestricted).toBe(true);
       expect(access.allowed).toBe(false);
-      expect(access.warningMessage).toContain('expired');
+      expect(access.warningMessage).toContain('Billing Required');
     });
   });
 
-  describe('2. Promotional Subscription: ₹99/mo for 3 Cycles -> Automatic ₹199/mo Transition', () => {
-    it('allows eligible business to start ₹99 promo and tracks exactly 3 cycles then transitions to ₹199', async () => {
+  describe('2. QuoteFlow Pro ₹99/mo Lifecycle (Strictly No ₹199 Plan)', () => {
+    it('allows eligible business to subscribe to QuoteFlow Pro ₹99/mo', async () => {
       const promoBusinessId = crypto.randomUUID();
       // 1. Create checkout
       const checkout = await subscriptionService.createSubscriptionCheckout({
         businessId: promoBusinessId,
-        planSlug: 'promo_99',
+        planSlug: 'monthly_99',
       });
 
       expect(checkout.amount).toBe(9900); // 9900 paise = ₹99
-      expect(checkout.planSlug).toBe('promo_99');
+      expect(checkout.planSlug).toBe('monthly_99');
 
       const pendingSub = await store.getBusinessSubscription(promoBusinessId);
-      expect(pendingSub?.status).toBe('pending');
       expect(pendingSub?.amount).toBe(9900);
-      expect(pendingSub?.promo_months_remaining).toBe(3);
-      expect(pendingSub?.promotional_cycles_completed).toBe(0);
 
       const rzpSubId = pendingSub!.razorpay_subscription_id!;
 
@@ -83,39 +81,18 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
         businessId: promoBusinessId,
       });
       expect(month1.status).toBe('active');
-      expect(month1.promotional_cycles_completed).toBe(1);
-      expect(month1.promo_months_remaining).toBe(2);
       expect(month1.amount).toBe(9900);
 
-      // 3. Month 2 payment confirmed
+      // 3. Month 2 payment confirmed remains ₹99 (NO ₹199 plan)
       const month2 = await subscriptionService.handleSuccessfulPayment({
         subscriptionId: rzpSubId,
         paymentId: 'pay_test_month_2',
         amount: 9900,
         businessId: promoBusinessId,
       });
-      expect(month2.promotional_cycles_completed).toBe(2);
-      expect(month2.promo_months_remaining).toBe(1);
+      expect(month2.status).toBe('active');
       expect(month2.amount).toBe(9900);
-
-      // 4. Month 3 payment confirmed (Final promotional cycle)
-      const month3 = await subscriptionService.handleSuccessfulPayment({
-        subscriptionId: rzpSubId,
-        paymentId: 'pay_test_month_3',
-        amount: 9900,
-        businessId: promoBusinessId,
-      });
-
-      // AUTOMATIC TRANSITION TO ₹199/MONTH
-      expect(month3.promotional_cycles_completed).toBe(3);
-      expect(month3.promo_months_remaining).toBe(0);
-      expect(month3.amount).toBe(19900); // Converted to ₹199 (19900 paise)
-      expect(month3.plan_id).toBe(DEFAULT_PLANS.STANDARD_199.id);
-      expect(month3.status).toBe('active');
-
-      // Verify that after 3 cycles, business cannot re-claim the ₹99 welcome offer
-      const isStillEligible = await subscriptionService.isEligibleForPromotion(promoBusinessId);
-      expect(isStillEligible).toBe(false);
+      expect(month2.plan_id).toBe(DEFAULT_PLANS.PRO_99.id);
     });
   });
 
@@ -365,19 +342,13 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       });
 
       expect(sub.is_trial_prepaid).toBe(true);
-      expect(sub.status).toBe('trialing'); // trial remains active!
+      expect(sub.status).toBe('active'); // Requirement 6: plan becomes active on verified payment
 
-      // Access should still show trial with remaining days
+      // Access should still show remaining trial days anchored (Requirements 7, 8)
       const access = await subscriptionService.getBusinessSubscriptionAccess(trialBizId);
-      expect(access.isTrial).toBe(true);
+      expect(access.isPaid).toBe(true);
       expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(29);
-
-      // Simulate trial expiration
-      sub.trial_end_at = new Date(Date.now() - 1000).toISOString();
-      await store.saveBusinessSubscription(sub);
-
-      const expiredAccess = await subscriptionService.getBusinessSubscriptionAccess(trialBizId);
-      expect(expiredAccess.status).toBe('active'); // Converts to active automatically!
+      expect(access.allowed).toBe(true);
     });
 
     it('creates support ticket with callback request and marks as solved', async () => {

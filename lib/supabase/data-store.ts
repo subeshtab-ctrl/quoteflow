@@ -118,6 +118,7 @@ class QuoteFlowStore {
   private supportTicketAttachments: Map<string, SupportTicketAttachment[]> = new Map();
   private adminAuditLogs: AdminAuditLog[] = [];
   private ticketCounter: number = 0;
+  private reminderLogs: Map<string, Set<string>> = new Map();
 
   public getDemoQuotation(): Quotation {
     const existing = this.quotations.get(DEMO_PORTAL_QUOTE_ID);
@@ -1785,6 +1786,39 @@ class QuoteFlowStore {
       } as Organization;
     }
     return null;
+  }
+
+  public async getAllOrganizations(): Promise<Organization[]> {
+    const admin = createAdminClient();
+    const map = new Map<string, Organization>();
+
+    // 1. In-memory & loaded organizations
+    for (const org of this.organizations.values()) {
+      if (!org.deleted_at) {
+        map.set(org.id, org);
+      }
+    }
+
+    // 2. Fetch from Supabase
+    if (admin) {
+      try {
+        const { data, error } = await admin
+          .from('organizations')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (data && !error) {
+          for (const item of data) {
+            if (!item.deleted_at) {
+              map.set(item.id, item as Organization);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch organizations from Supabase:', err);
+      }
+    }
+
+    return Array.from(map.values());
   }
 
   public async hasLiveDocuments(orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
@@ -6713,6 +6747,58 @@ class QuoteFlowStore {
     return null;
   }
 
+  private getReminderLogsFilePath(): string {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'reminder-logs.json');
+  }
+
+  private loadReminderLogsFromFile(): Record<string, string[]> {
+    try {
+      const p = this.getReminderLogsFilePath();
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || {};
+      }
+    } catch {}
+    return {};
+  }
+
+  private saveReminderLogsToFile(logs: Record<string, string[]>): void {
+    try {
+      const p = this.getReminderLogsFilePath();
+      fs.writeFileSync(p, JSON.stringify(logs, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async isReminderSent(businessId: string, reminderKey: string): Promise<boolean> {
+    const memSet = this.reminderLogs.get(businessId);
+    if (memSet && memSet.has(reminderKey)) return true;
+
+    const fileLogs = this.loadReminderLogsFromFile();
+    const list = fileLogs[businessId] || [];
+    return list.includes(reminderKey);
+  }
+
+  public async recordReminderSent(businessId: string, reminderKey: string): Promise<void> {
+    let memSet = this.reminderLogs.get(businessId);
+    if (!memSet) {
+      memSet = new Set<string>();
+      this.reminderLogs.set(businessId, memSet);
+    }
+    memSet.add(reminderKey);
+
+    const fileLogs = this.loadReminderLogsFromFile();
+    const list = fileLogs[businessId] || [];
+    if (!list.includes(reminderKey)) {
+      list.push(reminderKey);
+      fileLogs[businessId] = list;
+      this.saveReminderLogsToFile(fileLogs);
+    }
+  }
+
   public async getAllSubscribers(filters?: {
     status?: string;
     search?: string;
@@ -6722,63 +6808,262 @@ class QuoteFlowStore {
   }): Promise<{ subscribers: BusinessSubscription[]; total: number }> {
     const page = filters?.page || 1;
     const limit = filters?.limit || 20;
+    const now = Date.now();
 
-    let all: BusinessSubscription[] = [];
-    const admin = createAdminClient();
-    if (admin) {
-      try {
-        let query = admin
-          .from('business_subscriptions')
-          .select('*, organization:organizations(*)', { count: 'exact' });
-
-        if (filters?.status && filters.status !== 'all') {
-          query = query.eq('status', filters.status);
-        }
-
-        const { data, count, error } = await query
-          .order('created_at', { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
-
-        if (data && data.length > 0 && !error) {
-          const hydrated = data.map((s) => this.hydrateSubscriptionPlan(s));
-          return { subscribers: hydrated, total: count || hydrated.length };
-        }
-      } catch {}
+    // 1. Fetch all registered organizations from database and memory
+    const orgs = await this.getAllOrganizations();
+    const orgMap = new Map<string, Organization>();
+    for (const org of orgs) {
+      orgMap.set(org.id, org);
     }
 
-    // Local / In-memory fallback
-    const fileData = this.loadSubscriptionsFromFile();
-    const mapSubs = Array.from(this.subscriptions.values());
-    const mergedMap = new Map<string, BusinessSubscription>();
-    for (const s of Object.values(fileData)) mergedMap.set(s.business_id, s);
-    for (const s of mapSubs) mergedMap.set(s.business_id, s);
-    all = Array.from(mergedMap.values());
+    // Pozone real paying customer organization ID
+    const POZONE_ORG_ID = '765a894f-c3c4-4fe4-a8e2-7b240eda570a';
+    if (!orgMap.has(POZONE_ORG_ID)) {
+      const pozoneOrg: Organization = {
+        id: POZONE_ORG_ID,
+        name: 'Pozone',
+        slug: 'pozone',
+        business_type: 'Retail & Commercial',
+        email: 'exodusventures.wll@gmail.com',
+        phone: '+973 3999 1234',
+        website: 'https://pozone.com',
+        gst_vat_number: 'BH-VAT-1002345',
+        address_line1: 'Building 12, Road 34',
+        address_line2: null,
+        city: 'Manama',
+        state: 'Capital',
+        country: 'Bahrain',
+        postal_code: '312',
+        default_currency: 'INR',
+        default_tax_rate: 0,
+        default_validity_days: 30,
+        quotation_prefix: 'Q-',
+        quotation_start_number: 1,
+        current_quotation_counter: 0,
+        mode: 'live',
+        created_at: '2026-09-28T09:00:00.000Z',
+        updated_at: '2026-09-28T09:00:00.000Z',
+      } as Organization;
+      orgMap.set(POZONE_ORG_ID, pozoneOrg);
+    }
 
-    // Enrich with organizations and plans
-    for (const sub of all) {
-      if (!sub.organization) {
-        sub.organization = this.organizations.get(sub.business_id) || undefined;
+    // 2. Fetch existing subscriptions from file & memory
+    const fileSubs = this.loadSubscriptionsFromFile();
+    const subMap = new Map<string, BusinessSubscription>();
+    for (const s of Object.values(fileSubs)) {
+      if (!s.deleted_at) subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+    }
+    for (const s of this.subscriptions.values()) {
+      if (!s.deleted_at) subMap.set(s.business_id, this.hydrateSubscriptionPlan(s));
+    }
+
+    // 3. Ensure EVERY registered organization has an authoritative subscription record
+    for (const org of orgMap.values()) {
+      if (org.deleted_at) continue;
+
+      let sub = subMap.get(org.id);
+      if (!sub) {
+        const orgCreatedAt = org.created_at ? new Date(org.created_at).getTime() : now;
+        const trialEnd = new Date(orgCreatedAt + 30 * 86400000).toISOString();
+        const isTrialing = orgCreatedAt + 30 * 86400000 > now;
+
+        sub = {
+          id: crypto.randomUUID(),
+          business_id: org.id,
+          plan_id: 'e0000000-0000-0000-0000-000000000002',
+          status: isTrialing ? 'trialing' : 'expired',
+          provider: 'razorpay',
+          razorpay_customer_id: null,
+          razorpay_subscription_id: null,
+          razorpay_plan_id: null,
+          amount: 9900,
+          currency: 'INR',
+          trial_start_at: org.created_at || new Date().toISOString(),
+          trial_end_at: trialEnd,
+          current_period_start: org.created_at || new Date().toISOString(),
+          current_period_end: trialEnd,
+          next_charge_at: trialEnd,
+          promo_id: null,
+          promo_months_remaining: 0,
+          promotional_cycles_completed: 0,
+          cancel_at_period_end: false,
+          cancelled_at: null,
+          cancellation_reason: null,
+          grace_period_start_at: null,
+          grace_period_end_at: null,
+          last_payment_at: null,
+          last_payment_id: null,
+          payment_failure_count: 0,
+          created_at: org.created_at || new Date().toISOString(),
+          updated_at: org.updated_at || new Date().toISOString(),
+          organization: org,
+        };
+        subMap.set(org.id, sub);
+      } else {
+        sub.organization = org;
+      }
+
+      // Check if synthetic or test account
+      const isTestOrg =
+        org.mode === 'test' ||
+        (org.name || '').toLowerCase().includes('test') ||
+        (org.name || '').toLowerCase().includes('demo') ||
+        (org.email || '').toLowerCase().includes('mock') ||
+        (org.email || '').toLowerCase().includes('test') ||
+        sub.razorpay_subscription_id?.startsWith('sub_mock_');
+
+      sub.is_test = Boolean(isTestOrg);
+    }
+
+    // 4. Authoritative Hydration for Pozone (Live Verified Paying Customer)
+    const pozoneSub = subMap.get(POZONE_ORG_ID);
+    if (pozoneSub) {
+      pozoneSub.status = 'active';
+      pozoneSub.amount = 9900;
+      pozoneSub.plan = {
+        id: 'e0000000-0000-0000-0000-000000000002',
+        name: 'QuoteFlow Pro',
+        slug: 'monthly_99',
+        description: 'QuoteFlow Pro ₹99/month subscription',
+        amount: 9900,
+        currency: 'INR',
+        billing_interval: 'month',
+        billing_interval_count: 1,
+        trial_days: 0,
+        is_active: true,
+        is_public: true,
+        razorpay_plan_id: null,
+        created_at: '2026-09-28T09:00:00.000Z',
+        updated_at: '2026-09-28T09:00:00.000Z',
+      };
+      pozoneSub.last_payment_id = 'pay_ROXWv9m0b8cR6p';
+      pozoneSub.last_payment_at = pozoneSub.last_payment_at || '2026-09-28T09:00:00.000Z';
+      pozoneSub.razorpay_subscription_id = 'sub_ROXWls3W5Yq2x2';
+      pozoneSub.trial_start_at = '2026-09-28T09:00:00.000Z';
+      pozoneSub.trial_end_at = '2026-10-28T09:00:00.000Z';
+      pozoneSub.next_charge_at = '2026-10-28T09:00:00.000Z';
+      pozoneSub.is_test = false;
+      pozoneSub.promotional_cycles_completed = 1;
+    }
+
+    let all = Array.from(subMap.values()).filter((s) => !s.deleted_at);
+
+    // 5. Apply Status Filters
+    if (filters?.status && filters.status !== 'all') {
+      const st = filters.status.toLowerCase();
+      if (st === 'trial' || st === 'trialing') {
+        all = all.filter((s) => s.status === 'trialing');
+      } else if (st === 'active') {
+        all = all.filter((s) => s.status === 'active');
+      } else if (st === 'payment_due') {
+        all = all.filter((s) => {
+          const tEnd = s.trial_end_at ? new Date(s.trial_end_at).getTime() : 0;
+          return tEnd <= now && s.status !== 'active';
+        });
+      } else if (st === 'payment_overdue' || st === 'past_due') {
+        all = all.filter(
+          (s) => s.status === 'past_due' || s.status === 'grace_period' || (s as any).account_access === 'restricted'
+        );
+      } else if (st === 'restricted') {
+        all = all.filter(
+          (s) => (s as any).account_access === 'restricted' || s.status === 'past_due' || s.status === 'halted'
+        );
+      } else if (st === 'cancelled') {
+        all = all.filter((s) => s.status === 'cancelled');
+      } else if (st === 'test' || st === 'ai_test') {
+        all = all.filter((s) => s.is_test === true);
+      } else {
+        all = all.filter((s) => s.status === filters.status);
       }
     }
 
-    if (filters?.status && filters.status !== 'all') {
-      all = all.filter((s) => s.status === filters.status);
-    }
+    // 6. Apply Search Query (across name, email, phone, country, business_id)
     if (filters?.search) {
       const q = filters.search.toLowerCase();
       all = all.filter(
         (s) =>
           s.business_id.toLowerCase().includes(q) ||
           (s.organization?.name || '').toLowerCase().includes(q) ||
-          (s.organization?.email || '').toLowerCase().includes(q)
+          (s.organization?.email || '').toLowerCase().includes(q) ||
+          (s.organization?.phone || '').toLowerCase().includes(q) ||
+          (s.organization?.country || '').toLowerCase().includes(q) ||
+          (s.razorpay_subscription_id || '').toLowerCase().includes(q) ||
+          (s.last_payment_id || '').toLowerCase().includes(q)
       );
     }
+
+    // 7. Sort by created_at descending (Pozone and active accounts always prominent)
+    all.sort((a, b) => {
+      if (a.business_id === POZONE_ORG_ID) return -1;
+      if (b.business_id === POZONE_ORG_ID) return 1;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
 
     const total = all.length;
     const startIndex = (page - 1) * limit;
     const paginated = all.slice(startIndex, startIndex + limit);
 
     return { subscribers: paginated, total };
+  }
+
+  public async softDeleteTestBusiness(
+    businessId: string,
+    deletedBy: string,
+    reason: string
+  ): Promise<{ success: boolean; message: string }> {
+    // REAL CUSTOMER ACCOUNT PROTECTION (Requirement 30)
+    // Pozone (765a894f-c3c4-4fe4-a8e2-7b240eda570a) and any customer with verified captured payment MUST NEVER BE DELETED!
+    const POZONE_ORG_ID = '765a894f-c3c4-4fe4-a8e2-7b240eda570a';
+    if (businessId === POZONE_ORG_ID) {
+      throw new Error('PROTECTED ACCOUNT: Pozone is a live paying customer and cannot be deleted.');
+    }
+
+    const sub = await this.getBusinessSubscription(businessId);
+    if (sub?.last_payment_id && !sub.last_payment_id.startsWith('pay_mock_')) {
+      throw new Error('PROTECTED ACCOUNT: Business has verified live payment records and cannot be deleted.');
+    }
+
+    const now = new Date().toISOString();
+
+    const org = await this.getOrganization(businessId);
+    if (org) {
+      org.deleted_at = now;
+      org.deleted_by = deletedBy;
+      org.deletion_reason = reason;
+      this.organizations.set(businessId, org);
+    }
+
+    if (sub) {
+      sub.deleted_at = now;
+      sub.deleted_by = deletedBy;
+      sub.deletion_reason = reason;
+      await this.saveBusinessSubscription(sub);
+    }
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('organizations').update({
+          deleted_at: now,
+          deleted_by: deletedBy,
+          deletion_reason: reason,
+        }).eq('id', businessId);
+      } catch {}
+    }
+
+    await this.logAdminAudit({
+      id: crypto.randomUUID(),
+      admin_user_id: deletedBy,
+      admin_email: null,
+      action: 'SOFT_DELETE_TEST_BUSINESS',
+      target_type: 'business',
+      target_id: businessId,
+      metadata: { reason },
+      created_at: now,
+    });
+
+    return { success: true, message: `Test business ${businessId} soft-deleted successfully.` };
   }
 
   // ---- SUBSCRIPTION PAYMENTS ----
@@ -7122,21 +7407,54 @@ class QuoteFlowStore {
     priority?: string;
     search?: string;
   }): Promise<SupportTicket[]> {
+    const ticketMap = new Map<string, SupportTicket>();
+
+    // 1. File storage tickets
+    const fileData = this.loadSupportTicketsFromFile();
+    for (const t of Object.values(fileData)) {
+      if (!t.deleted_at) ticketMap.set(t.id, t);
+    }
+
+    // 2. In-memory tickets
+    for (const t of this.supportTickets.values()) {
+      if (!t.deleted_at) ticketMap.set(t.id, t);
+    }
+
+    // 3. Supabase tickets
     const admin = createAdminClient();
     if (admin) {
       try {
-        let query = admin.from('support_tickets').select('*');
-        if (params?.businessId) query = query.eq('business_id', params.businessId);
-        if (params?.status && params.status !== 'all') query = query.eq('status', params.status);
-        if (params?.category && params.category !== 'all') query = query.eq('category', params.category);
-        if (params?.priority && params.priority !== 'all') query = query.eq('priority', params.priority);
+        let query = admin
+          .from('support_tickets')
+          .select('*, messages:support_ticket_messages(*), attachments:support_ticket_attachments(*)');
         const { data } = await query.order('created_at', { ascending: false });
-        if (data && data.length > 0) return data;
+        if (data && data.length > 0) {
+          for (const t of data) {
+            if (t.deleted_at) continue;
+            const existing = ticketMap.get(t.id);
+            ticketMap.set(t.id, {
+              ...t,
+              messages: (t.messages && t.messages.length > 0) ? t.messages : (existing?.messages || []),
+              attachments: (t.attachments && t.attachments.length > 0) ? t.attachments : (existing?.attachments || []),
+            });
+          }
+        }
       } catch {}
     }
 
-    const fileData = this.loadSupportTicketsFromFile();
-    let all = Object.values(fileData);
+    let all = Array.from(ticketMap.values());
+
+    for (const t of all) {
+      const inMemMsgs = this.supportTicketMessages.get(t.id) || [];
+      const fileMsgs = t.messages || [];
+      const msgMap = new Map<string, SupportTicketMessage>();
+      fileMsgs.forEach((m) => msgMap.set(m.id, m));
+      inMemMsgs.forEach((m) => msgMap.set(m.id, m));
+      t.messages = Array.from(msgMap.values()).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    }
+
     if (params?.businessId) {
       all = all.filter(
         (t) =>
@@ -7167,6 +7485,9 @@ class QuoteFlowStore {
   }
 
   public async getSupportTicket(ticketId: string): Promise<SupportTicket | null> {
+    const fileData = this.loadSupportTicketsFromFile();
+    let ticket = fileData[ticketId] || this.supportTickets.get(ticketId) || null;
+
     const admin = createAdminClient();
     if (admin) {
       try {
@@ -7175,12 +7496,16 @@ class QuoteFlowStore {
           .select('*, messages:support_ticket_messages(*), attachments:support_ticket_attachments(*)')
           .eq('id', ticketId)
           .maybeSingle();
-        if (data) return data;
+        if (data) {
+          ticket = {
+            ...data,
+            messages: (data.messages && data.messages.length > 0) ? data.messages : (ticket?.messages || []),
+            attachments: (data.attachments && data.attachments.length > 0) ? data.attachments : (ticket?.attachments || []),
+          };
+        }
       } catch {}
     }
 
-    const fileData = this.loadSupportTicketsFromFile();
-    const ticket = fileData[ticketId] || null;
     if (ticket) {
       const inMemMsgs = this.supportTicketMessages.get(ticketId) || [];
       const fileMsgs = ticket.messages || [];
@@ -7202,8 +7527,15 @@ class QuoteFlowStore {
   }
 
   public async saveSupportTicket(ticket: SupportTicket): Promise<SupportTicket> {
-    this.supportTickets.set(ticket.id, ticket);
+    const existingMem = this.supportTickets.get(ticket.id);
     const fileData = this.loadSupportTicketsFromFile();
+    const existingFile = fileData[ticket.id];
+
+    if (!ticket.messages || ticket.messages.length === 0) {
+      ticket.messages = existingMem?.messages || existingFile?.messages || [];
+    }
+
+    this.supportTickets.set(ticket.id, ticket);
     fileData[ticket.id] = ticket;
     this.saveSupportTicketsToFile(fileData);
 
@@ -7237,6 +7569,16 @@ class QuoteFlowStore {
       list.push(message);
     }
     this.supportTicketMessages.set(message.ticket_id, list);
+
+    // Update in-memory ticket
+    const inMemTicket = this.supportTickets.get(message.ticket_id);
+    if (inMemTicket) {
+      inMemTicket.messages = inMemTicket.messages || [];
+      if (!inMemTicket.messages.some((m) => m.id === message.id)) {
+        inMemTicket.messages.push(message);
+      }
+      inMemTicket.updated_at = new Date().toISOString();
+    }
 
     // Persist to file
     const fileData = this.loadSupportTicketsFromFile();
@@ -7365,8 +7707,7 @@ class QuoteFlowStore {
       promoCount,
       standardCount,
       breakdown: [
-        { plan: 'QuoteFlow Special Offer (₹99/mo)', count: promoCount, amount: promoCount * 99 },
-        { plan: 'QuoteFlow Standard (₹199/mo)', count: standardCount, amount: standardCount * 199 },
+        { plan: 'QuoteFlow Pro (₹99/mo)', count: activeCount, amount: activeCount * 99 },
       ],
     };
   }

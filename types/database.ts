@@ -113,6 +113,9 @@ export interface Organization {
   mode?: 'test' | 'live';
   current_test_quotation_counter?: number;
   current_test_invoice_counter?: number;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -527,11 +530,16 @@ export interface Template {
 // ==============================================================================
 
 export type SubscriptionStatus =
+  | 'trial'
   | 'trialing'
   | 'pending'
+  | 'payment_pending'
   | 'active'
-  | 'past_due'
+  | 'payment_due'
+  | 'payment_overdue'
   | 'grace_period'
+  | 'restricted'
+  | 'past_due'
   | 'cancelled'
   | 'expired'
   | 'halted'
@@ -549,7 +557,7 @@ export interface SubscriptionPlan {
   name: string;
   slug: string;
   description: string | null;
-  amount: number; // in paise (e.g. 19900 = ₹199)
+  amount: number; // in paise (e.g. 9900 = ₹99)
   currency: string;
   billing_interval: string;
   billing_interval_count: number;
@@ -591,9 +599,14 @@ export interface BusinessSubscription {
   is_trial_prepaid?: boolean;
   plan_start_mode?: 'immediate' | 'after_trial';
   autopay_enabled?: boolean;
+  account_access?: 'active' | 'restricted';
   scheduled_plan_id?: string | null;
   scheduled_subscription_id?: string | null;
   paid_scheduled_start?: string | null;
+  is_test?: boolean;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
   created_at: string;
   updated_at: string;
   // Hydrated references
@@ -637,7 +650,7 @@ export interface Promotion {
   name: string;
   code: string;
   description: string | null;
-  discount_type: 'PERCENTAGE' | 'FIXED';
+  discount_type: 'PERCENTAGE' | 'FIXED' | 'FREE_DAYS' | 'TRIAL_EXTENSION';
   discount_value: number;
   promotional_price: number; // in paise
   currency: string;
@@ -663,19 +676,41 @@ export interface PromotionAssignment {
   promotion?: Promotion;
 }
 
+export interface AdminOffer {
+  id: string;
+  business_id: string;
+  admin_user_id: string;
+  admin_email?: string | null;
+  offer_name: string;
+  offer_type: 'PERCENTAGE' | 'FIXED' | 'FREE_DAYS' | 'TRIAL_EXTENSION';
+  offer_value: number;
+  reason: string;
+  billing_cycles_affected?: number;
+  effective_from: string;
+  effective_until?: string | null;
+  created_at: string;
+}
+
 export interface SubscriptionAccess {
   allowed: boolean;
+  accountAccess: 'active' | 'restricted';
   status: SubscriptionStatus;
   isTrial: boolean;
   isPaid: boolean;
+  isPaymentPending: boolean;
+  isPaymentDue: boolean;
+  isPaymentOverdue: boolean;
   isPastDue: boolean;
   isGracePeriod: boolean;
+  isRestricted: boolean;
   isExpired: boolean;
   isHalted: boolean;
   isCancelled: boolean;
   daysRemainingInTrial: number;
   graceDaysRemaining: number;
   trialEndsAt: string | null;
+  trialStartedAt?: string | null;
+  nextPaymentDue: string | null;
   planName: string;
   planAmount: number;
   promoActive: boolean;
@@ -734,6 +769,10 @@ export interface SupportTicket {
   closed_at: string | null;
   callback_requested?: boolean;
   callback_phone?: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
+  is_test?: boolean;
   // Hydrated references
   business_name?: string;
   creator_email?: string;

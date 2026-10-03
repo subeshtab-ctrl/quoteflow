@@ -1,8 +1,8 @@
 {
   "email": "m.subesh@outlook.com",
-  "passwordHash": "a4f5bf46608a3cf8a64e0ce8907f3294ee362fd0e659a58b128549d55e43548eb6dca31e4644b16a197a78842255a9bc5dbf1513c00bc6854d54b7957a99c8db",
-  "salt": "b32d91a1cc932827435264f9bcffb448",
-  "updatedAt": "2026-10-02T15:49:49.752Z",
+  "passwordHash": "67704a57a37949f4c10daadf6ad152ab65122861f2f35506e64effced92782b34aded8795bc5170efbb7a4d7ed8b90da322517e2f8b5a3231675273acb7ce292",
+  "salt": "827a6d27b644faeb8ce580941bf23537",
+  "updatedAt": "2026-10-03T05:03:51.134Z",
   "razorpayKeyId": null,
   "razorpayKeySecret": null,
   "razorpayPlanIdPromo99": "plan_Tj1uiAIYxdedEa",

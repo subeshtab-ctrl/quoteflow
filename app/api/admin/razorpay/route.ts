@@ -122,39 +122,29 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Create Promo ₹99 plan
-      const promoPlan = await razorpayService.createPlan({
-        name: 'QuoteFlow Special Offer',
+      // Create QuoteFlow Pro ₹99/month recurring plan (Requirement 1: ONLY ₹99 plan exists)
+      const proPlan = await razorpayService.createPlan({
+        name: 'QuoteFlow Pro',
         amount: 9900,
         currency: 'INR',
         period: 'monthly',
         interval: 1,
-        description: 'QuoteFlow ₹99/mo Introductory Plan (3 Cycles)',
+        description: 'QuoteFlow Pro ₹99/month recurring subscription',
       });
 
-      // Create Standard ₹199 plan
-      const standardPlan = await razorpayService.createPlan({
-        name: 'QuoteFlow Standard',
-        amount: 19900,
-        currency: 'INR',
-        period: 'monthly',
-        interval: 1,
-        description: 'QuoteFlow Standard Monthly Subscription',
-      });
-
-      // Update config with the newly created plan IDs
+      // Update config with the newly created plan ID
       const updated = updateRazorpayApiConfig({
-        promoPlanId: promoPlan.id,
-        standardPlanId: standardPlan.id,
+        promoPlanId: proPlan.id,
+        standardPlanId: proPlan.id,
       });
 
-      const testResult = await razorpayService.testConnection(promoPlan.id, standardPlan.id);
+      const testResult = await razorpayService.testConnection(proPlan.id, proPlan.id);
 
       return NextResponse.json({
         success: true,
-        message: 'Successfully created and linked ₹99 and ₹199 plans in your Razorpay account!',
-        promoPlanId: promoPlan.id,
-        standardPlanId: standardPlan.id,
+        message: 'Successfully created and linked QuoteFlow Pro (₹99/month) plan in your Razorpay account!',
+        promoPlanId: proPlan.id,
+        standardPlanId: proPlan.id,
         testResult,
       });
     }

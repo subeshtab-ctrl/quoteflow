@@ -165,10 +165,12 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
     });
 
-    // 7. Seed cache
+    // 7. Seed cache & Start 30-Day Free Trial (Requirement 3)
     if (newOrg) {
       store.setCachedOrganization(newOrgId, newOrg);
     }
+    const { subscriptionService } = await import('@/lib/billing/subscription-service');
+    await subscriptionService.startFreeTrial(newOrgId).catch(console.error);
 
     // 8. Generate & dispatch verification email link to the user's inbox
     try {

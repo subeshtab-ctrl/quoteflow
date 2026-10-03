@@ -39,6 +39,21 @@ import {
   PhoneCall,
   Paperclip,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+  Trash2,
+  Building2,
+  Mail,
+  Phone,
+  Globe,
+  MapPin,
+  Calendar,
+  Percent,
+  ShieldAlert,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark' } = {}) {
@@ -70,6 +85,27 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   const [subSearch, setSubSearch] = useState('');
   const [subPage, setSubPage] = useState(1);
 
+  // Business Expansion & Offer / Clean-up State
+  const [expandedBusinessId, setExpandedBusinessId] = useState<string | null>(null);
+  const [expandedBusinessDetails, setExpandedBusinessDetails] = useState<any | null>(null);
+  const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Apply Offer Modal State
+  const [applyOfferModalOpen, setApplyOfferModalOpen] = useState(false);
+  const [offerTargetBusiness, setOfferTargetBusiness] = useState<BusinessSubscription | null>(null);
+  const [offerType, setOfferType] = useState<'percentage' | 'fixed' | 'free_months' | 'special_rate'>('percentage');
+  const [offerValue, setOfferValue] = useState<number>(20);
+  const [offerDuration, setOfferDuration] = useState<number>(1);
+  const [offerReason, setOfferReason] = useState<string>('Founder promotional incentive');
+  const [isApplyingOffer, setIsApplyingOffer] = useState(false);
+
+  // Cleanup Test Data Modal State
+  const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
+  const [cleanupAccounts, setCleanupAccounts] = useState<any[]>([]);
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [isLoadingCleanupInfo, setIsLoadingCleanupInfo] = useState(false);
+
   // Offers
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [createOfferModalOpen, setCreateOfferModalOpen] = useState(false);
@@ -90,6 +126,119 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+
+  const handleCopy = (text: string, key: string) => {
+    if (!text) return;
+    navigator.clipboard?.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleToggleExpand = async (sub: BusinessSubscription) => {
+    if (expandedBusinessId === sub.business_id) {
+      setExpandedBusinessId(null);
+      setExpandedBusinessDetails(null);
+      return;
+    }
+
+    setExpandedBusinessId(sub.business_id);
+    setExpandedBusinessDetails(null);
+    try {
+      setIsLoadingExpanded(true);
+      const res = await fetch(`/api/admin/subscribers/${sub.business_id}`);
+      const json = await res.json();
+      if (res.ok) {
+        setExpandedBusinessDetails(json);
+      }
+    } catch (err) {
+      console.error('Failed to load business details:', err);
+    } finally {
+      setIsLoadingExpanded(false);
+    }
+  };
+
+  const handleOpenCleanupModal = async () => {
+    setCleanupModalOpen(true);
+    try {
+      setIsLoadingCleanupInfo(true);
+      const res = await fetch('/api/admin/cleanup-test-data');
+      const json = await res.json();
+      if (res.ok) {
+        setCleanupAccounts(json.accounts || []);
+      }
+    } catch (err) {
+      console.error('Error fetching test accounts:', err);
+    } finally {
+      setIsLoadingCleanupInfo(false);
+    }
+  };
+
+  const handleConfirmCleanup = async () => {
+    try {
+      setIsCleaningUp(true);
+      const res = await fetch('/api/admin/cleanup-test-data', { method: 'POST' });
+      const json = await res.json();
+      if (res.ok) {
+        alert(`Successfully cleaned ${json.cleanedCount} synthetic test accounts. Live paying accounts (Pozone) were safely protected.`);
+        setCleanupModalOpen(false);
+        await fetchSubscribers();
+        await fetchStats();
+      } else {
+        alert(json.error || 'Failed to cleanup test data');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error executing cleanup');
+    } finally {
+      setIsCleaningUp(false);
+    }
+  };
+
+  const handleOpenApplyOffer = (sub: BusinessSubscription) => {
+    setOfferTargetBusiness(sub);
+    setOfferType('percentage');
+    setOfferValue(20);
+    setOfferDuration(1);
+    setOfferReason('Developer Admin promotional incentive');
+    setApplyOfferModalOpen(true);
+  };
+
+  const handleApplyOfferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!offerTargetBusiness) return;
+    try {
+      setIsApplyingOffer(true);
+      const res = await fetch(`/api/admin/subscribers/${offerTargetBusiness.business_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'apply_offer',
+          offerType,
+          value: offerValue,
+          durationMonths: offerDuration,
+          reason: offerReason,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        alert(json.message || 'Offer applied successfully to future billing cycles!');
+        setApplyOfferModalOpen(false);
+        setOfferTargetBusiness(null);
+        await fetchSubscribers();
+        await fetchAuditLogs();
+        if (expandedBusinessId) {
+          const ref = await fetch(`/api/admin/subscribers/${expandedBusinessId}`);
+          const rj = await ref.json();
+          if (rj.success) setExpandedBusinessDetails(rj);
+        }
+      } else {
+        alert(json.error || 'Failed to apply offer');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error applying offer');
+    } finally {
+      setIsApplyingOffer(false);
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -569,7 +718,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
       {/* TAB 2: SUBSCRIBERS */}
       {activeTab === 'subscribers' && (
         <div className="space-y-4">
-          {/* Filters & Search */}
+          {/* Filters, Search & Cleanup */}
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -579,96 +728,430 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   setSubSearch(e.target.value);
                   setSubPage(1);
                 }}
-                placeholder="Search by company name, email, or business ID..."
+                placeholder="Search by business name, email, phone, country, or ID..."
                 className="pl-9 text-xs"
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <select
                 value={subStatusFilter}
                 onChange={(e) => {
                   setSubStatusFilter(e.target.value);
                   setSubPage(1);
                 }}
-                className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs"
+                className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium"
               >
                 <option value="all">All Statuses</option>
-                <option value="trialing">Trialing</option>
+                <option value="trial">Trial</option>
                 <option value="active">Active</option>
-                <option value="past_due">Past Due</option>
-                <option value="grace_period">Grace Period</option>
+                <option value="payment_due">Payment Due</option>
+                <option value="payment_overdue">Payment Overdue</option>
+                <option value="restricted">Restricted</option>
                 <option value="cancelled">Cancelled</option>
-                <option value="expired">Expired</option>
-                <option value="halted">Halted</option>
+                <option value="ai_test">AI / Test</option>
               </select>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenCleanupModal}
+                className="text-xs gap-1.5 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Clean Test Data</span>
+              </Button>
             </div>
           </div>
 
-          {/* Subscribers Table */}
+          {/* Subscribers 11-Column Table (Requirement 24) */}
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold">
                   <tr>
-                    <th className="px-5 py-3">Business</th>
-                    <th className="px-5 py-3">Plan</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Price</th>
-                    <th className="px-5 py-3">Promo Progress</th>
-                    <th className="px-5 py-3">Current Period End</th>
-                    <th className="px-5 py-3">Created</th>
+                    <th className="px-4 py-3">Business Name</th>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Phone</th>
+                    <th className="px-4 py-3">Country</th>
+                    <th className="px-4 py-3">Registration</th>
+                    <th className="px-4 py-3">Plan</th>
+                    <th className="px-4 py-3">Trial Status</th>
+                    <th className="px-4 py-3">Sub Status</th>
+                    <th className="px-4 py-3">Trial End</th>
+                    <th className="px-4 py-3">Next Due</th>
+                    <th className="px-4 py-3">Payment</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {subscribers.map((s) => (
-                    <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                      <td className="px-5 py-3">
-                        <div className="space-y-0.5">
-                          <p className="font-bold text-slate-900 dark:text-slate-100">
-                            {s.organization?.name || 'Unnamed Business'}
-                          </p>
-                          <p className="text-[11px] text-slate-400 font-mono">{s.business_id.substring(0, 13)}...</p>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-slate-700 dark:text-slate-300 font-medium">
-                        {s.plan?.name || (s.amount === 9900 ? 'QuoteFlow Special Offer' : s.amount === 19900 ? 'QuoteFlow Standard' : 'Free Trial')}
-                      </td>
-                      <td className="px-5 py-3">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            s.status === 'active'
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : s.status === 'trialing'
-                              ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                              : s.status === 'grace_period'
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                              : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                  {subscribers.map((s) => {
+                    const isPozone = s.business_id === '765a894f-c3c4-4fe4-a8e2-7b240eda570a';
+                    const isExpanded = expandedBusinessId === s.business_id;
+                    const now = Date.now();
+                    const trialEndMs = s.trial_end_at ? new Date(s.trial_end_at).getTime() : 0;
+                    const isTrialActive = trialEndMs > now;
+                    const daysRemaining = isTrialActive ? Math.max(0, Math.ceil((trialEndMs - now) / 86400000)) : 0;
+
+                    // Authoritative trial status
+                    const trialStatusText = s.is_trial_prepaid
+                      ? `Paid (${daysRemaining}d trial left)`
+                      : isTrialActive
+                      ? `Active (${daysRemaining}d left)`
+                      : 'Concluded';
+
+                    // Next payment due date
+                    const nextPaymentDueFormatted = s.next_charge_at
+                      ? new Date(s.next_charge_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                      : s.trial_end_at
+                      ? new Date(s.trial_end_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                      : '—';
+
+                    return (
+                      <React.Fragment key={s.id}>
+                        <tr
+                          onClick={() => handleToggleExpand(s)}
+                          className={`cursor-pointer transition-colors ${
+                            isExpanded
+                              ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
+                              : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
                           }`}
                         >
-                          {s.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 font-semibold text-slate-900 dark:text-slate-100">
-                        ₹{(s.amount / 100).toFixed(2)}/mo
-                      </td>
-                      <td className="px-5 py-3 text-slate-500">
-                        {s.promotional_cycles_completed > 0 || s.promo_months_remaining > 0 ? (
-                          <span className="font-medium text-violet-600 dark:text-violet-400">
-                            {s.promotional_cycles_completed}/3 ({s.promo_months_remaining} left)
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">N/A</span>
+                          {/* 1. Business Name */}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-indigo-500 shrink-0" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                              )}
+                              <div className="space-y-0.5 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-slate-900 dark:text-slate-100 hover:text-indigo-600 transition-colors">
+                                    {s.organization?.name || 'Unnamed Business'}
+                                  </span>
+                                  {isPozone && (
+                                    <Badge className="bg-emerald-600 text-white text-[9px] font-bold">
+                                      Verified Paid
+                                    </Badge>
+                                  )}
+                                  {s.is_test && (
+                                    <Badge variant="outline" className="text-amber-500 border-amber-500/30 text-[9px]">
+                                      Test
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
+                                  {s.business_id}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* 2. Email */}
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                            {s.organization?.email || '—'}
+                          </td>
+
+                          {/* 3. Phone */}
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                            {s.organization?.phone || '—'}
+                          </td>
+
+                          {/* 4. Country */}
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                            {s.organization?.country || '—'}
+                          </td>
+
+                          {/* 5. Registration Date */}
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                            {new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </td>
+
+                          {/* 6. Plan */}
+                          <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                            {s.plan?.name || (s.amount === 9900 ? 'QuoteFlow Pro' : 'Free Trial')}
+                          </td>
+
+                          {/* 7. Trial Status */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                isTrialActive
+                                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                              }`}
+                            >
+                              {trialStatusText}
+                            </span>
+                          </td>
+
+                          {/* 8. Subscription Status */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                s.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : s.status === 'trialing'
+                                  ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                                  : s.status === 'grace_period'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  : s.status === 'payment_overdue' || (s as any).account_access === 'restricted'
+                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                  : s.status === 'payment_pending'
+                                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                              }`}
+                            >
+                              {s.status}
+                            </span>
+                          </td>
+
+                          {/* 9. Trial End Date */}
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                            {s.trial_end_at
+                              ? new Date(s.trial_end_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                              : '—'}
+                          </td>
+
+                          {/* 10. Next Payment Due */}
+                          <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                            {nextPaymentDueFormatted}
+                          </td>
+
+                          {/* 11. Payment Status */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {s.last_payment_id || s.status === 'active' || isPozone ? (
+                              <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                                Paid (₹99)
+                              </Badge>
+                            ) : s.is_trial_prepaid ? (
+                              <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                                Prepaid
+                              </Badge>
+                            ) : s.status === 'grace_period' || s.status === 'payment_overdue' ? (
+                              <Badge className="bg-rose-600 text-white text-[10px] font-bold">
+                                Overdue
+                              </Badge>
+                            ) : s.status === 'trialing' ? (
+                              <Badge variant="outline" className="text-slate-500 text-[10px]">
+                                Trial (₹0)
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-amber-600 text-white text-[10px] font-bold">
+                                Pending
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+
+                        {/* EXPANDED ROW DETAILS (Requirements 25, 26, 27, 28, 29, 30) */}
+                        {isExpanded && (
+                          <tr className="bg-slate-50/90 dark:bg-slate-950 border-y border-indigo-200 dark:border-indigo-900/60">
+                            <td colSpan={11} className="p-6">
+                              {isLoadingExpanded ? (
+                                <div className="py-8 flex items-center justify-center gap-2 text-slate-400">
+                                  <Loader2 className="h-5 w-5 animate-spin text-indigo-500" />
+                                  <span>Loading authoritative business details...</span>
+                                </div>
+                              ) : (
+                                <div className="space-y-6">
+                                  {/* Top Actions & Header */}
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <Building2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                                        <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                                          {s.organization?.name || 'Business Overview'}
+                                        </h4>
+                                        {isPozone && (
+                                          <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
+                                            Live Paying Account (Protected)
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-slate-500">
+                                        Registered on {new Date(s.created_at).toLocaleString()} • Business ID: <span className="font-mono">{s.business_id}</span>
+                                      </p>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <Button
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenApplyOffer(s);
+                                        }}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold gap-1.5 shadow-xs"
+                                      >
+                                        <Tag className="h-3.5 w-3.5" />
+                                        <span>Apply Offer</span>
+                                      </Button>
+                                    </div>
+                                  </div>
+
+                                  {/* Grid of 4 Cards */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {/* 1. Business Info (from Settings) */}
+                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                                        <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+                                        <span>Settings Profile</span>
+                                      </span>
+                                      <div className="space-y-1.5 text-[11px] pt-1">
+                                        <div><span className="text-slate-400">Email:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.email || '—'}</strong></div>
+                                        <div><span className="text-slate-400">Phone:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.phone || '—'}</strong></div>
+                                        <div><span className="text-slate-400">Address:</span> <strong className="text-slate-800 dark:text-slate-200">{[s.organization?.address_line1, s.organization?.city, s.organization?.state, s.organization?.postal_code, s.organization?.country].filter(Boolean).join(', ') || '—'}</strong></div>
+                                        <div><span className="text-slate-400">Website:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.website || '—'}</strong></div>
+                                        <div><span className="text-slate-400">Tax/GST/VAT:</span> <strong className="text-slate-800 dark:text-slate-200">{s.organization?.gst_vat_number || 'None'}</strong></div>
+                                      </div>
+                                    </div>
+
+                                    {/* 2. Trial Details */}
+                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                                        <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                                        <span>Trial Timeline</span>
+                                      </span>
+                                      <div className="space-y-1.5 text-[11px] pt-1">
+                                        <div><span className="text-slate-400">Trial Started:</span> <strong className="text-slate-800 dark:text-slate-200">{s.trial_start_at ? new Date(s.trial_start_at).toLocaleDateString() : 'At Registration'}</strong></div>
+                                        <div><span className="text-slate-400">Trial Ends:</span> <strong className="text-slate-800 dark:text-slate-200">{s.trial_end_at ? new Date(s.trial_end_at).toLocaleDateString() : '30 days'}</strong></div>
+                                        <div><span className="text-slate-400">Days Remaining:</span> <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{daysRemaining} days</strong></div>
+                                        <div><span className="text-slate-400">Prepaid:</span> <strong className="text-slate-800 dark:text-slate-200">{s.is_trial_prepaid ? 'Yes (Trial Active)' : 'No'}</strong></div>
+                                      </div>
+                                    </div>
+
+                                    {/* 3. Plan Details */}
+                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                                        <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
+                                        <span>Plan & Schedule</span>
+                                      </span>
+                                      <div className="space-y-1.5 text-[11px] pt-1">
+                                        <div><span className="text-slate-400">Plan:</span> <strong className="text-slate-800 dark:text-slate-200">{s.plan?.name || 'QuoteFlow Pro'}</strong></div>
+                                        <div><span className="text-slate-400">Price:</span> <strong className="text-slate-900 dark:text-white font-bold">₹{(s.amount / 100).toFixed(2)} / month</strong></div>
+                                        <div><span className="text-slate-400">Status:</span> <strong className="text-slate-800 dark:text-slate-200">{s.status}</strong></div>
+                                        <div><span className="text-slate-400">Next Payment Due:</span> <strong className="text-slate-900 dark:text-white">{nextPaymentDueFormatted}</strong></div>
+                                        <div><span className="text-slate-400">Billing Interval:</span> <strong className="text-slate-800 dark:text-slate-200">Monthly (₹99)</strong></div>
+                                      </div>
+                                    </div>
+
+                                    {/* 4. Admin-Only Copyable Identifiers */}
+                                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                                      <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 text-xs pb-1 border-b border-slate-100 dark:border-slate-800">
+                                        <Key className="h-3.5 w-3.5 text-amber-500" />
+                                        <span>Razorpay IDs (Admin Only)</span>
+                                      </span>
+                                      <div className="space-y-2 pt-1 font-mono text-[10px]">
+                                        <div>
+                                          <span className="text-slate-400 block font-sans">Payment ID:</span>
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="truncate">{s.last_payment_id || 'None'}</span>
+                                            {s.last_payment_id && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleCopy(s.last_payment_id!, `pay_${s.id}`);
+                                                }}
+                                                className="p-1 hover:text-indigo-500 text-slate-400"
+                                                title="Copy Payment ID"
+                                              >
+                                                {copiedKey === `pay_${s.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <div>
+                                          <span className="text-slate-400 block font-sans">Subscription ID:</span>
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="truncate">{s.razorpay_subscription_id || 'None'}</span>
+                                            {s.razorpay_subscription_id && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleCopy(s.razorpay_subscription_id!, `sub_${s.id}`);
+                                                }}
+                                                className="p-1 hover:text-indigo-500 text-slate-400"
+                                                title="Copy Subscription ID"
+                                              >
+                                                {copiedKey === `sub_${s.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <div>
+                                          <span className="text-slate-400 block font-sans">Plan ID:</span>
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="truncate">{s.razorpay_plan_id || 'plan_monthly_99'}</span>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleCopy(s.razorpay_plan_id || 'plan_monthly_99', `plan_${s.id}`);
+                                              }}
+                                              className="p-1 hover:text-indigo-500 text-slate-400"
+                                              title="Copy Plan ID"
+                                            >
+                                              {copiedKey === `plan_${s.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* 5. Admin Transaction History Table */}
+                                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                                    <h5 className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                                      <Activity className="h-4 w-4 text-emerald-500" />
+                                      <span>Admin Transaction History</span>
+                                    </h5>
+
+                                    {expandedBusinessDetails?.payments && expandedBusinessDetails.payments.length > 0 ? (
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-xs text-left">
+                                          <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 uppercase font-semibold text-[10px]">
+                                            <tr>
+                                              <th className="px-3 py-2">Date</th>
+                                              <th className="px-3 py-2">Amount</th>
+                                              <th className="px-3 py-2">Status</th>
+                                              <th className="px-3 py-2">Payment ID</th>
+                                              <th className="px-3 py-2">Invoice ID</th>
+                                              <th className="px-3 py-2">Method</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {expandedBusinessDetails.payments.map((p: any) => (
+                                              <tr key={p.id}>
+                                                <td className="px-3 py-2">{new Date(p.paid_at || p.created_at).toLocaleString()}</td>
+                                                <td className="px-3 py-2 font-bold text-slate-900 dark:text-white">₹{(p.amount / 100).toFixed(2)}</td>
+                                                <td className="px-3 py-2">
+                                                  <Badge className={p.status === 'captured' ? 'bg-emerald-600 text-white text-[9px]' : 'bg-rose-600 text-white text-[9px]'}>
+                                                    {p.status}
+                                                  </Badge>
+                                                </td>
+                                                <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{p.razorpay_payment_id || '—'}</td>
+                                                <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{p.razorpay_invoice_id || '—'}</td>
+                                                <td className="px-3 py-2 uppercase text-[10px] text-slate-500">{p.payment_method || 'card'}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-slate-400 py-3 text-center">
+                                        No captured payments recorded for this account.
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-5 py-3 text-slate-600 dark:text-slate-400">
-                        {s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : '—'}
-                      </td>
-                      <td className="px-5 py-3 text-slate-400">
-                        {new Date(s.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -679,6 +1162,176 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               </div>
             )}
           </div>
+
+          {/* APPLY OFFER MODAL (Requirements 27, 28, 44) */}
+          {applyOfferModalOpen && offerTargetBusiness && (
+            <Modal
+              isOpen={applyOfferModalOpen}
+              onClose={() => setApplyOfferModalOpen(false)}
+              title={`Apply Offer to ${offerTargetBusiness.organization?.name || 'Business'}`}
+            >
+              <form onSubmit={handleApplyOfferSubmit} className="space-y-4 p-4 text-xs">
+                <div>
+                  <label className="font-semibold block mb-1">Offer Type</label>
+                  <select
+                    value={offerType}
+                    onChange={(e) => setOfferType(e.target.value as any)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs font-medium"
+                  >
+                    <option value="percentage">Percentage Discount (e.g. 20% off)</option>
+                    <option value="fixed">Fixed Amount Discount (e.g. ₹30 off)</option>
+                    <option value="free_months">Free Months (100% free billing)</option>
+                    <option value="special_rate">Special Monthly Rate (e.g. ₹49/month)</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold block mb-1">
+                      {offerType === 'percentage'
+                        ? 'Discount Percentage (%)'
+                        : offerType === 'fixed'
+                        ? 'Discount Amount (₹)'
+                        : offerType === 'free_months'
+                        ? 'Number of Free Months'
+                        : 'Special Monthly Rate (₹)'}
+                    </label>
+                    <Input
+                      type="number"
+                      value={offerValue}
+                      onChange={(e) => setOfferValue(Number(e.target.value))}
+                      required
+                      min={1}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold block mb-1">Duration (Billing Cycles / Months)</label>
+                    <Input
+                      type="number"
+                      value={offerDuration}
+                      onChange={(e) => setOfferDuration(Number(e.target.value))}
+                      required
+                      min={1}
+                      max={12}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Internal Reason / Approval Note</label>
+                  <Input
+                    value={offerReason}
+                    onChange={(e) => setOfferReason(e.target.value)}
+                    required
+                    placeholder="e.g. Founder promotional incentive or partner credit"
+                  />
+                </div>
+
+                {/* Live Preview Box */}
+                <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
+                  <span className="font-bold text-indigo-900 dark:text-indigo-200 block text-xs">
+                    Live Calculation Preview
+                  </span>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5">
+                    <div>Original Rate: <span className="line-through text-slate-400">₹99.00 / month</span></div>
+                    <div>
+                      Adjusted Rate:{' '}
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-bold text-sm">
+                        {offerType === 'percentage'
+                          ? `₹${Math.round(99 * (1 - Math.min(100, offerValue) / 100))}.00 / month`
+                          : offerType === 'fixed'
+                          ? `₹${Math.max(0, 99 - offerValue)}.00 / month`
+                          : offerType === 'free_months'
+                          ? '₹0.00 / month'
+                          : `₹${offerValue}.00 / month`}
+                      </strong>
+                    </div>
+                    <div>Duration: <strong>{offerDuration} billing cycle(s)</strong></div>
+                  </div>
+                </div>
+
+                {/* Safety Guarantee */}
+                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 text-[10px] text-slate-500 space-y-0.5">
+                  <p className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                    <span>Safety Check: Future Cycles Only</span>
+                  </p>
+                  <p>This offer applies strictly to upcoming renewals and will never alter past captured payments. All adjustments are logged to the Admin Audit Log.</p>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setApplyOfferModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isApplyingOffer}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                  >
+                    {isApplyingOffer ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Confirm & Apply Offer'}
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          )}
+
+          {/* CLEANUP TEST DATA CONFIRMATION MODAL (Requirement 31) */}
+          {cleanupModalOpen && (
+            <Modal
+              isOpen={cleanupModalOpen}
+              onClose={() => setCleanupModalOpen(false)}
+              title="Clean Synthetic & Test Accounts"
+            >
+              <div className="space-y-4 p-4 text-xs">
+                {isLoadingCleanupInfo ? (
+                  <div className="py-6 flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                    <span>Scanning for test accounts...</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 space-y-1">
+                      <p className="font-bold flex items-center gap-1.5 text-xs">
+                        <AlertTriangle className="h-4 w-4" />
+                        <span>Ready to clean {cleanupAccounts.length} test accounts</span>
+                      </p>
+                      <p className="text-[11px] leading-relaxed">
+                        This action will soft-delete synthetic demo and test accounts created during quality assurance.
+                      </p>
+                    </div>
+
+                    {/* Strict Live Account Protection Notice */}
+                    <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 space-y-1">
+                      <p className="font-bold flex items-center gap-1.5 text-xs">
+                        <ShieldCheck className="h-4 w-4" />
+                        <span>Real Payment Accounts Strictly Protected</span>
+                      </p>
+                      <p className="text-[11px] leading-relaxed">
+                        Real customer accounts like <strong>Pozone</strong> and any account with verified live payment records are permanently locked and will NEVER be deleted.
+                      </p>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setCleanupModalOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={isCleaningUp || cleanupAccounts.length === 0}
+                        onClick={handleConfirmCleanup}
+                        className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                      >
+                        {isCleaningUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Delete ${cleanupAccounts.length} Test Accounts`}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </Modal>
+          )}
         </div>
       )}
 
@@ -1034,15 +1687,13 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Plan Linkage</span>
               <p className="text-lg font-bold text-slate-900 dark:text-white pt-1">
-                {razorpayPromoPlanId && razorpayStandardPlanId ? (
-                  <span className="text-emerald-500">2 Plans Linked ✓</span>
-                ) : razorpayPromoPlanId || razorpayStandardPlanId ? (
-                  <span className="text-amber-500">1 Plan Linked</span>
+                {razorpayPromoPlanId ? (
+                  <span className="text-emerald-500">Plan Linked ✓</span>
                 ) : (
                   <span className="text-slate-400">Pending Setup</span>
                 )}
               </p>
-              <p className="text-[11px] text-slate-500">Promo (₹99) & Standard (₹199)</p>
+              <p className="text-[11px] text-slate-500">QuoteFlow Pro (₹99/month)</p>
             </div>
           </div>
 
@@ -1052,10 +1703,10 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Activity className="h-4 w-4 text-indigo-500" />
-                  <span>Test Razorpay Live Connection & Plans</span>
+                  <span>Test Razorpay Live Connection &amp; Plan</span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Sends an authorized test probe to the Razorpay API to verify your Key ID, Key Secret, and Plan existence.
+                  Sends an authorized test probe to the Razorpay API to verify your Key ID, Key Secret, and QuoteFlow Pro (₹99/mo) Plan.
                 </p>
               </div>
               <Button
@@ -1104,14 +1755,14 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
                 {razorpayTestResult.apiSuccess && (
                   <div className="space-y-3 pt-2 border-t border-emerald-500/20">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-slate-300">
+                    <div className="grid grid-cols-1 gap-3 text-slate-300">
                       <div className={`p-3 rounded-lg border ${
                         razorpayTestResult.promoPlanDetails
                           ? 'bg-emerald-950/30 border-emerald-800'
                           : 'bg-amber-950/30 border-amber-800'
                       }`}>
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-slate-400 uppercase font-semibold">Promo Plan (₹99):</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold">QuoteFlow Pro Plan (₹99 / month):</span>
                           {razorpayTestResult.promoPlanDetails ? (
                             <Badge className="bg-emerald-600/30 text-emerald-300 border-emerald-700 text-[10px]">
                               {razorpayTestResult.promoPlanDetails.isAutoDetected ? 'Auto-Detected' : 'Linked ✓'}
@@ -1124,64 +1775,40 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                         </div>
                         <p className="font-mono text-white text-xs mt-1">
                           {razorpayTestResult.promoPlanDetails
-                            ? `${razorpayTestResult.promoPlanDetails.name} (₹${razorpayTestResult.promoPlanDetails.amount / 100}) - ${razorpayTestResult.promoPlanDetails.id}`
+                            ? `${razorpayTestResult.promoPlanDetails.name} (₹${razorpayTestResult.promoPlanDetails.amount / 100}/mo) - ${razorpayTestResult.promoPlanDetails.id}`
                             : 'No ₹99 plan linked or found on Razorpay'}
-                        </p>
-                      </div>
-
-                      <div className={`p-3 rounded-lg border ${
-                        razorpayTestResult.standardPlanDetails
-                          ? 'bg-emerald-950/30 border-emerald-800'
-                          : 'bg-amber-950/30 border-amber-800'
-                      }`}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-slate-400 uppercase font-semibold">Standard Plan (₹199):</span>
-                          {razorpayTestResult.standardPlanDetails ? (
-                            <Badge className="bg-emerald-600/30 text-emerald-300 border-emerald-700 text-[10px]">
-                              {razorpayTestResult.standardPlanDetails.isAutoDetected ? 'Auto-Detected' : 'Linked ✓'}
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-amber-600/30 text-amber-300 border-amber-700 text-[10px]">
-                              Not Linked
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="font-mono text-white text-xs mt-1">
-                          {razorpayTestResult.standardPlanDetails
-                            ? `${razorpayTestResult.standardPlanDetails.name} (₹${razorpayTestResult.standardPlanDetails.amount / 100}) - ${razorpayTestResult.standardPlanDetails.id}`
-                            : 'No ₹199 plan linked or found on Razorpay'}
                         </p>
                       </div>
                     </div>
 
                     {/* Auto-Match Quick Link Banner */}
-                    {(razorpayTestResult.promoPlanDetails?.isAutoDetected || razorpayTestResult.standardPlanDetails?.isAutoDetected) && (
+                    {razorpayTestResult.promoPlanDetails?.isAutoDetected && (
                       <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 flex-wrap">
                         <div className="text-xs text-emerald-200">
-                          <strong>✨ Matching plans detected in your Razorpay account!</strong> Click below to link them with 1 click.
+                          <strong>✨ Matching ₹99/mo plan detected in your Razorpay account!</strong> Click below to link it with 1 click.
                         </div>
                         <Button
                           size="sm"
                           type="button"
-                          onClick={() => handleAutoLinkDetectedPlans(razorpayTestResult.promoPlanDetails?.id, razorpayTestResult.standardPlanDetails?.id)}
+                          onClick={() => handleAutoLinkDetectedPlans(razorpayTestResult.promoPlanDetails?.id, razorpayTestResult.promoPlanDetails?.id)}
                           disabled={isLinkingPlans}
                           className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8"
                         >
-                          {isLinkingPlans ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '⚡ Link Detected Plans Now'}
+                          {isLinkingPlans ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '⚡ Link Detected Plan Now'}
                         </Button>
                       </div>
                     )}
 
                     {/* 1-Click Auto-Create Plans in Razorpay Button if not linked */}
-                    {(!razorpayTestResult.promoPlanDetails || !razorpayTestResult.standardPlanDetails) && (
+                    {!razorpayTestResult.promoPlanDetails && (
                       <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-0.5 text-xs text-indigo-200">
                           <p className="font-bold flex items-center gap-1.5 text-white">
                             <Sparkles className="h-4 w-4 text-indigo-400" />
-                            <span>1-Click Solution: Auto-Create QuoteFlow Plans in Razorpay</span>
+                            <span>1-Click Solution: Auto-Create QuoteFlow Pro Plan in Razorpay</span>
                           </p>
                           <p className="text-slate-300 text-[11px]">
-                            We will automatically call Razorpay's API to create the official ₹99/mo Promotional and ₹199/mo Standard recurring plans and link them instantly.
+                            We will automatically call Razorpay's API to create the official QuoteFlow Pro (₹99/month) recurring plan and link it instantly.
                           </p>
                         </div>
                         <Button
@@ -1195,7 +1822,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                           ) : (
                             <Sparkles className="h-3.5 w-3.5" />
                           )}
-                          <span>Auto-Create Plans in Razorpay</span>
+                          <span>Auto-Create ₹99 Plan</span>
                         </Button>
                       </div>
                     )}
@@ -1224,16 +1851,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                                   onClick={() => handleApplyDetectedPlan(p.id, 'promo')}
                                   className="h-6 text-[10px] px-2"
                                 >
-                                  Use for ₹99 Promo
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => handleApplyDetectedPlan(p.id, 'standard')}
-                                  className="h-6 text-[10px] px-2"
-                                >
-                                  Use for ₹199 Standard
+                                  Use for QuoteFlow Pro (₹99)
                                 </Button>
                               </div>
                             </div>
@@ -1252,10 +1870,10 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Key className="h-4 w-4 text-indigo-500" />
-                <span>Razorpay API Credentials &amp; Subscription Plans</span>
+                <span>Razorpay API Credentials &amp; Subscription Plan</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Update your live or test credentials and linked plans. Changes are applied dynamically to checkout sessions.
+                Update your live credentials and QuoteFlow Pro (₹99/month) Plan ID.
               </p>
             </div>
 
@@ -1314,40 +1932,26 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               </div>
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-2">Linked Recurring Plan IDs</h4>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-2">Linked QuoteFlow Pro Plan ID</h4>
               </div>
 
-              {/* Promo Plan ID */}
+              {/* Pro Plan ID */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Promotional Plan ID (₹99/mo for first 3 cycles)
+                  QuoteFlow Pro Plan ID (₹99/month recurring)
                 </label>
                 <Input
                   type="text"
                   placeholder="e.g. plan_O1a2b3c4d5e6f7"
                   value={razorpayPromoPlanId}
-                  onChange={(e) => setRazorpayPromoPlanId(e.target.value)}
+                  onChange={(e) => {
+                    setRazorpayPromoPlanId(e.target.value);
+                    setRazorpayStandardPlanId(e.target.value);
+                  }}
                   className="font-mono text-xs"
                 />
                 <p className="text-[11px] text-slate-400">
                   Monthly recurring plan created in Razorpay with amount ₹99.
-                </p>
-              </div>
-
-              {/* Standard Plan ID */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Standard Plan ID (₹199/mo recurring)
-                </label>
-                <Input
-                  type="text"
-                  placeholder="e.g. plan_P1a2b3c4d5e6f7"
-                  value={razorpayStandardPlanId}
-                  onChange={(e) => setRazorpayStandardPlanId(e.target.value)}
-                  className="font-mono text-xs"
-                />
-                <p className="text-[11px] text-slate-400">
-                  Monthly recurring plan created in Razorpay with amount ₹199.
                 </p>
               </div>
 
@@ -1362,7 +1966,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
                   ) : (
                     <CheckCircle2 className="h-3.5 w-3.5" />
                   )}
-                  <span>Save Credentials &amp; Plans</span>
+                  <span>Save Credentials &amp; Plan</span>
                 </Button>
 
                 <Button
@@ -1397,13 +2001,12 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               </li>
               <li>
                 Click <strong>+ Create Plan</strong>:
-                <ul className="list-disc list-inside ml-5 mt-1 space-y-1 text-slate-600 dark:text-slate-400">
-                  <li><strong>Plan 1 (Promo)</strong>: Name: <code>QuoteFlow Special Offer</code>, Frequency: <code>Monthly</code> (Every 1 Month), Amount: <code>₹99</code>. Copy the generated Plan ID (e.g. <code>plan_...</code>).</li>
-                  <li><strong>Plan 2 (Standard)</strong>: Name: <code>QuoteFlow Standard</code>, Frequency: <code>Monthly</code> (Every 1 Month), Amount: <code>₹199</code>. Copy the generated Plan ID (e.g. <code>plan_...</code>).</li>
-                </ul>
+                <div className="ml-5 mt-1 text-slate-600 dark:text-slate-400">
+                  <strong>QuoteFlow Pro</strong>: Name: <code>QuoteFlow Pro</code>, Frequency: <code>Monthly</code> (Every 1 Month), Amount: <code>₹99</code>. Copy the generated Plan ID (e.g. <code>plan_...</code>).
+                </div>
               </li>
               <li>
-                Paste both Plan IDs in the fields above and click <strong>Save Plan IDs</strong>.
+                Paste the Plan ID in the field above and click <strong>Save Credentials &amp; Plan</strong>.
               </li>
               <li>
                 In your <strong>Vercel Project Settings &rarr; Environment Variables</strong>, ensure you have set:
