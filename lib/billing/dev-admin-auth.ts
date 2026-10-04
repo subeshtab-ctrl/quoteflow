@@ -5,6 +5,7 @@ import os from 'os';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { createAdminClient } from '@/lib/supabase/service-role';
 
 export const DEVELOPER_ADMIN_EMAIL = 'm.subesh@outlook.com';
 export const DEFAULT_DEVELOPER_ADMIN_PASSWORD = 'Subesh@123';
@@ -85,6 +86,24 @@ function getOtpPath(): string {
 }
 
 /**
+ * Safely save admin config to disk cache without exposing secret credentials
+ */
+function saveConfigToDisk(cfg: DeveloperAdminConfig): void {
+  try {
+    const p = getConfigPath();
+    // Security: Never save secret keys to disk in tracked repository files
+    const sanitized: DeveloperAdminConfig = {
+      ...cfg,
+      razorpayKeyId: null,
+      razorpayKeySecret: null,
+    };
+    fs.writeFileSync(p, JSON.stringify(sanitized, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not write admin config to disk (in-memory config preserved):', err);
+  }
+}
+
+/**
  * Hash a password using PBKDF2 with SHA-512 and unique salt
  */
 export function hashPassword(password: string, customSalt?: string): { hash: string; salt: string } {
@@ -99,6 +118,13 @@ export function hashPassword(password: string, customSalt?: string): { hash: str
  */
 export function getDeveloperAdminConfig(): DeveloperAdminConfig {
   if (globalThis.__devAdminConfig__) {
+    if (!globalThis.__devAdminConfig__.razorpayKeyId) {
+      globalThis.__devAdminConfig__.razorpayKeyId =
+        process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || null;
+    }
+    if (!globalThis.__devAdminConfig__.razorpayKeySecret) {
+      globalThis.__devAdminConfig__.razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || null;
+    }
     if (!globalThis.__devAdminConfig__.razorpayPlanIdPromo99) {
       globalThis.__devAdminConfig__.razorpayPlanIdPromo99 = process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa';
     }
@@ -106,7 +132,10 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
       globalThis.__devAdminConfig__.razorpayPlanIdStandard199 = process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa';
     }
     if (!globalThis.__devAdminConfig__.razorpayMode) {
-      globalThis.__devAdminConfig__.razorpayMode = 'live';
+      const kid = globalThis.__devAdminConfig__.razorpayKeyId;
+      globalThis.__devAdminConfig__.razorpayMode = kid?.startsWith('rzp_test_')
+        ? 'test'
+        : (process.env.RAZORPAY_MODE as 'live' | 'test') || 'live';
     }
     return globalThis.__devAdminConfig__;
   }
@@ -117,16 +146,17 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
       const raw = fs.readFileSync(p, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed.passwordHash && parsed.salt) {
+        const resolvedKeyId = parsed.razorpayKeyId || process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || null;
         const cfg: DeveloperAdminConfig = {
           email: DEVELOPER_ADMIN_EMAIL,
           passwordHash: parsed.passwordHash,
           salt: parsed.salt,
           updatedAt: parsed.updatedAt || null,
-          razorpayKeyId: parsed.razorpayKeyId || process.env.RAZORPAY_KEY_ID || null,
+          razorpayKeyId: resolvedKeyId,
           razorpayKeySecret: parsed.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || null,
           razorpayPlanIdPromo99: parsed.razorpayPlanIdPromo99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
           razorpayPlanIdStandard199: parsed.razorpayPlanIdStandard199 || process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
-          razorpayMode: parsed.razorpayMode || 'live',
+          razorpayMode: parsed.razorpayMode || (resolvedKeyId?.startsWith('rzp_test_') ? 'test' : ((process.env.RAZORPAY_MODE as 'live' | 'test') || 'live')),
           staffMembers: Array.isArray(parsed.staffMembers) ? parsed.staffMembers : [],
         };
         globalThis.__devAdminConfig__ = cfg;
@@ -138,15 +168,16 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
   // Pre-seed default credentials: m.subesh@outlook.com / Subesh@123
   const defaultSalt = 'qf_dev_salt_2026';
   const defaultHash = hashPassword(DEFAULT_DEVELOPER_ADMIN_PASSWORD, defaultSalt).hash;
+  const envKeyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || null;
   const defaultCfg: DeveloperAdminConfig = {
     email: DEVELOPER_ADMIN_EMAIL,
     passwordHash: defaultHash,
     salt: defaultSalt,
     updatedAt: null,
-    razorpayKeyId: process.env.RAZORPAY_KEY_ID || null,
+    razorpayKeyId: envKeyId,
     razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || null,
-    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1uiAIYxdedEa',
-    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1uiAIYxdedEa',
+    razorpayPlanIdPromo99: process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1jndtNip44ci',
+    razorpayPlanIdStandard199: process.env.RAZORPAY_PLAN_ID_STANDARD_199 || 'plan_Tj1jndtNip44ci',
     razorpayMode: 'live',
     staffMembers: [],
   };
@@ -199,23 +230,49 @@ export function setDeveloperAdminPassword(newPassword: string): boolean {
   };
   globalThis.__devAdminConfig__ = cfg;
 
-  try {
-    const p = getConfigPath();
-    fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('Could not write admin config to disk (in-memory config preserved):', err);
-  }
+  saveConfigToDisk(cfg);
+
+  // Cloud Persistence to Supabase
+  saveCloudAdminConfig(cfg).catch(() => {});
   return true;
+}
+
+/**
+ * Persist configuration to Supabase notifications table for permanent cloud survival
+ */
+export async function saveCloudAdminConfig(config: DeveloperAdminConfig): Promise<boolean> {
+  try {
+    const admin = createAdminClient();
+    if (!admin) return false;
+
+    const { error } = await admin.from('notifications').upsert({
+      id: '00000000-0000-0000-0000-000000000099',
+      organization_id: 'a0000000-0000-0000-0000-000000000001',
+      title: 'DEVELOPER_ADMIN_CONFIG',
+      message: JSON.stringify(config),
+      type: 'ADMIN_CONFIG',
+      is_read: true,
+    });
+
+    if (error) {
+      console.warn('[QuoteFlow] Could not save admin config to Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[QuoteFlow] Exception saving admin config to Supabase:', err);
+    return false;
+  }
 }
 
 /**
  * Update Razorpay Plan IDs configuration
  */
-export function updateRazorpayPlansConfig(
+export async function updateRazorpayPlansConfig(
   promoPlanId?: string | null,
   standardPlanId?: string | null
-): DeveloperAdminConfig {
-  return updateRazorpayApiConfig({
+): Promise<DeveloperAdminConfig> {
+  return await updateRazorpayApiConfig({
     promoPlanId,
     standardPlanId,
   });
@@ -224,35 +281,25 @@ export function updateRazorpayPlansConfig(
 /**
  * Update Razorpay API Keys & Plan IDs configuration dynamically
  */
-export function updateRazorpayApiConfig(params: {
+export async function updateRazorpayApiConfig(params: {
   keyId?: string | null;
   keySecret?: string | null;
   promoPlanId?: string | null;
   standardPlanId?: string | null;
   mode?: 'live' | 'test';
-}): DeveloperAdminConfig {
+}): Promise<DeveloperAdminConfig> {
   const current = getDeveloperAdminConfig();
   if (params.keyId !== undefined) current.razorpayKeyId = params.keyId?.trim() || null;
   if (params.keySecret !== undefined) current.razorpayKeySecret = params.keySecret?.trim() || null;
-  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || 'plan_Tj1uiAIYxdedEa';
-  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || 'plan_Tj1uiAIYxdedEa';
-  if (params.mode !== undefined) {
-    current.razorpayMode = params.mode;
-  } else if (params.keyId && params.keyId.startsWith('rzp_live_')) {
-    current.razorpayMode = 'live';
-  } else if (!current.razorpayMode) {
-    current.razorpayMode = 'live';
-  }
+  if (params.promoPlanId !== undefined) current.razorpayPlanIdPromo99 = params.promoPlanId?.trim() || 'plan_Tj1jndtNip44ci';
+  if (params.standardPlanId !== undefined) current.razorpayPlanIdStandard199 = params.standardPlanId?.trim() || 'plan_Tj1jndtNip44ci';
+
+  current.razorpayMode = 'live';
 
   current.updatedAt = new Date().toISOString();
   globalThis.__devAdminConfig__ = current;
 
-  try {
-    const p = getConfigPath();
-    fs.writeFileSync(p, JSON.stringify(current, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('Could not write admin config to disk (in-memory config preserved):', err);
-  }
+  saveConfigToDisk(current);
 
   try {
     const envPath = path.join(process.cwd(), '.env.local');
@@ -280,28 +327,8 @@ export function updateRazorpayApiConfig(params: {
     // Non-fatal if filesystem is read-only (e.g. serverless)
   }
 
-  // Cloud Persistence: Persist in Supabase notifications table for serverless survival
-  try {
-    const { createAdminClient } = require('@/lib/supabase/client');
-    const admin = createAdminClient();
-    if (admin) {
-      admin.from('notifications').upsert({
-        id: '00000000-0000-0000-0000-000000000099',
-        organization_id: '765a894f-c3c4-4fe4-a8e2-7b240eda570a',
-        title: 'DEVELOPER_ADMIN_CONFIG',
-        message: JSON.stringify({
-          razorpayKeyId: current.razorpayKeyId,
-          razorpayKeySecret: current.razorpayKeySecret,
-          razorpayPlanIdPromo99: current.razorpayPlanIdPromo99,
-          razorpayPlanIdStandard199: current.razorpayPlanIdStandard199,
-          razorpayMode: current.razorpayMode,
-          updatedAt: current.updatedAt,
-        }),
-        type: 'ADMIN_CONFIG',
-        is_read: true,
-      }).then(() => {}).catch(() => {});
-    }
-  } catch {}
+  // Cloud Persistence: Persist full config in Supabase notifications table for serverless survival
+  await saveCloudAdminConfig(current);
 
   return current;
 }
@@ -449,10 +476,9 @@ export async function isAuthorizedDeveloperAdmin(req?: NextRequest): Promise<boo
 export async function syncCloudAdminConfig(): Promise<DeveloperAdminConfig> {
   const cfg = getDeveloperAdminConfig();
   try {
-    const { createAdminClient } = require('@/lib/supabase/client');
     const admin = createAdminClient();
     if (admin) {
-      const { data } = await admin
+      const { data, error } = await admin
         .from('notifications')
         .select('message')
         .eq('type', 'ADMIN_CONFIG')
@@ -460,8 +486,10 @@ export async function syncCloudAdminConfig(): Promise<DeveloperAdminConfig> {
         .limit(1)
         .maybeSingle();
 
-      if (data?.message) {
+      if (!error && data?.message) {
         const parsed = JSON.parse(data.message);
+        if (parsed.passwordHash) cfg.passwordHash = parsed.passwordHash;
+        if (parsed.salt) cfg.salt = parsed.salt;
         if (parsed.razorpayKeyId) cfg.razorpayKeyId = parsed.razorpayKeyId;
         if (parsed.razorpayKeySecret) cfg.razorpayKeySecret = parsed.razorpayKeySecret;
         if (parsed.razorpayPlanIdPromo99) cfg.razorpayPlanIdPromo99 = parsed.razorpayPlanIdPromo99;
@@ -470,9 +498,21 @@ export async function syncCloudAdminConfig(): Promise<DeveloperAdminConfig> {
         if (Array.isArray(parsed.staffMembers)) cfg.staffMembers = parsed.staffMembers;
         cfg.updatedAt = parsed.updatedAt || cfg.updatedAt;
         globalThis.__devAdminConfig__ = cfg;
+
+        // Cache sanitized config to local disk if filesystem is writable
+        saveConfigToDisk(cfg);
       }
     }
+  } catch (err) {
+    console.warn('[QuoteFlow] syncCloudAdminConfig error:', err);
+  }
+
+  // Ensure razorpayService is refreshed with the latest credentials
+  try {
+    const { razorpayService } = require('@/lib/billing/razorpay');
+    razorpayService.reloadCredentials();
   } catch {}
+
   return cfg;
 }
 
@@ -519,28 +559,10 @@ export function addSupportStaffMember(member: {
   cfg.updatedAt = now;
   globalThis.__devAdminConfig__ = cfg;
 
-  try {
-    const p = getConfigPath();
-    fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('Could not write admin config to disk:', err);
-  }
+  saveConfigToDisk(cfg);
 
   // Cloud Persistence via Supabase notifications table
-  try {
-    const { createAdminClient } = require('@/lib/supabase/client');
-    const admin = createAdminClient();
-    if (admin) {
-      admin.from('notifications').upsert({
-        id: '00000000-0000-0000-0000-000000000099',
-        organization_id: '765a894f-c3c4-4fe4-a8e2-7b240eda570a',
-        title: 'DEVELOPER_ADMIN_CONFIG',
-        message: JSON.stringify(cfg),
-        type: 'ADMIN_CONFIG',
-        is_read: true,
-      }).then(() => {}).catch(() => {});
-    }
-  } catch {}
+  saveCloudAdminConfig(cfg).catch(() => {});
 
   return newStaff;
 }
@@ -559,26 +581,10 @@ export function removeSupportStaffMember(id: string): boolean {
   cfg.updatedAt = new Date().toISOString();
   globalThis.__devAdminConfig__ = cfg;
 
-  try {
-    const p = getConfigPath();
-    fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf-8');
-  } catch {}
+  saveConfigToDisk(cfg);
 
   // Cloud Persistence
-  try {
-    const { createAdminClient } = require('@/lib/supabase/client');
-    const admin = createAdminClient();
-    if (admin) {
-      admin.from('notifications').upsert({
-        id: '00000000-0000-0000-0000-000000000099',
-        organization_id: '765a894f-c3c4-4fe4-a8e2-7b240eda570a',
-        title: 'DEVELOPER_ADMIN_CONFIG',
-        message: JSON.stringify(cfg),
-        type: 'ADMIN_CONFIG',
-        is_read: true,
-      }).then(() => {}).catch(() => {});
-    }
-  } catch {}
+  saveCloudAdminConfig(cfg).catch(() => {});
 
   return true;
 }

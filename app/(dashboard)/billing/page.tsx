@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService, DEFAULT_PLANS } from '@/lib/billing/subscription-service';
 import { razorpayService } from '@/lib/billing/razorpay';
+import { syncCloudAdminConfig } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 import { BillingView } from '@/components/billing/billing-view';
 
@@ -20,6 +21,9 @@ export default async function BillingPage() {
   if (!auth) {
     redirect('/login');
   }
+
+  // Ensure latest Razorpay credentials & plan IDs are synced from Supabase cloud config
+  await syncCloudAdminConfig();
 
   const [subscription, access, isEligibleForPromo, payments] = await Promise.all([
     store.getBusinessSubscription(auth.orgId),

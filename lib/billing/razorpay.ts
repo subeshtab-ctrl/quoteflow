@@ -56,7 +56,7 @@ export class RazorpayService {
     this.keyId = '';
     this.keySecret = '';
     this.webhookSecret = '';
-    this.mode = 'test';
+    this.mode = 'live';
     this.reloadCredentials();
   }
 
@@ -79,12 +79,8 @@ export class RazorpayService {
     this.keySecret = cfgKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
     this.webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 
-    if (cfgMode) {
-      this.mode = cfgMode.toLowerCase();
-    } else if (this.keyId.startsWith('rzp_live_')) {
-      this.mode = 'live';
-    } else if (this.keyId.startsWith('rzp_test_')) {
-      this.mode = (process.env.RAZORPAY_MODE || 'live').toLowerCase() === 'test' ? 'test' : 'live';
+    if (this.keyId.startsWith('rzp_test_') && (process.env.VITEST || process.env.NODE_ENV === 'test')) {
+      this.mode = 'test';
     } else {
       this.mode = 'live';
     }
