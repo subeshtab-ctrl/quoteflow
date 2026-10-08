@@ -17,6 +17,8 @@ import {
   DollarSign,
   TrendingUp,
   AlertTriangle,
+  MailWarning,
+  MailCheck,
   Clock,
   CheckCircle2,
   XCircle,
@@ -66,7 +68,7 @@ import {
 import { SupportChatFloatingWidget } from '@/components/support/support-chat-floating-widget';
 
 export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark' } = {}) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'staff' | 'razorpay' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'subscribers' | 'offers' | 'tickets' | 'staff' | 'razorpay' | 'audit' | 'unverified'>('overview');
   const [isLoading, setIsLoading] = useState(true);
 
   // Razorpay Configuration State
@@ -157,6 +159,72 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+
+  // Unverified Email Accounts
+  const [unverifiedAccounts, setUnverifiedAccounts] = useState<any[]>([]);
+  const [isLoadingUnverified, setIsLoadingUnverified] = useState(false);
+  const [unverifiedSearch, setUnverifiedSearch] = useState('');
+  const [unverifiedActionLoading, setUnverifiedActionLoading] = useState<string | null>(null);
+
+  const fetchUnverifiedAccounts = async () => {
+    try {
+      setIsLoadingUnverified(true);
+      const res = await fetch('/api/admin/unverified-accounts');
+      if (res.ok) {
+        const json = await res.json();
+        setUnverifiedAccounts(json.unverifiedAccounts || []);
+      }
+    } catch (err) {
+      console.error('Error fetching unverified accounts:', err);
+    } finally {
+      setIsLoadingUnverified(false);
+    }
+  };
+
+  const handleVerifyManually = async (userId: string, email: string) => {
+    if (!confirm(`Are you sure you want to manually mark ${email} as verified in Supabase auth?`)) return;
+    try {
+      setUnverifiedActionLoading(userId);
+      const res = await fetch('/api/admin/unverified-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify_manually', userId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✓ Account ${email} marked as verified successfully!`);
+        await fetchUnverifiedAccounts();
+        await fetchSubscribers();
+      } else {
+        alert(data.error || 'Failed to verify account');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error executing manual verification');
+    } finally {
+      setUnverifiedActionLoading(null);
+    }
+  };
+
+  const handleResendVerification = async (email: string) => {
+    try {
+      setUnverifiedActionLoading(email);
+      const res = await fetch('/api/admin/unverified-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resend', email }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✓ Verification email sent to ${email} successfully via Resend.`);
+      } else {
+        alert(data.error || 'Failed to resend verification email');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error resending verification');
+    } finally {
+      setUnverifiedActionLoading(null);
+    }
+  };
 
   const handleCopy = (text: string, key: string) => {
     if (!text) return;
@@ -677,6 +745,7 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
       fetchStaffMembers(),
       fetchAuditLogs(),
       fetchRazorpayConfig(),
+      fetchUnverifiedAccounts(),
     ]);
     setIsLoading(false);
   };
@@ -698,28 +767,11 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
   useEffect(() => {
     fetchTickets();
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       fetchTickets();
-      if (activeAdminTicket?.id) {
-        fetch(`/api/support/tickets/${activeAdminTicket.id}`)
-          .then((r) => r.json())
-          .then((j) => {
-            if (j.ticket) {
-              setActiveAdminTicket((prev) => {
-                if (!prev || prev.id !== j.ticket.id) return j.ticket;
-                const prevCount = prev.messages?.length || 0;
-                const newCount = j.ticket.messages?.length || 0;
-                if (newCount !== prevCount || j.ticket.status !== prev.status) {
-                  return j.ticket;
-                }
-                return prev;
-              });
-            }
-          })
-          .catch(() => {});
-      }
-    }, 3000);
+    }, 60000);
     return () => clearInterval(interval);
-  }, [ticketStatusFilter, activeAdminTicket?.id]);
+  }, [ticketStatusFilter]);
 
   const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -847,6 +899,12 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
         {[
           { id: 'overview', label: 'Overview & MRR', icon: TrendingUp },
           { id: 'subscribers', label: `Subscribers (${subscriberTotal})`, icon: Users },
+          {
+            id: 'unverified',
+            label: `Unverified Accounts (${unverifiedAccounts.length})`,
+            icon: MailWarning,
+            alert: unverifiedAccounts.length > 0,
+          },
           { id: 'offers', label: 'Offers & Promotions', icon: Tag },
           { id: 'tickets', label: `Support Tickets (${tickets.length})${tickets.filter((t) => t.status === 'unread' || t.status === 'open').length > 0 ? ` • ${tickets.filter((t) => t.status === 'unread' || t.status === 'open').length} New` : ''}`, icon: LifeBuoy },
           { id: 'staff', label: `Support Staff (${staffMembers.length})`, icon: UserCheck },
@@ -1894,6 +1952,142 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
               </form>
             </Modal>
           )}
+        </div>
+      )}
+
+      {/* TAB: UNVERIFIED ACCOUNTS */}
+      {activeTab === 'unverified' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200">
+            <div className="flex items-start gap-3">
+              <MailWarning className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-bold">Unverified Email Registrations ({unverifiedAccounts.length})</h3>
+                <p className="text-xs text-amber-700 dark:text-amber-300/80 mt-0.5">
+                  These accounts signed up but have not yet verified their email. You can resend verification emails or manually verify their accounts directly in Supabase Auth.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchUnverifiedAccounts}
+              disabled={isLoadingUnverified}
+              className="gap-1.5 shrink-0 bg-white/50 dark:bg-slate-900/50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingUnverified ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input
+                placeholder="Search by email or company name..."
+                value={unverifiedSearch}
+                onChange={(e) => setUnverifiedSearch(e.target.value)}
+                className="pl-9 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="py-3 px-4">User / Email</th>
+                    <th className="py-3 px-4">Company Name</th>
+                    <th className="py-3 px-4">Signed Up</th>
+                    <th className="py-3 px-4">Last Sign-In</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {isLoadingUnverified ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-indigo-500" />
+                        Loading unverified accounts...
+                      </td>
+                    </tr>
+                  ) : unverifiedAccounts.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+                        <p className="font-semibold text-slate-700 dark:text-slate-300">All registered accounts are verified!</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">No pending unverified email registrations found.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    unverifiedAccounts
+                      .filter((acc) => {
+                        if (!unverifiedSearch) return true;
+                        const q = unverifiedSearch.toLowerCase();
+                        return (
+                          (acc.email && acc.email.toLowerCase().includes(q)) ||
+                          (acc.user_metadata?.company_name && acc.user_metadata.company_name.toLowerCase().includes(q))
+                        );
+                      })
+                      .map((acc) => (
+                        <tr key={acc.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                              <span>{acc.email}</span>
+                              <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[9px] px-1 py-0">
+                                Unverified
+                              </Badge>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">ID: {acc.id.slice(0, 12)}...</span>
+                          </td>
+                          <td className="py-3 px-4 text-slate-700 dark:text-slate-300 font-medium">
+                            {acc.user_metadata?.company_name || acc.user_metadata?.name || '—'}
+                          </td>
+                          <td className="py-3 px-4 text-slate-500">
+                            {acc.created_at ? new Date(acc.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                          </td>
+                          <td className="py-3 px-4 text-slate-500">
+                            {acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleDateString() : 'Never signed in'}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleResendVerification(acc.email)}
+                                disabled={unverifiedActionLoading === acc.email}
+                                className="h-7 text-[11px] gap-1 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                              >
+                                {unverifiedActionLoading === acc.email ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Send className="h-3 w-3" />
+                                )}
+                                <span>Resend Email</span>
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => handleVerifyManually(acc.id, acc.email)}
+                                disabled={unverifiedActionLoading === acc.id}
+                                className="h-7 text-[11px] gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                              >
+                                {unverifiedActionLoading === acc.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <CheckCheck className="h-3 w-3" />
+                                )}
+                                <span>Verify Manually</span>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

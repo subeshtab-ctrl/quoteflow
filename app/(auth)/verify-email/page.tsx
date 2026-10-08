@@ -229,9 +229,26 @@ function VerifyEmailContent() {
         } = await supabase.auth.getUser();
 
         if (userErr || !user) {
-          // If no active session or invalid user, do NOT celebrate
+          // If no active session, check if the email from URL or query is already confirmed
+          const checkTargetEmail = urlEmail || searchParams.get('email');
+          if (checkTargetEmail) {
+            try {
+              const statusRes = await fetch(`/api/auth/verify-status?email=${encodeURIComponent(checkTargetEmail)}`);
+              if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                if (statusData.verified) {
+                  setVerifiedEmail(checkTargetEmail);
+                  setStatus('verified');
+                  setTimeout(() => triggerFireworks(), 100);
+                  return;
+                }
+              }
+            } catch {}
+          }
+
+          // If no session and email not confirmed, show error with option to check/resend
           setStatus('error');
-          setErrorMessage('Your verification link may have expired or already been used.');
+          setErrorMessage('Your verification link may have expired or already been used. If you already verified, you can sign in directly.');
           return;
         }
 
@@ -249,6 +266,22 @@ function VerifyEmailContent() {
         }
       } catch (err: any) {
         console.error('Email verification error:', err);
+        // Before showing error, check if email is actually confirmed
+        const checkTargetEmail = urlEmail || searchParams.get('email');
+        if (checkTargetEmail) {
+          try {
+            const statusRes = await fetch(`/api/auth/verify-status?email=${encodeURIComponent(checkTargetEmail)}`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.verified) {
+                setVerifiedEmail(checkTargetEmail);
+                setStatus('verified');
+                setTimeout(() => triggerFireworks(), 100);
+                return;
+              }
+            }
+          } catch {}
+        }
         setStatus('error');
         setErrorMessage(
           err.message || 'Verification failed. Your link may have expired or already been used.'
@@ -278,6 +311,19 @@ function VerifyEmailContent() {
     setResendMessage(null);
 
     try {
+      // Check if account is already verified
+      const statusRes = await fetch(`/api/auth/verify-status?email=${encodeURIComponent(targetEmail)}`);
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.verified) {
+          setVerifiedEmail(targetEmail);
+          setStatus('verified');
+          setTimeout(() => triggerFireworks(), 100);
+          setIsResending(false);
+          return;
+        }
+      }
+
       // 1. Primary: Dispatch via our robust backend Resend service
       const res = await fetch('/api/auth/send-verification-otp', {
         method: 'POST',

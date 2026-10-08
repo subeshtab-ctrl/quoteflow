@@ -18,6 +18,7 @@ import {
 import { razorpayService } from './razorpay';
 import { getDeveloperAdminConfig, updateRazorpayPlansConfig, syncCloudAdminConfig } from './dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
+import { getDaysRemainingInTimezone } from '@/lib/utils/ip-timezone';
 import { sendEmail } from '@/lib/email/service';
 
 export const DEFAULT_PLANS = {
@@ -155,8 +156,13 @@ export class SubscriptionService {
   /**
    * Central Subscription Access and Entitlement Resolver
    * Never trust client clocks or user metadata.
+   * @param userTimezone - Optional IANA timezone (e.g. "Asia/Kolkata") resolved from the user's IP.
+   *   Used to anchor trial day boundaries to the user's local calendar, not UTC midnight.
    */
-  public async getBusinessSubscriptionAccess(businessId: string): Promise<SubscriptionAccess> {
+  public async getBusinessSubscriptionAccess(
+    businessId: string,
+    userTimezone = 'UTC'
+  ): Promise<SubscriptionAccess> {
     let sub = await store.getBusinessSubscription(businessId);
     if (!sub) {
       sub = await this.startFreeTrial(businessId);
@@ -175,9 +181,9 @@ export class SubscriptionService {
     const trialStart = sub.trial_start_at ? new Date(sub.trial_start_at).getTime() : new Date(sub.created_at).getTime();
     const trialEnd = sub.trial_end_at ? new Date(sub.trial_end_at).getTime() : trialStart + 30 * 86400000;
 
-    const daysRemainingInTrial = trialEnd > now
-      ? Math.max(0, Math.ceil((trialEnd - now) / 86400000))
-      : 0;
+    // Use IP-resolved timezone so a trial ending "today" isn't already expired for
+    // someone in IST (+5:30) who still has hours left in their local day.
+    const daysRemainingInTrial = getDaysRemainingInTimezone(trialEnd, userTimezone);
 
     // Grace Period calculation: exactly 3 days after payment becomes due
     const graceStart = sub.grace_period_start_at ? new Date(sub.grace_period_start_at).getTime() : trialEnd;
@@ -1294,12 +1300,53 @@ export class SubscriptionService {
           message_id: msgId,
           uploaded_by_user_id: params.senderUserId || 'system',
           storage_path: att.storage_path,
+          mime_type: (att as any).mime_type || (att as any).file_type || 'application/octet-stream',
           file_name: att.file_name,
           file_size: att.file_size,
-          mime_type: att.mime_type,
           created_at: now,
         });
       }
+    }
+
+    // Dispatch email notifications via Resend for email-like messaging
+    try {
+      const { sendEmail } = await import('@/lib/email/service');
+      const recipientEmail = ticket.creator_email || (ticket as any).contact_email;
+      const recipientName = ticket.creator_name || (ticket as any).contact_name || 'Customer';
+
+      if (params.senderType === 'business') {
+        // Send email to Developer Admin
+        await sendEmail({
+          to: 'm.subesh@outlook.com',
+          subject: `[QuoteFlow Support] New message on Ticket #${ticket.ticket_number}: ${ticket.subject}`,
+          html: `<div style="font-family: sans-serif; line-height: 1.6; color: #1e293b;">
+            <h2>Support Ticket Update: #${ticket.ticket_number}</h2>
+            <p><strong>Business:</strong> ${ticket.business_name || 'Customer'} (${recipientEmail || 'no-email'})</p>
+            <p><strong>Subject:</strong> ${ticket.subject}</p>
+            <div style="background: #f8fafc; border-left: 4px solid #4f46e5; padding: 12px 16px; margin: 16px 0;">
+              ${params.message.replace(/\n/g, '<br/>')}
+            </div>
+            <p><a href="https://www.blendandbold.com/admin" style="display: inline-block; background: #4f46e5; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold;">View in Developer Admin</a></p>
+          </div>`,
+        }).catch((e) => console.warn('Email dispatch to dev error:', e));
+      } else if (params.senderType === 'developer' && recipientEmail) {
+        // Send email to Customer
+        await sendEmail({
+          to: recipientEmail,
+          subject: `[QuoteFlow Support] Response to Ticket #${ticket.ticket_number}: ${ticket.subject}`,
+          html: `<div style="font-family: sans-serif; line-height: 1.6; color: #1e293b;">
+            <h2>QuoteFlow Support Response</h2>
+            <p>Hi ${recipientName},</p>
+            <p>Our team has replied to your support request (<strong>Ticket #${ticket.ticket_number}: ${ticket.subject}</strong>):</p>
+            <div style="background: #f8fafc; border-left: 4px solid #10b981; padding: 12px 16px; margin: 16px 0;">
+              ${params.message.replace(/\n/g, '<br/>')}
+            </div>
+            <p><a href="https://www.blendandbold.com/settings?tab=support" style="display: inline-block; background: #10b981; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold;">View &amp; Reply in QuoteFlow</a></p>
+          </div>`,
+        }).catch((e) => console.warn('Email dispatch to user error:', e));
+      }
+    } catch (e) {
+      console.warn('Ticket notification error:', e);
     }
 
     return msg;

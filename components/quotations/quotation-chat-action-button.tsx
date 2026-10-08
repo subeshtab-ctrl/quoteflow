@@ -55,23 +55,7 @@ export function QuotationChatActionButton({
     setUnreadCount(initialUnreadCount);
   }, [initialHasUnread, initialUnreadCount]);
 
-  useEffect(() => {
-    let mounted = true;
-    const poll = async () => {
-      const map = await fetchLiveChatStatusMap();
-      if (mounted && map && map[quotationId]) {
-        const count = map[quotationId].unread_chat_count || 0;
-        setUnreadCount(count);
-        setHasUnread(count > 0);
-      }
-    };
-    const interval = setInterval(poll, 2500);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
-  }, [quotationId]);
-
+  // Static badge loaded with page - no aggressive polling
   const showUnread = hasUnread && unreadCount > 0;
 
   return (

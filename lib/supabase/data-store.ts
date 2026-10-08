@@ -336,6 +336,8 @@ class QuoteFlowStore {
   }
 
   private loadOrgSettingsFromFile(): Record<string, {
+    name?: string;
+    default_currency?: string;
     require_full_payment_for_invoice?: boolean;
     invoice_prefix?: string;
     invoice_start_number?: number;
@@ -359,10 +361,18 @@ class QuoteFlowStore {
           current_test_invoice_counter?: number;
           current_test_quotation_counter?: number;
           brand_color?: string | null;
+          name?: string;
+          default_currency?: string;
         }> = {};
         for (const [key, val] of Object.entries(parsed)) {
           if (val && typeof val === 'object') {
             result[key] = {
+              ...(typeof (val as any).name === 'string' && (val as any).name.trim()
+                ? { name: (val as any).name.trim() }
+                : {}),
+              ...(typeof (val as any).default_currency === 'string' && (val as any).default_currency.trim()
+                ? { default_currency: (val as any).default_currency.trim() }
+                : {}),
               ...(typeof (val as any).require_full_payment_for_invoice === 'boolean'
                 ? { require_full_payment_for_invoice: (val as any).require_full_payment_for_invoice }
                 : {}),
@@ -401,6 +411,8 @@ class QuoteFlowStore {
       const all = this.loadOrgSettingsFromFile();
       all[orgId] = {
         ...(all[orgId] || {}),
+        ...(data.name !== undefined && typeof data.name === 'string' && data.name.trim() ? { name: data.name.trim() } : {}),
+        ...(data.default_currency !== undefined ? { default_currency: data.default_currency } : {}),
         ...(data.require_full_payment_for_invoice !== undefined
           ? { require_full_payment_for_invoice: Boolean(data.require_full_payment_for_invoice) }
           : {}),
@@ -1741,6 +1753,8 @@ class QuoteFlowStore {
             default_show_upi_details: effectivePayment.default_show_upi_details ?? (data as any).default_show_upi_details ?? true,
             default_show_crypto_details: effectivePayment.default_show_crypto_details ?? (data as any).default_show_crypto_details ?? false,
             brand_color: localSettings.brand_color || (data as any).brand_color || '#4f46e5',
+            name: localSettings.name || data.name,
+            default_currency: (localSettings.default_currency || data.default_currency || 'INR') as any,
           } as Organization;
           this.organizations.set(data.id, fullOrg);
           return fullOrg;
@@ -1792,6 +1806,8 @@ class QuoteFlowStore {
         default_show_upi_details: localPayment.default_show_upi_details ?? cached.default_show_upi_details ?? true,
         default_show_crypto_details: localPayment.default_show_crypto_details ?? cached.default_show_crypto_details ?? false,
         brand_color: localSettings.brand_color || cached.brand_color || '#4f46e5',
+        name: localSettings.name || cached.name,
+        default_currency: (localSettings.default_currency || cached.default_currency || 'INR') as any,
       } as Organization;
     }
     return null;
@@ -1856,7 +1872,7 @@ class QuoteFlowStore {
         name: data.name || 'My Company',
         slug: data.slug || 'my-company',
         email: data.email || '',
-        default_currency: 'USD',
+        default_currency: 'INR',
         default_tax_rate: 0,
         default_validity_days: 30,
         quotation_prefix: 'Q-',
@@ -1919,9 +1935,6 @@ class QuoteFlowStore {
           invoice_footer: cleanFooter,
           updated_at: new Date().toISOString(),
         };
-        if (updated.mode !== undefined) dbPayload.mode = updated.mode;
-        if (updated.current_test_invoice_counter !== undefined) dbPayload.current_test_invoice_counter = updated.current_test_invoice_counter;
-        if (updated.current_test_quotation_counter !== undefined) dbPayload.current_test_quotation_counter = updated.current_test_quotation_counter;
 
         let { data: saved, error } = await supabase
           .from('organizations')
@@ -4061,7 +4074,7 @@ class QuoteFlowStore {
   // --- PUBLIC CUSTOMER VIEW TRACKING ---
   public async recordQuotationView(
     quotationId: string,
-    meta: { ip?: string; userAgent?: string; ip_address?: string; user_agent?: string }
+    meta: { ip?: string; userAgent?: string; ip_address?: string; user_agent?: string; viewer_timezone?: string }
   ): Promise<{ quotation: Quotation; firstView: boolean }> {
     const quote = this.quotations.get(quotationId) || (await this.getQuotationById(quotationId));
     if (!quote) throw new Error('Quotation not found');
@@ -4108,13 +4121,14 @@ class QuoteFlowStore {
     quote.updated_at = nowIso;
     this.quotations.set(quotationId, quote);
 
-    // Record view log
+    // Record view log (UTC timestamp + viewer timezone for display)
     viewList.push({
       id: `view_${Date.now()}`,
       quotation_id: quotationId,
       ip_address: rawIp,
       user_agent: meta.userAgent,
       viewed_at: nowIso,
+      viewer_timezone: meta.viewer_timezone,
     });
     this.views.set(quotationId, viewList);
 
@@ -4508,6 +4522,8 @@ class QuoteFlowStore {
     signature_type: 'DRAWN' | 'TYPED';
     ip_address?: string;
     user_agent?: string;
+    /** IANA timezone resolved from signer IP, e.g. "Asia/Kolkata". signed_at is always UTC. */
+    signer_timezone?: string;
   }): Promise<Quotation> {
     const quote = await this.getQuotationByPublicToken(params.token);
     if (!quote) throw new Error('Quotation not found');
@@ -4556,7 +4572,7 @@ class QuoteFlowStore {
       signer_email: effectiveSignerEmail,
     });
 
-    // 1. Create Signature Record
+    // 1. Create Signature Record (UTC timestamp + signer timezone for display)
     const sig: QuotationSignature = {
       id: `sig_${Date.now()}`,
       quotation_id: quote.id,
@@ -4571,6 +4587,7 @@ class QuoteFlowStore {
       user_agent: params.user_agent,
       signed_at: now,
       document_hash: documentHash,
+      signer_timezone: params.signer_timezone,
     };
     this.signatures.set(quote.id, sig);
 

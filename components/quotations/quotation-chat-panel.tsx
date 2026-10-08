@@ -53,8 +53,6 @@ export function QuotationChatPanel({
 
   useEffect(() => {
     fetchAndMarkRead();
-    const interval = setInterval(fetchAndMarkRead, 2500);
-    return () => clearInterval(interval);
   }, [quotationId]);
 
   useEffect(() => {

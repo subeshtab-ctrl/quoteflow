@@ -58,6 +58,7 @@ import {
 import { COUNTRIES, getCountryProfile } from '@/lib/tax/country-config';
 import { TrainingGuideModal } from '@/components/training/training-guide-modal';
 import { SupportView } from '@/components/support/support-view';
+import { AppearanceSettingsView } from '@/components/settings/appearance-settings-view';
 
 export function SettingsClientView({
   initialOrganization,
@@ -73,13 +74,19 @@ export function SettingsClientView({
   initialTab?: string;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'general' | 'support'>(
-    initialTab === 'support' ? 'support' : 'general'
+  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'support'>(
+    initialTab === 'support'
+      ? 'support'
+      : initialTab === 'appearance'
+      ? 'appearance'
+      : 'general'
   );
 
   useEffect(() => {
     if (initialTab === 'support') {
       setActiveTab('support');
+    } else if (initialTab === 'appearance') {
+      setActiveTab('appearance');
     } else if (initialTab === 'general') {
       setActiveTab('general');
     }
@@ -680,6 +687,21 @@ export function SettingsClientView({
         <button
           type="button"
           onClick={() => {
+            setActiveTab('appearance');
+            router.push('/settings?tab=appearance', { scroll: false });
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'appearance'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Sparkles className="h-4 w-4" />
+          <span>Appearance & Themes</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             setActiveTab('support');
             router.push('/settings?tab=support', { scroll: false });
           }}
@@ -697,6 +719,10 @@ export function SettingsClientView({
       {activeTab === 'support' ? (
         <div className="space-y-6">
           <SupportView />
+        </div>
+      ) : activeTab === 'appearance' ? (
+        <div className="space-y-6">
+          <AppearanceSettingsView />
         </div>
       ) : (
         <>

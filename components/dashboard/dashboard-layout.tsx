@@ -2,6 +2,9 @@ import React from 'react';
 import { redirect } from 'next/navigation';
 import { DashboardSidebar } from '@/components/dashboard/sidebar';
 import { DashboardHeader, UserProfileInfo } from '@/components/dashboard/header';
+import { CommandPalette } from '@/components/dashboard/command-palette';
+import { QuoteFlowAiModal } from '@/components/ai/quoteflow-ai-modal';
+import { MobileBottomNav } from '@/components/dashboard/mobile-nav';
 import { TestModeBanner } from '@/components/dashboard/test-mode-banner';
 import { BillingBanner } from '@/components/billing/billing-banner';
 import { WelcomeTrialTrigger } from '@/components/billing/welcome-trial-trigger';
@@ -73,10 +76,19 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
           trialEndsAt={subscriptionAccess?.trialEndsAt}
           isTrial={subscriptionAccess?.isTrial}
         />
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-8">
           {children}
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      <MobileBottomNav />
+
+      {/* Global Command Palette (⌘K) */}
+      <CommandPalette />
+
+      {/* Global QuoteFlow AI Modal (⌘J) */}
+      <QuoteFlowAiModal />
     </div>
   );
 }

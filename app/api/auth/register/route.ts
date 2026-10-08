@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
         slug: orgSlug,
         business_type: 'Services & Products',
         email: cleanEmail,
-        default_currency: 'USD',
+        default_currency: 'INR',
         default_tax_rate: 0,
         default_validity_days: 30,
         quotation_prefix: 'Q-',

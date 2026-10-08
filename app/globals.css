@@ -131,3 +131,30 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   animation: pulseGlow 2.5s ease-in-out infinite;
 }
 
+/* Card and Surface Style Variants */
+[data-card-style="glass"] .bg-white,
+[data-card-style="glass"] .dark .bg-slate-900 {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background-color: rgba(255, 255, 255, 0.85);
+}
+
+.dark[data-card-style="glass"] .bg-white,
+.dark[data-card-style="glass"] .dark .bg-slate-900 {
+  background-color: rgba(15, 23, 42, 0.85);
+}
+
+[data-card-style="sharp"] {
+  --radius: 0.25rem !important;
+}
+
+/* Floating Sidebar Support */
+[data-sidebar-style="floating"] aside {
+  margin: 12px;
+  height: calc(100vh - 24px) !important;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+}
+
+

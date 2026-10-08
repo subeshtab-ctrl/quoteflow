@@ -4,6 +4,7 @@ import { subscriptionService, DEFAULT_PLANS } from '@/lib/billing/subscription-s
 import { razorpayService } from '@/lib/billing/razorpay';
 import { syncCloudAdminConfig } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
+import { getTimezoneFromIp } from '@/lib/utils/ip-timezone';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -18,9 +19,16 @@ export async function GET(req: NextRequest) {
     // Ensure latest Razorpay credentials & plan IDs are synced from Supabase
     await syncCloudAdminConfig();
 
+    // Resolve user's timezone from their IP so trial day boundaries are local, not UTC
+    const userIp =
+      req.headers.get('x-forwarded-for')?.split(',')[0] ||
+      req.headers.get('x-real-ip') ||
+      undefined;
+    const userTimezone = await getTimezoneFromIp(userIp);
+
     const [subscription, access, isEligibleForPromo, payments] = await Promise.all([
       store.getBusinessSubscription(auth.orgId),
-      subscriptionService.getBusinessSubscriptionAccess(auth.orgId),
+      subscriptionService.getBusinessSubscriptionAccess(auth.orgId, userTimezone),
       subscriptionService.isEligibleForPromotion(auth.orgId),
       store.getSubscriptionPayments(auth.orgId, 20),
     ]);
@@ -43,6 +51,7 @@ export async function GET(req: NextRequest) {
       payments,
       isTestMode,
       keyId,
+      userTimezone,
     });
   } catch (err: any) {
     console.error('Error fetching subscription details:', err);

@@ -28,9 +28,24 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const validated = OrganizationSettingsSchema.partial().parse(body);
-
+    const validated = OrganizationSettingsSchema.parse(body);
     const updated = await store.updateOrganization(orgId, validated as Partial<Organization>);
+
+    if (auth?.userId && validated.name) {
+      try {
+        const { createAdminClient } = await import('@/lib/supabase/service-role');
+        const admin = createAdminClient();
+        if (admin) {
+          await admin.auth.admin.updateUserById(auth.userId, {
+            user_metadata: {
+              company_name: validated.name,
+            },
+          });
+        }
+      } catch (metaErr) {
+        console.warn('Could not sync company_name into user metadata:', metaErr);
+      }
+    }
 
     return NextResponse.json({ success: true, organization: updated });
   } catch (err: any) {

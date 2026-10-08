@@ -255,6 +255,8 @@ export interface QuotationSignature {
   user_agent?: string;
   signed_at: string;
   document_hash: string;
+  /** IANA timezone resolved from signer's IP, e.g. "Asia/Kolkata". Stored for display only; signed_at is always UTC. */
+  signer_timezone?: string;
 }
 
 export interface QuotationView {
@@ -263,6 +265,8 @@ export interface QuotationView {
   ip_address?: string;
   user_agent?: string;
   viewed_at: string;
+  /** IANA timezone resolved from viewer's IP, e.g. "Asia/Kolkata". Stored for display only; viewed_at is always UTC. */
+  viewer_timezone?: string;
 }
 
 export interface QuotationEvent {

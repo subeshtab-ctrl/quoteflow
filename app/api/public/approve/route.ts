@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { ApprovalSchema } from '@/lib/validations/quotation';
 import { generateQuotationApprovedEmail, sendEmail } from '@/lib/email/service';
+import { getTimezoneFromIp } from '@/lib/utils/ip-timezone';
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,6 +11,9 @@ export async function POST(req: NextRequest) {
 
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || req.headers.get('x-real-ip') || undefined;
     const userAgent = req.headers.get('user-agent') || undefined;
+
+    // Resolve signer's timezone from their IP for accurate timestamp display
+    const signerTimezone = await getTimezoneFromIp(ip);
 
     const approvedQuote = await store.approveQuotation({
       token: validated.token,
@@ -22,6 +26,7 @@ export async function POST(req: NextRequest) {
       signature_type: validated.signature_type,
       ip_address: ip,
       user_agent: userAgent,
+      signer_timezone: signerTimezone,
     });
 
     // Send email notification to business and customer

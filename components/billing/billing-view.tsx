@@ -48,6 +48,8 @@ interface BillingViewProps {
     payments?: SubscriptionPayment[];
     isTestMode?: boolean;
     keyId?: string | null;
+    /** IANA timezone resolved from user's IP, e.g. "Asia/Kolkata" */
+    userTimezone?: string;
   };
 }
 
@@ -298,6 +300,8 @@ export function BillingView({ initialData }: BillingViewProps) {
 
   const sub = data?.subscription;
   const access = data?.access;
+  // IANA timezone from user's IP (falls back to browser locale if not available)
+  const userTimezone = data?.userTimezone || undefined;
 
   // Real payment check
   const hasConfirmedPayment = Boolean(
@@ -314,12 +318,14 @@ export function BillingView({ initialData }: BillingViewProps) {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
+        ...(userTimezone ? { timeZone: userTimezone } : {}),
       })
     : sub?.trial_end_at
     ? new Date(sub.trial_end_at).toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
+        ...(userTimezone ? { timeZone: userTimezone } : {}),
       })
     : null;
 
@@ -328,6 +334,7 @@ export function BillingView({ initialData }: BillingViewProps) {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
+        ...(userTimezone ? { timeZone: userTimezone } : {}),
       })
     : null;
 

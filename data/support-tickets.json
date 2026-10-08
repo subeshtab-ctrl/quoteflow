@@ -214,5 +214,77 @@
         "created_at": "2026-10-03T09:24:10.017Z"
       }
     ]
+  },
+  "bfec36a6-3bd9-46e5-8d01-1aa0804ea099": {
+    "id": "bfec36a6-3bd9-46e5-8d01-1aa0804ea099",
+    "business_id": "0ea1e1b9-be04-4db9-9bc8-39556f7dae43",
+    "created_by_user_id": "3f273076-a2af-4418-a70a-984e37165ffb",
+    "ticket_number": "QF-2026-000007",
+    "subject": "Inquiry regarding GST invoice rounding",
+    "category": "Invoice",
+    "priority": "High",
+    "status": "waiting_for_customer",
+    "description": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+    "assigned_to": null,
+    "created_at": "2026-10-05T11:35:39.240Z",
+    "updated_at": "2026-10-05T11:35:39.315Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "callback_requested": false,
+    "creator_email": "client@example.com",
+    "creator_name": "Test Client",
+    "messages": [
+      {
+        "id": "a432a2cb-a7ce-43ef-ae23-889f3653bc37",
+        "ticket_id": "bfec36a6-3bd9-46e5-8d01-1aa0804ea099",
+        "sender_user_id": "3f273076-a2af-4418-a70a-984e37165ffb",
+        "sender_type": "business",
+        "sender_name": "Test Client",
+        "message": "Line item 2 displays 18.01% instead of 18.00% under custom tax formula.",
+        "created_at": "2026-10-05T11:35:39.240Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "8c0f3bc5-4b8c-4209-90de-fdd7bb4d49cb",
+        "ticket_id": "bfec36a6-3bd9-46e5-8d01-1aa0804ea099",
+        "message_id": "a432a2cb-a7ce-43ef-ae23-889f3653bc37",
+        "uploaded_by_user_id": "3f273076-a2af-4418-a70a-984e37165ffb",
+        "storage_path": "/uploads/support/sample.png",
+        "file_name": "invoice_screenshot.png",
+        "file_size": 102450,
+        "mime_type": "image/png",
+        "created_at": "2026-10-05T11:35:39.240Z"
+      }
+    ]
+  },
+  "f5e2bc01-7595-4540-b6f4-893258f6bec8": {
+    "id": "f5e2bc01-7595-4540-b6f4-893258f6bec8",
+    "business_id": "2c8c9dc6-d0f3-4812-864d-2899dc732419",
+    "created_by_user_id": "usr_test_1",
+    "ticket_number": "QF-2026-000008",
+    "subject": "Billing inquiry with callback",
+    "category": "Billing",
+    "priority": "High",
+    "status": "resolved",
+    "description": "Please call me regarding promo pricing",
+    "assigned_to": null,
+    "created_at": "2026-10-05T11:35:40.781Z",
+    "updated_at": "2026-10-05T11:35:40.790Z",
+    "resolved_at": "2026-10-05T11:35:40.798Z",
+    "closed_at": null,
+    "callback_requested": true,
+    "callback_phone": "+91 9876543210",
+    "messages": [
+      {
+        "id": "b94fbfca-ac3a-4923-a5c4-073a6987108e",
+        "ticket_id": "f5e2bc01-7595-4540-b6f4-893258f6bec8",
+        "sender_user_id": "usr_test_1",
+        "sender_type": "business",
+        "sender_name": "Customer",
+        "message": "Please call me regarding promo pricing",
+        "created_at": "2026-10-05T11:35:40.781Z"
+      }
+    ]
   }
 }

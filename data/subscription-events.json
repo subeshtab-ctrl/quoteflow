@@ -152,5 +152,19 @@
     "processing_error": null,
     "created_at": "2026-10-03T09:24:08.456Z",
     "processed_at": "2026-10-03T09:24:08.456Z"
+  },
+  "evt_test_idempotent_1791200139367": {
+    "id": "f6e0f45c-77a8-4912-8e3d-f5ac3231d82b",
+    "event_id": "evt_test_idempotent_1791200139367",
+    "event_type": "subscription.charged",
+    "razorpay_subscription_id": "sub_test_dup",
+    "razorpay_payment_id": "pay_test_dup",
+    "payload": {
+      "test": true
+    },
+    "processed": true,
+    "processing_error": null,
+    "created_at": "2026-10-05T11:35:39.367Z",
+    "processed_at": "2026-10-05T11:35:39.367Z"
   }
 }

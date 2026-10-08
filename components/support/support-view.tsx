@@ -86,10 +86,6 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
 
   useEffect(() => {
     fetchTickets(false);
-    const interval = setInterval(() => {
-      fetchTickets(true);
-    }, 4000);
-    return () => clearInterval(interval);
   }, [selectedStatus, selectedCategory, searchQuery]);
 
   const loadTicketDetails = (ticketId: string) => {
@@ -550,17 +546,117 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
         </Modal>
       )}
 
-      {/* Floating Bottom-Right Support Chat Widget (Identical to Client Portal Chat) */}
+      {/* Email-like Ticket Message Thread Modal */}
       {activeTicket && (
-        <SupportChatFloatingWidget
-          ticket={activeTicket}
+        <Modal
+          isOpen={Boolean(activeTicket)}
           onClose={() => setActiveTicket(null)}
-          senderType="business"
-          onTicketUpdated={(updated) => {
-            setActiveTicket(updated);
-            setTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-          }}
-        />
+          title={`Ticket #${activeTicket.ticket_number}: ${activeTicket.subject}`}
+        >
+          <div className="space-y-4 max-h-[75vh] flex flex-col">
+            {/* Header info */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3 text-xs">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="font-semibold uppercase tracking-wider text-[10px]">
+                  {activeTicket.category}
+                </Badge>
+                <Badge
+                  className={
+                    activeTicket.status === 'resolved' || activeTicket.status === 'closed'
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                  }
+                >
+                  {activeTicket.status.replace(/_/g, ' ').toUpperCase()}
+                </Badge>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => loadTicketDetails(activeTicket.id)}
+                className="text-xs h-7 gap-1 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+              >
+                <span>Refresh Messages</span>
+              </Button>
+            </div>
+
+            {/* Email message log */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 py-1 max-h-[380px]">
+              {/* Initial ticket message */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 p-3.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    {(activeTicket as any).contact_name || activeTicket.creator_name || 'You (Initial Request)'}
+                  </span>
+                  <span className="text-[11px] font-mono">
+                    {new Date(activeTicket.created_at).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                  {activeTicket.description}
+                </p>
+              </div>
+
+              {/* Message replies */}
+              {(activeTicket.messages || []).map((msg) => {
+                const isDev = msg.sender_type === 'developer';
+                return (
+                  <div
+                    key={msg.id}
+                    className={`rounded-xl border p-3.5 space-y-2 text-xs ${
+                      isDev
+                        ? 'border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/30 text-indigo-950 dark:text-indigo-200 ml-4'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold">
+                          {msg.sender_name || (isDev ? 'QuoteFlow Engineer' : 'You')}
+                        </span>
+                        {isDev && (
+                          <Badge className="bg-indigo-600 text-white text-[9px] px-1.5 py-0">
+                            Support Team
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {new Date(msg.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Email reply composer */}
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-2">
+              <Textarea
+                placeholder="Write an email reply to support team..."
+                value={replyMessage}
+                onChange={(e) => setReplyMessage(e.target.value)}
+                rows={3}
+                className="text-xs resize-none"
+              />
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-[11px] text-slate-400">
+                  Replies are sent directly via email to our dedicated support desk.
+                </p>
+                <Button
+                  onClick={handleSendReply}
+                  disabled={isSendingReply || !replyMessage.trim()}
+                  size="sm"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs gap-1.5 shadow-sm"
+                >
+                  {isSendingReply ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  <span>Send Reply</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
