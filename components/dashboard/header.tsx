@@ -18,12 +18,21 @@ import {
   GraduationCap,
   Sparkles,
   Palette,
+  Volume2,
+  VolumeX,
+  CreditCard,
+  LifeBuoy,
 } from 'lucide-react';
 import { Notification } from '@/types/database';
 import { formatDateTime } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { useThemeCustomization } from '@/lib/theme/theme-customization-context';
+import {
+  playNotificationChime,
+  isSoundNotificationsEnabled,
+  setSoundNotificationsEnabled,
+} from '@/lib/utils/sound';
 
 export interface UserProfileInfo {
   id?: string;
@@ -49,6 +58,41 @@ export function DashboardHeader({
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfileInfo | null>(initialUser);
   const [isSigningOut, setIsSigningOut] = useState(false);
+
+  // Sound chime & Memoji states
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const prevUnreadCountRef = React.useRef<number | null>(null);
+  const [selectedMemoji, setSelectedMemoji] = useState<string | null>(null);
+  const MEMOJI_OPTIONS = ['🧑‍💼', '👩‍💻', '👨‍💻', '🚀', '⚡', '🦊', '🎯', '✨'];
+
+  useEffect(() => {
+    setSoundEnabled(isSoundNotificationsEnabled());
+    try {
+      const saved = localStorage.getItem('quoteflow_user_memoji');
+      if (saved) setSelectedMemoji(saved);
+    } catch {}
+  }, []);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    setSoundNotificationsEnabled(next);
+    if (next) {
+      playNotificationChime();
+    }
+  };
+
+  const handleSelectMemoji = (emoji: string) => {
+    const next = selectedMemoji === emoji ? null : emoji;
+    setSelectedMemoji(next);
+    try {
+      if (next) {
+        localStorage.setItem('quoteflow_user_memoji', next);
+      } else {
+        localStorage.removeItem('quoteflow_user_memoji');
+      }
+    } catch {}
+  };
 
   const { openCommandPalette, openAiModal } = useThemeCustomization();
 
@@ -104,6 +148,11 @@ export function DashboardHeader({
         if (res.ok) {
           const data = await res.json();
           if (data.notifications) {
+            const newUnread = data.notifications.filter((n: any) => !n.is_read).length;
+            if (prevUnreadCountRef.current !== null && newUnread > prevUnreadCountRef.current) {
+              playNotificationChime();
+            }
+            prevUnreadCountRef.current = newUnread;
             setNotifications(data.notifications);
           }
         }
@@ -125,6 +174,7 @@ export function DashboardHeader({
     try {
       await fetch('/api/notifications/mark-read', { method: 'POST' });
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      prevUnreadCountRef.current = 0;
     } catch {
       // Ignore
     }
@@ -229,7 +279,20 @@ export function DashboardHeader({
           {isNotifOpen && (
             <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">Notifications</h4>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">Notifications</h4>
+                  <button
+                    onClick={toggleSound}
+                    className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    title={soundEnabled ? 'Mute notification sound' : 'Enable notification sound'}
+                  >
+                    {soundEnabled ? (
+                      <Volume2 className="h-3.5 w-3.5 text-indigo-500" />
+                    ) : (
+                      <VolumeX className="h-3.5 w-3.5 text-slate-400" />
+                    )}
+                  </button>
+                </div>
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllRead}
@@ -275,8 +338,12 @@ export function DashboardHeader({
             className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
             aria-label="User profile menu"
           >
-            <div className="h-8 w-8 rounded-xl bg-[var(--brand-color,#4f46e5)] text-white font-bold flex items-center justify-center text-xs shadow-sm uppercase">
-              {displayInitials}
+            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white font-bold flex items-center justify-center text-xs shadow-sm ring-2 ring-indigo-500/20 select-none">
+              {selectedMemoji ? (
+                <span className="text-base leading-none">{selectedMemoji}</span>
+              ) : (
+                <span className="uppercase">{displayInitials}</span>
+              )}
             </div>
             <div className="hidden lg:block text-left max-w-[140px]">
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight truncate">
@@ -314,16 +381,40 @@ export function DashboardHeader({
                 )}
               </div>
 
-              <div className="py-1 space-y-0.5">
-                <Link
-                  href="/training"
-                  onClick={() => setIsProfileOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                >
-                  <GraduationCap className="h-3.5 w-3.5 text-slate-400" />
-                  <span>Training & Guides</span>
-                </Link>
+              {/* Memoji / Avatar Picker Row */}
+              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  <span>Memoji / Avatar</span>
+                  {selectedMemoji && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectMemoji(selectedMemoji)}
+                      className="text-[10px] text-indigo-500 hover:underline capitalize"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 overflow-x-auto py-0.5 scrollbar-none">
+                  {MEMOJI_OPTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => handleSelectMemoji(emoji)}
+                      className={`h-7 w-7 rounded-lg text-sm flex items-center justify-center transition-all ${
+                        selectedMemoji === emoji
+                          ? 'bg-indigo-100 dark:bg-indigo-950/80 ring-2 ring-indigo-500 scale-110 shadow-xs'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                      title={`Choose ${emoji}`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
+              <div className="py-1 space-y-0.5">
                 <Link
                   href="/settings"
                   onClick={() => setIsProfileOpen(false)}
@@ -334,12 +425,39 @@ export function DashboardHeader({
                 </Link>
 
                 <Link
+                  href="/billing"
+                  onClick={() => setIsProfileOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
+                  <span>Billing & Subscription</span>
+                </Link>
+
+                <Link
                   href="/settings?tab=appearance"
                   onClick={() => setIsProfileOpen(false)}
                   className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 >
                   <Palette className="h-3.5 w-3.5 text-indigo-500" />
                   <span>Appearance & Themes</span>
+                </Link>
+
+                <Link
+                  href="/settings?tab=support"
+                  onClick={() => setIsProfileOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <LifeBuoy className="h-3.5 w-3.5 text-emerald-500" />
+                  <span>Help & Support</span>
+                </Link>
+
+                <Link
+                  href="/training"
+                  onClick={() => setIsProfileOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <GraduationCap className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Training & Guides</span>
                 </Link>
 
                 <button

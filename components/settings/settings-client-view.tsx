@@ -43,6 +43,7 @@ import {
   BookOpen,
   ArrowRight,
   LifeBuoy,
+  Crop,
 } from 'lucide-react';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
 import { ThemeSegmentedControl } from '@/components/theme/theme-toggle';
@@ -59,6 +60,7 @@ import { COUNTRIES, getCountryProfile } from '@/lib/tax/country-config';
 import { TrainingGuideModal } from '@/components/training/training-guide-modal';
 import { SupportView } from '@/components/support/support-view';
 import { AppearanceSettingsView } from '@/components/settings/appearance-settings-view';
+import { LogoEditorModal } from '@/components/settings/logo-editor-modal';
 
 export function SettingsClientView({
   initialOrganization,
@@ -127,6 +129,36 @@ export function SettingsClientView({
 
   // Interactive Training & Workflow Guides
   const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
+  const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
+
+  const handleSaveLogoModal = async (newFormattedUrl: string) => {
+    setOrg((prev) => ({ ...prev, logo_url: newFormattedUrl }));
+    const parsed = parseLogoUrl(newFormattedUrl);
+    setLogoShape(parsed.shape);
+    setLogoFit(parsed.fit);
+
+    // Auto extract color if possible
+    try {
+      const color = await extractDominantColor(parsed.cleanUrl);
+      if (color) {
+        setOrg((prev) => ({ ...prev, brand_color: color }));
+        document.documentElement.style.setProperty('--brand-color', color);
+      }
+    } catch {}
+
+    // Save to server
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...org,
+        logo_url: newFormattedUrl,
+      }),
+    });
+
+    setSuccessMsg('Logo updated successfully!');
+    setTimeout(() => setSuccessMsg(null), 3000);
+  };
 
   const handleDefaultUpiQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -712,7 +744,7 @@ export function SettingsClientView({
           }`}
         >
           <LifeBuoy className="h-4 w-4" />
-          <span>Customer Support & Help Desk</span>
+          <span>Help & Support</span>
         </button>
       </div>
 
@@ -761,57 +793,30 @@ export function SettingsClientView({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Quick Cards Grid: Subscription/Billing + Customer Support */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Subscription & Billing Quick Card */}
-              <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 p-5 shadow-xs flex flex-col justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                      Subscription & SaaS Billing
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Manage your QuoteFlow plans (30-day Free Trial and ₹99/month Pro plan), view payment receipts, or update recurring billing.
-                  </p>
+            {/* Help & Support Quick Card */}
+            <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <LifeBuoy className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                    Help & Support
+                  </h3>
                 </div>
-                <Link href="/billing">
-                  <Button
-                    type="button"
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-xs"
-                  >
-                    <span>Manage Subscription & Billing</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Button>
-                </Link>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Submit support inquiries, check ticket status, and chat directly with developer engineers.
+                </p>
               </div>
-
-              {/* Customer Support & Help Desk Quick Card */}
-              <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-gradient-to-r from-emerald-50/70 via-teal-50/40 to-slate-50 dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-slate-900 p-5 shadow-xs flex flex-col justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <LifeBuoy className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                      Customer Support & Ticket History
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    View support ticket history (Pending, In Process, Resolved), create new tickets, and chat directly with developer engineers.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('support');
-                    router.push('/settings?tab=support', { scroll: false });
-                  }}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs gap-1.5 shadow-xs"
-                >
-                  <span>Open Support Desk & History</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+              <Button
+                type="button"
+                onClick={() => {
+                  setActiveTab('support');
+                  router.push('/settings?tab=support', { scroll: false });
+                }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-xs shrink-0"
+              >
+                <span>Open Help & Support</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
 
         {/* Operating Environment Mode Card */}
@@ -915,21 +920,6 @@ export function SettingsClientView({
           </div>
         </div>
 
-        {/* Appearance & Soft Dark Mode Card */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <SunMoon className="h-5 w-5 text-indigo-500" />
-                <span>Appearance & Display Theme</span>
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Switch between standard light mode, comfortable soft dark mode, or system automatic.
-              </p>
-            </div>
-            <ThemeSegmentedControl />
-          </div>
-        </div>
 
         {/* Brand & Logo Card */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-5">
@@ -1042,12 +1032,12 @@ export function SettingsClientView({
                     type="button"
                     variant="primary"
                     size="sm"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => setIsLogoModalOpen(true)}
                     disabled={isUploadingLogo}
-                    className="gap-2 shadow-sm font-bold"
+                    className="gap-2 shadow-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
-                    <Upload className="h-4 w-4" />
-                    <span>{org.logo_url ? 'Change Logo' : 'Upload Logo'}</span>
+                    <Crop className="h-4 w-4" />
+                    <span>{org.logo_url ? 'Edit Logo' : 'Upload & Edit Logo'}</span>
                   </Button>
 
                   {org.logo_url && (
@@ -2389,6 +2379,16 @@ export function SettingsClientView({
       <TrainingGuideModal
         isOpen={isTrainingModalOpen}
         onClose={() => setIsTrainingModalOpen(false)}
+      />
+
+      {/* Customize Logo & Crop Modal */}
+      <LogoEditorModal
+        isOpen={isLogoModalOpen}
+        onClose={() => setIsLogoModalOpen(false)}
+        currentLogoUrl={org.logo_url}
+        companyName={org.name}
+        onSave={handleSaveLogoModal}
+        onRemove={handleRemoveLogo}
       />
     </div>
   );

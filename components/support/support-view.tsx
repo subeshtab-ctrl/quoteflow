@@ -30,6 +30,7 @@ import {
   Download,
   PhoneCall,
 } from 'lucide-react';
+import { playNotificationChime } from '@/lib/utils/sound';
 
 export function SupportView({ initialTickets }: { initialTickets?: SupportTicket[] }) {
   const [tickets, setTickets] = useState<SupportTicket[]>(initialTickets || []);
@@ -90,16 +91,38 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
 
   const loadTicketDetails = (ticketId: string) => {
     const existing = tickets.find((t) => t.id === ticketId);
-    if (existing) {
+    if (existing && !activeTicket) {
       setActiveTicket(existing);
     }
     fetch(`/api/support/tickets/${ticketId}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
-        if (j.ticket) setActiveTicket(j.ticket);
+        if (j.ticket) {
+          if (
+            activeTicket &&
+            activeTicket.id === ticketId &&
+            j.ticket.messages?.length > (activeTicket.messages?.length || 0)
+          ) {
+            const lastMsg = j.ticket.messages[j.ticket.messages.length - 1];
+            if (lastMsg?.sender_role === 'DEVELOPER') {
+              playNotificationChime();
+            }
+          }
+          setActiveTicket(j.ticket);
+        }
       })
       .catch(() => {});
   };
+
+  // Poll open ticket for live developer responses
+  useEffect(() => {
+    if (!activeTicket) return;
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      loadTicketDetails(activeTicket.id);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [activeTicket?.id]);
 
   const handleFileUpload = async (file: File, isReply = false) => {
     if (!file) return;

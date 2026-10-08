@@ -338,6 +338,21 @@ export function BillingView({ initialData }: BillingViewProps) {
       })
     : null;
 
+  const isCancelledPeriodActive = Boolean(
+    (sub?.cancel_at_period_end || access?.cancelAtPeriodEnd || sub?.status === 'cancelled') &&
+    (access?.activeUntil || sub?.current_period_end) &&
+    new Date(access?.activeUntil || sub?.current_period_end!).getTime() > Date.now()
+  );
+
+  const activeUntilDateFormatted = isCancelledPeriodActive
+    ? new Date(access?.activeUntil || sub?.current_period_end!).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        ...(userTimezone ? { timeZone: userTimezone } : {}),
+      })
+    : null;
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-12 selection:bg-indigo-500 selection:text-white">
       {/* Back Button */}
@@ -453,6 +468,37 @@ export function BillingView({ initialData }: BillingViewProps) {
             </Button>
           </div>
         </div>
+      ) : isCancelledPeriodActive ? (
+        <div className="p-4 sm:p-5 rounded-2xl border border-amber-300 dark:border-amber-800/80 bg-amber-50/90 dark:bg-amber-950/40 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="h-10 w-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-amber-950 dark:text-amber-200 uppercase tracking-wider">
+                    Cancelled — Active until {activeUntilDateFormatted}
+                  </span>
+                  <Badge className="bg-amber-500 text-white text-[11px] px-2.5 py-0.5 font-semibold">
+                    Cancelled
+                  </Badge>
+                </div>
+                <p className="text-xs text-amber-900 dark:text-amber-200">
+                  Your subscription has been cancelled. You will continue to have full access until {activeUntilDateFormatted}. Autopay has been turned off and no further charges will occur.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleReactivate}
+              disabled={isProcessingCheckout}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs shrink-0 font-bold gap-1.5 shadow-xs"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Reactivate Subscription</span>
+            </Button>
+          </div>
+        </div>
       ) : hasConfirmedPayment ? (
         <div className="p-4 sm:p-5 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/30 shadow-xs">
           <div className="flex items-start sm:items-center gap-3.5">
@@ -522,14 +568,21 @@ export function BillingView({ initialData }: BillingViewProps) {
               </h2>
               <Badge
                 className={
-                  hasConfirmedPayment
+                  isCancelledPeriodActive
+                    ? 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold tracking-tight bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                    : hasConfirmedPayment
                     ? 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold tracking-tight bg-[#e8f8f0] dark:bg-[#064e3b]/35 text-[#047857] dark:text-[#34d399] border border-[#6ee7b7] dark:border-[#059669]/60'
                     : inTrial
                     ? 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold tracking-tight bg-[#fffbeb] dark:bg-[#78350f]/25 text-[#92400e] dark:text-[#fbbf24] border border-[#fcd34d] dark:border-[#b45309]/60'
                     : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-300 font-bold'
                 }
               >
-                {hasConfirmedPayment ? (
+                {isCancelledPeriodActive ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    <span>Cancelled — Active until {activeUntilDateFormatted}</span>
+                  </>
+                ) : hasConfirmedPayment ? (
                   <>
                     <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] shrink-0" />
                     <span>Active</span>
@@ -570,8 +623,17 @@ export function BillingView({ initialData }: BillingViewProps) {
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
             <span className="text-xs text-slate-400 font-medium">Status</span>
             <p className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-              <span>{hasConfirmedPayment ? 'Active' : inTrial ? 'Trial Active' : 'Trial Ended'}</span>
+              {isCancelledPeriodActive ? (
+                <>
+                  <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                  <span>Cancelled (Active Period)</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <span>{hasConfirmedPayment ? 'Active' : inTrial ? 'Trial Active' : 'Trial Ended'}</span>
+                </>
+              )}
             </p>
             <p className="text-[11px] text-slate-400">Account status</p>
           </div>
@@ -591,12 +653,16 @@ export function BillingView({ initialData }: BillingViewProps) {
 
           {hasConfirmedPayment && (
             <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400 font-medium">Next Payment Due</span>
+              <span className="text-xs text-slate-400 font-medium">
+                {isCancelledPeriodActive ? 'Active Until' : 'Next Payment Due'}
+              </span>
               <p className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                <Calendar className="h-4 w-4 text-emerald-500 shrink-0" />
-                <span>{nextPaymentDateFormatted || '—'}</span>
+                <Calendar className={`h-4 w-4 ${isCancelledPeriodActive ? 'text-amber-500' : 'text-emerald-500'} shrink-0`} />
+                <span>{isCancelledPeriodActive ? activeUntilDateFormatted : (nextPaymentDateFormatted || '—')}</span>
               </p>
-              <p className="text-[11px] text-slate-400">Amount: ₹99</p>
+              <p className="text-[11px] text-slate-400">
+                {isCancelledPeriodActive ? 'Autopay: Off (No upcoming charges)' : 'Amount: ₹99'}
+              </p>
             </div>
           )}
         </div>
@@ -604,7 +670,9 @@ export function BillingView({ initialData }: BillingViewProps) {
         {/* Action Buttons */}
         <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800">
           <p className="text-xs text-slate-500">
-            {hasConfirmedPayment
+            {isCancelledPeriodActive
+              ? `Your subscription has been cancelled. Full Pro access remains active until ${activeUntilDateFormatted}.`
+              : hasConfirmedPayment
               ? 'Your subscription renews automatically. You can cancel anytime.'
               : 'Subscribe to maintain uninterrupted access after your trial.'}
           </p>
@@ -622,15 +690,15 @@ export function BillingView({ initialData }: BillingViewProps) {
                   'Subscribe for ₹99/month'
                 )}
               </Button>
-            ) : sub?.cancel_at_period_end ? (
+            ) : isCancelledPeriodActive || sub?.cancel_at_period_end ? (
               <Button
                 size="sm"
                 onClick={handleReactivate}
                 disabled={isProcessingCheckout}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold gap-1.5"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold gap-1.5 shadow-xs"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
-                <span>Resume Subscription</span>
+                <span>Reactivate Subscription</span>
               </Button>
             ) : (
               <Button

@@ -374,6 +374,12 @@ export interface Quotation {
   completed_at?: string | null;
   completed_unpaid?: boolean;
 
+  // PIN Protection Security
+  pin_protection_enabled?: boolean;
+  pin?: string | null;
+  pin_hash?: string | null;
+  pin_created_at?: string | null;
+
   // Joined fields
   customer?: Customer;
   organization?: Organization;
@@ -737,6 +743,8 @@ export interface SubscriptionAccess {
   autopayAmount?: number;
   razorpaySubscriptionId?: string | null;
   lastPaymentId?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  activeUntil?: string | null;
   warningMessage: string | null;
 }
 

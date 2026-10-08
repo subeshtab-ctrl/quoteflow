@@ -45,6 +45,7 @@ import {
   Mail,
   Globe,
   Loader2,
+  Lock,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import {
@@ -247,6 +248,29 @@ export function QuotationBuilder({
       setShowBankDetails(true);
       setShowUpiDetails(true);
       setShowCryptoDetails(true);
+    }
+  };
+
+  // Quotation PIN Protection State (Default OFF)
+  const [pinProtectionEnabled, setPinProtectionEnabled] = useState<boolean>(
+    initialQuotation?.pin_protection_enabled ?? false
+  );
+  const [pin, setPin] = useState<string>(() => {
+    if (initialQuotation?.pin) return initialQuotation.pin;
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  });
+  const [copiedPin, setCopiedPin] = useState(false);
+
+  const handleRegeneratePin = () => {
+    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    setPin(newPin);
+  };
+
+  const handleCopyPin = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(pin);
+      setCopiedPin(true);
+      setTimeout(() => setCopiedPin(false), 2000);
     }
   };
 
@@ -524,6 +548,8 @@ export function QuotationBuilder({
         bank_details: bankDetails,
         upi_details: upiDetails,
         crypto_details: cryptoDetails,
+        pin_protection_enabled: pinProtectionEnabled,
+        pin: pinProtectionEnabled ? pin : null,
       };
 
       const endpoint = initialQuotation?.id
@@ -1744,6 +1770,86 @@ export function QuotationBuilder({
               Upload project specifications, reference images, drawings, or contract PDFs for your customer to review.
             </p>
             <FileAttachmentsUploader attachments={attachments} onChange={setAttachments} />
+          </div>
+
+          {/* Step 7: Quotation Access Security & PIN Protection */}
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                  <Lock className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    7. Quotation Access Security (Optional PIN)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Require a 6-digit PIN to open and view this quotation
+                  </p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pinProtectionEnabled}
+                  onChange={(e) => setPinProtectionEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            {pinProtectionEnabled ? (
+              <div className="p-4 rounded-xl bg-indigo-50/50 border border-indigo-100 space-y-3 animate-in fade-in duration-150">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                      6-Digit Access PIN
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Share this PIN with your customer along with the quotation link.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      maxLength={8}
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
+                      className="h-10 w-32 text-center font-mono font-black text-lg tracking-widest rounded-xl border border-indigo-300 bg-white text-indigo-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRegeneratePin}
+                      className="h-10 text-xs font-semibold"
+                      title="Generate a new random PIN"
+                    >
+                      Regenerate
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyPin}
+                      className="h-10 text-xs font-semibold gap-1"
+                      title="Copy PIN to clipboard"
+                    >
+                      {copiedPin ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      <span>{copiedPin ? 'Copied' : 'Copy'}</span>
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-indigo-800/80 bg-indigo-100/60 p-2.5 rounded-lg">
+                  🔒 When PIN protection is enabled, anyone opening the link must enter this PIN to view the quotation. No registration, client login, or mobile OTP needed.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">
+                PIN protection is OFF. Anyone with the secure link can directly open and view this quotation without entering a PIN.
+              </p>
+            )}
           </div>
         </div>
 

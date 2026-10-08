@@ -1,31 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import crypto from 'crypto';
-import { cleanPhoneNumber, maskPhone, splitPhoneNumber } from '@/lib/country-codes';
 
-function maskEmail(email: string): string {
-  if (!email || !email.includes('@')) return '***@***.com';
-  const [local, domain] = email.split('@');
-  if (local.length <= 2) {
-    return `${local[0]}***@${domain}`;
-  }
-  return `${local[0]}***${local[local.length - 1]}@${domain}`;
-}
-
-const COOKIE_MAX_AGE = 365 * 24 * 60 * 60; // 365 days (1 year) for trusted devices
+const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days session for authenticated quote
 
 function generateAuthSecret(quotationId: string, pinHash: string): string {
   return crypto
     .createHash('sha256')
-    .update(`${quotationId}:${pinHash}:quoteflow_portal_salt_2026`)
+    .update(`${quotationId}:${pinHash}:quoteflow_quote_pin_salt_2026`)
     .digest('hex');
 }
 
-function generateDeviceToken(customerKey: string, pinHash: string): string {
-  return crypto
-    .createHash('sha256')
-    .update(`dev:${customerKey}:${pinHash}:quoteflow_device_salt_2026`)
-    .digest('hex');
+// In-memory rate limiting map: max 5 failed attempts per 15 minutes
+interface RateLimitEntry {
+  attempts: number;
+  lockedUntil?: number;
+}
+const rateLimitMap = new Map<string, RateLimitEntry>();
+
+function getRateLimitKey(req: NextRequest, quotationId: string): string {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+             req.headers.get('x-real-ip') ||
+             '127.0.0.1';
+  return `${ip}:${quotationId}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -43,106 +40,41 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
     }
 
-    const customer = quotation.customer;
-    const phoneCountryCode = customer?.phone_country_code || (customer?.phone ? splitPhoneNumber(customer.phone).countryCode : '+91');
-    const customerPhoneClean = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
-    const rawEmail = customer?.email || '';
-    const hasDummyEmail = rawEmail.endsWith('@mobile.client') || rawEmail.endsWith('@customer.local');
-    const customerEmail = hasDummyEmail ? '' : rawEmail;
-
-    const pinReg = await store.getPortalPin(quotation.id);
-    const hasPin = Boolean(pinReg && pinReg.pin_hash);
-
-    let authenticated = false;
-    let expectedQuoteSecret = '';
-    let expectedDeviceToken = '';
-
-    if (hasPin && pinReg) {
-      const customerKey = quotation.customer_id || customerPhoneClean || customerEmail || quotation.id;
-      expectedQuoteSecret = generateAuthSecret(quotation.id, pinReg.pin_hash);
-      expectedDeviceToken = generateDeviceToken(customerKey, pinReg.pin_hash);
-
-      // Check 1: Quotation-specific cookie
-      const quoteCookie = request.cookies.get(`portal_auth_${quotation.id}`)?.value;
-      if (quoteCookie && quoteCookie === expectedQuoteSecret) {
-        authenticated = true;
-      }
-
-      // Check 2: Customer-specific device cookie (remembers same device across multiple quotes)
-      if (!authenticated && quotation.customer_id) {
-        const custCookie = request.cookies.get(`portal_auth_cust_${quotation.customer_id}`)?.value;
-        if (custCookie && custCookie === expectedDeviceToken) {
-          authenticated = true;
-        }
-      }
-
-      // Check 3: Global portal device cookie
-      if (!authenticated) {
-        const devCookie = request.cookies.get('portal_device_token')?.value;
-        if (devCookie && (devCookie === expectedDeviceToken || devCookie === expectedQuoteSecret)) {
-          authenticated = true;
-        }
-      }
-
-      // Check 4: Client-passed deviceToken (from browser localStorage)
-      if (!authenticated) {
-        const clientDevToken =
-          searchParams.get('deviceToken') ||
-          request.headers.get('x-portal-device-token');
-        if (
-          clientDevToken &&
-          (clientDevToken === expectedDeviceToken || clientDevToken === expectedQuoteSecret)
-        ) {
-          authenticated = true;
-        }
-      }
+    // If PIN protection is disabled, quotation is directly accessible without any login
+    if (!quotation.pin_protection_enabled) {
+      return NextResponse.json({
+        success: true,
+        pinProtectionEnabled: false,
+        hasPin: false,
+        authenticated: true,
+        quotationNumber: quotation.quotation_number,
+        title: quotation.title,
+      });
     }
 
-    const hasPhone = Boolean(customerPhoneClean && customerPhoneClean.length >= 5);
-    const hasEmail = Boolean(customerEmail && customerEmail.length > 0);
+    // PIN protection is enabled: check if device has already unlocked this quotation
+    const targetPinHash = quotation.pin_hash || (quotation.pin ? store.hashPin(quotation.pin) : '');
+    const expectedSecret = generateAuthSecret(quotation.id, targetPinHash);
 
-    let authMethod: 'MOBILE' | 'EMAIL' | 'BOTH' = 'MOBILE';
-    if (hasPhone && hasEmail) {
-      authMethod = 'BOTH';
-    } else if (hasPhone) {
-      authMethod = 'MOBILE';
-    } else {
-      authMethod = 'EMAIL';
-    }
+    const quoteCookie = request.cookies.get(`portal_auth_${quotation.id}`)?.value;
+    const headerSecret = request.headers.get('x-portal-auth-secret') || searchParams.get('authSecret');
+
+    const authenticated = Boolean(
+      (quoteCookie && quoteCookie === expectedSecret) ||
+      (headerSecret && headerSecret === expectedSecret)
+    );
 
     const response = NextResponse.json({
       success: true,
-      hasPin,
+      pinProtectionEnabled: true,
+      hasPin: true,
       authenticated,
-      deviceToken: authenticated ? expectedDeviceToken : undefined,
-      customerId: quotation.customer_id,
-      authMethod,
-      phoneCountryCode,
-      customerPhoneMasked: customerPhoneClean ? maskPhone(customerPhoneClean, phoneCountryCode) : '',
-      customerEmailMasked: customerEmail ? maskEmail(customerEmail) : '',
       quotationNumber: quotation.quotation_number,
       title: quotation.title,
     });
 
-    // Refresh cookies for 1 year if device is authenticated
-    if (authenticated && expectedQuoteSecret) {
-      response.cookies.set(`portal_auth_${quotation.id}`, expectedQuoteSecret, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
-
-      if (quotation.customer_id) {
-        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, expectedDeviceToken, {
-          path: '/',
-          httpOnly: true,
-          sameSite: 'lax',
-          maxAge: COOKIE_MAX_AGE,
-        });
-      }
-
-      response.cookies.set('portal_device_token', expectedDeviceToken, {
+    if (authenticated) {
+      response.cookies.set(`portal_auth_${quotation.id}`, expectedSecret, {
         path: '/',
         httpOnly: true,
         sameSite: 'lax',
@@ -163,7 +95,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token: rawToken, action, email, phone, credential, pin } = body;
+    const { token: rawToken, pin } = body;
     const token = rawToken ? decodeURIComponent(rawToken).trim() : '';
 
     if (!token) {
@@ -175,241 +107,91 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 });
     }
 
-    const customer = quotation.customer;
-    const phoneCountryCode = customer?.phone_country_code || (customer?.phone ? splitPhoneNumber(customer.phone).countryCode : '+91');
-    const customerPhone = customer?.phone ? cleanPhoneNumber(customer.phone, phoneCountryCode) : '';
-    const rawEmail = customer?.email || '';
-    const hasDummyEmail = rawEmail.endsWith('@mobile.client') || rawEmail.endsWith('@customer.local');
-    const customerEmail = hasDummyEmail ? '' : rawEmail.toLowerCase().trim();
-
-    const hasPhone = Boolean(customerPhone && customerPhone.length >= 5);
-    const hasEmail = Boolean(customerEmail && customerEmail.length > 0);
-
-    let authMethod: 'MOBILE' | 'EMAIL' | 'BOTH' = body.authMethod || customer?.auth_method;
-    if (!authMethod) {
-      if (hasPhone && hasEmail) authMethod = 'BOTH';
-      else if (hasPhone) authMethod = 'MOBILE';
-      else authMethod = 'EMAIL';
-    }
-
-    if (action === 'check_credential' || action === 'check_email' || action === 'check_phone') {
-      const inputVal = (credential || phone || email || '').trim();
-      const isEmailInput = Boolean(inputVal.includes('@') || action === 'check_email');
-
-      if (isEmailInput) {
-        const cleanInput = inputVal.toLowerCase().trim();
-        if (!cleanInput) {
-          return NextResponse.json({ error: 'Email address is required' }, { status: 400 });
-        }
-        if (!customerEmail) {
-          return NextResponse.json(
-            { error: 'No customer email registered on this quotation. Please contact the company.' },
-            { status: 400 }
-          );
-        }
-        if (cleanInput !== customerEmail) {
-          return NextResponse.json(
-            {
-              error: `Email does not match the registered client email on quotation ${quotation.quotation_number}.`,
-              matches: false,
-            },
-            { status: 400 }
-          );
-        }
-        return NextResponse.json({ success: true, matches: true, verifiedVia: 'EMAIL' });
-      } else {
-        const cleanInput = cleanPhoneNumber(inputVal, phoneCountryCode);
-        if (!cleanInput) {
-          return NextResponse.json(
-            { error: 'Mobile number is required' },
-            { status: 400 }
-          );
-        }
-        if (!customerPhone) {
-          return NextResponse.json(
-            { error: 'No customer mobile number registered on this quotation. Please contact the company.' },
-            { status: 400 }
-          );
-        }
-        const matchExact = cleanInput === customerPhone;
-        const matchSuffix = (cleanInput.length >= 7 && customerPhone.endsWith(cleanInput)) ||
-                            (customerPhone.length >= 7 && cleanInput.endsWith(customerPhone));
-        if (!matchExact && !matchSuffix) {
-          return NextResponse.json(
-            {
-              error: `Mobile number does not match the registered client mobile on quotation ${quotation.quotation_number}.`,
-              matches: false,
-            },
-            { status: 400 }
-          );
-        }
-        return NextResponse.json({ success: true, matches: true, verifiedVia: 'MOBILE' });
-      }
-    }
-
-    if (action === 'register') {
-      const rawCred = (credential || email || phone || '').trim();
-      const isEmailInput = Boolean(rawCred.includes('@') || action === 'check_email');
-      const cleanPhoneCred = isEmailInput ? '' : cleanPhoneNumber(rawCred, phoneCountryCode);
-      const effectiveCredential = isEmailInput ? rawCred.toLowerCase() : (cleanPhoneCred || rawCred);
-
-      if (!effectiveCredential || !pin) {
-        return NextResponse.json(
-          {
-            error: 'Credential and 6-digit PIN are required to register',
-          },
-          { status: 400 }
-        );
-      }
-
-      await store.registerPortalPin(quotation.id, effectiveCredential, pin, authMethod);
-      const pinReg = await store.getPortalPin(quotation.id);
-      const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
-      const customerKey = quotation.customer_id || customerPhone || customerEmail || quotation.id;
-      const deviceToken = generateDeviceToken(customerKey, pinReg!.pin_hash);
-
-      const response = NextResponse.json({
+    // If quotation is not PIN-protected, grant access immediately
+    if (!quotation.pin_protection_enabled) {
+      return NextResponse.json({
         success: true,
         authenticated: true,
-        deviceToken,
-        customerId: quotation.customer_id,
-        message: 'Security PIN registered successfully! Access granted.',
+        message: 'Quotation is public and accessible.',
       });
-
-      response.cookies.set(`portal_auth_${quotation.id}`, authSecret, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
-
-      if (quotation.customer_id) {
-        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, deviceToken, {
-          path: '/',
-          httpOnly: true,
-          sameSite: 'lax',
-          maxAge: COOKIE_MAX_AGE,
-        });
-      }
-
-      response.cookies.set('portal_device_token', deviceToken, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
-
-      return response;
     }
 
-    if (action === 'verify') {
-      if (!pin) {
-        return NextResponse.json({ error: '6-digit PIN is required' }, { status: 400 });
-      }
+    // Rate Limiting Check
+    const rateLimitKey = getRateLimitKey(request, quotation.id);
+    const now = Date.now();
+    const entry = rateLimitMap.get(rateLimitKey);
 
-      const isValid = await store.verifyPortalPin(quotation.id, pin);
-      if (!isValid) {
+    if (entry && entry.lockedUntil && entry.lockedUntil > now) {
+      const minsRemaining = Math.ceil((entry.lockedUntil - now) / 60000);
+      return NextResponse.json(
+        {
+          error: `Too many incorrect attempts. Please try again after ${minsRemaining} minute${minsRemaining === 1 ? '' : 's'}.`,
+          isLocked: true,
+          lockedUntil: entry.lockedUntil,
+        },
+        { status: 429 }
+      );
+    }
+
+    const cleanPin = (pin || '').toString().trim();
+    if (!cleanPin) {
+      return NextResponse.json({ error: 'Please enter the 6-digit access PIN.' }, { status: 400 });
+    }
+
+    // Verify PIN
+    const isValid = await store.verifyQuotationPin(quotation.id, cleanPin);
+
+    if (!isValid) {
+      const attempts = (entry?.attempts || 0) + 1;
+      if (attempts >= 5) {
+        const lockedUntil = now + 15 * 60 * 1000; // Lock for 15 minutes
+        rateLimitMap.set(rateLimitKey, { attempts, lockedUntil });
         return NextResponse.json(
-          { error: 'Incorrect 6-digit PIN. Please try again.' },
+          {
+            error: 'Too many incorrect attempts. This quotation is locked for 15 minutes.',
+            isLocked: true,
+            lockedUntil,
+          },
+          { status: 429 }
+        );
+      } else {
+        rateLimitMap.set(rateLimitKey, { attempts });
+        const remaining = 5 - attempts;
+        return NextResponse.json(
+          {
+            error: `Incorrect PIN. Please try again (${remaining} attempt${remaining === 1 ? '' : 's'} remaining).`,
+            remainingAttempts: remaining,
+          },
           { status: 401 }
         );
       }
-
-      const pinReg = await store.getPortalPin(quotation.id);
-      const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
-      const customerKey = quotation.customer_id || customerPhone || customerEmail || quotation.id;
-      const deviceToken = generateDeviceToken(customerKey, pinReg!.pin_hash);
-
-      const response = NextResponse.json({
-        success: true,
-        authenticated: true,
-        deviceToken,
-        customerId: quotation.customer_id,
-        message: 'PIN verified successfully! Access granted.',
-      });
-
-      response.cookies.set(`portal_auth_${quotation.id}`, authSecret, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
-
-      if (quotation.customer_id) {
-        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, deviceToken, {
-          path: '/',
-          httpOnly: true,
-          sameSite: 'lax',
-          maxAge: COOKIE_MAX_AGE,
-        });
-      }
-
-      response.cookies.set('portal_device_token', deviceToken, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
-
-      return response;
     }
 
-    if (action === 'reset') {
-      const effectiveCredential = credential || (authMethod === 'MOBILE' ? phone : email);
-      if (!effectiveCredential || !pin) {
-        return NextResponse.json(
-          {
-            error: `Registered ${authMethod === 'MOBILE' ? 'mobile number' : 'email'} and new 6-digit PIN are required`,
-          },
-          { status: 400 }
-        );
-      }
+    // PIN is valid: clear rate limit
+    rateLimitMap.delete(rateLimitKey);
 
-      await store.resetPortalPin(quotation.id, effectiveCredential, pin, authMethod);
-      const pinReg = await store.getPortalPin(quotation.id);
-      const authSecret = generateAuthSecret(quotation.id, pinReg!.pin_hash);
-      const customerKey = quotation.customer_id || customerPhone || customerEmail || quotation.id;
-      const deviceToken = generateDeviceToken(customerKey, pinReg!.pin_hash);
+    const targetPinHash = quotation.pin_hash || (quotation.pin ? store.hashPin(quotation.pin) : '');
+    const authSecret = generateAuthSecret(quotation.id, targetPinHash);
 
-      const response = NextResponse.json({
-        success: true,
-        authenticated: true,
-        deviceToken,
-        customerId: quotation.customer_id,
-        message: 'PIN reset successfully! Access granted.',
-      });
+    const response = NextResponse.json({
+      success: true,
+      authenticated: true,
+      secret: authSecret,
+      message: 'Access granted!',
+    });
 
-      response.cookies.set(`portal_auth_${quotation.id}`, authSecret, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
+    response.cookies.set(`portal_auth_${quotation.id}`, authSecret, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: COOKIE_MAX_AGE,
+    });
 
-      if (quotation.customer_id) {
-        response.cookies.set(`portal_auth_cust_${quotation.customer_id}`, deviceToken, {
-          path: '/',
-          httpOnly: true,
-          sameSite: 'lax',
-          maxAge: COOKIE_MAX_AGE,
-        });
-      }
-
-      response.cookies.set('portal_device_token', deviceToken, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-      });
-
-      return response;
-    }
-
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+    return response;
   } catch (err: any) {
     console.error('Error in POST /api/public/portal-auth:', err);
     return NextResponse.json(
-      { error: err.message || 'Portal authentication failed' },
+      { error: err.message || 'Verification failed' },
       { status: 500 }
     );
   }

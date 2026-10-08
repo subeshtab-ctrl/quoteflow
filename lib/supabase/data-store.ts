@@ -3493,6 +3493,9 @@ class QuoteFlowStore {
     bank_details?: BankAccountDetails | null;
     upi_details?: UpiPaymentDetails | null;
     crypto_details?: CryptoPaymentDetails | null;
+    pin_protection_enabled?: boolean;
+    pin?: string | null;
+    pin_hash?: string | null;
   }): Promise<Quotation> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
@@ -3519,6 +3522,10 @@ class QuoteFlowStore {
     const bankDetails = data.bank_details !== undefined ? data.bank_details : (org?.default_bank_details || null);
     const upiDetails = data.upi_details !== undefined ? data.upi_details : (org?.default_upi_details || null);
     const cryptoDetails = data.crypto_details !== undefined ? data.crypto_details : (org?.default_crypto_details || null);
+
+    const pinProtectionEnabled = Boolean(data.pin_protection_enabled);
+    const pin = pinProtectionEnabled ? (data.pin || null) : null;
+    const pinHash = pinProtectionEnabled ? (data.pin_hash || (pin ? this.hashPin(pin) : null)) : null;
 
     const newQuotation: Quotation = {
       id,
@@ -3556,6 +3563,10 @@ class QuoteFlowStore {
       bank_details: bankDetails,
       upi_details: upiDetails,
       crypto_details: cryptoDetails,
+      pin_protection_enabled: pinProtectionEnabled,
+      pin: pin,
+      pin_hash: pinHash,
+      pin_created_at: pinProtectionEnabled ? new Date().toISOString() : null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -3811,6 +3822,9 @@ class QuoteFlowStore {
       bank_details?: BankAccountDetails | null;
       upi_details?: UpiPaymentDetails | null;
       crypto_details?: CryptoPaymentDetails | null;
+      pin_protection_enabled?: boolean;
+      pin?: string | null;
+      pin_hash?: string | null;
     },
     orgId?: string
   ): Promise<Quotation> {
@@ -3875,6 +3889,12 @@ class QuoteFlowStore {
       this.quotationItems.set(id, newItems);
     }
 
+    const nextPinEnabled = data.pin_protection_enabled !== undefined ? data.pin_protection_enabled : existing.pin_protection_enabled;
+    const nextPin = data.pin !== undefined ? data.pin : existing.pin;
+    const nextPinHash = data.pin_hash !== undefined
+      ? data.pin_hash
+      : (data.pin ? this.hashPin(data.pin) : existing.pin_hash);
+
     const updated: Quotation = {
       ...existing,
       customer_id: data.customer_id || existing.customer_id,
@@ -3902,6 +3922,9 @@ class QuoteFlowStore {
       bank_details: data.bank_details !== undefined ? data.bank_details : existing.bank_details,
       upi_details: data.upi_details !== undefined ? data.upi_details : existing.upi_details,
       crypto_details: data.crypto_details !== undefined ? data.crypto_details : existing.crypto_details,
+      pin_protection_enabled: nextPinEnabled,
+      pin: nextPinEnabled ? nextPin : null,
+      pin_hash: nextPinEnabled ? nextPinHash : null,
       status: data.status || existing.status,
       updated_at: new Date().toISOString(),
     };
@@ -4201,6 +4224,18 @@ class QuoteFlowStore {
   // --- CLIENT PORTAL 6-DIGIT PIN AUTHENTICATION ---
   public hashPin(pin: string): string {
     return crypto.createHash('sha256').update(pin.trim()).digest('hex');
+  }
+
+  public async verifyQuotationPin(quotationId: string, inputPin: string): Promise<boolean> {
+    const quote = await this.getQuotationById(quotationId);
+    if (!quote) return false;
+    if (!quote.pin_protection_enabled) return true; // not protected
+    const clean = inputPin.trim();
+    if (!clean) return false;
+    if (quote.pin && quote.pin.trim() === clean) return true;
+    const h = this.hashPin(clean);
+    if (quote.pin_hash && quote.pin_hash === h) return true;
+    return false;
   }
 
   public async getPortalPin(quotationId: string, forceFresh = false): Promise<PortalPinRegistration | null> {

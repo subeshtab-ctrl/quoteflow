@@ -192,18 +192,26 @@ export class SubscriptionService {
       ? Math.max(0, Math.ceil((graceEnd - now) / 86400000))
       : 0;
 
+    // If user cancelled midway through the billing cycle, their paid access remains active until current_period_end
+    const hasCancelledGrace = Boolean(
+      (sub.cancel_at_period_end || sub.status === 'cancelled' || sub.cancelled_at) &&
+      sub.current_period_end &&
+      new Date(sub.current_period_end).getTime() > now
+    );
+
     const isExplicitlyTroubled =
       sub.status === 'grace_period' ||
       sub.status === 'payment_overdue' ||
       sub.status === 'past_due' ||
       sub.status === 'halted' ||
       sub.status === 'expired' ||
-      sub.status === 'cancelled';
+      (sub.status === 'cancelled' && !hasCancelledGrace);
 
     const hasConfirmedPayment = Boolean(
       (businessId === POZONE_ID ||
       sub.last_payment_id ||
       sub.status === 'active' ||
+      hasCancelledGrace ||
       (sub.promotional_cycles_completed && sub.promotional_cycles_completed > 0) ||
       sub.is_trial_prepaid) && !isExplicitlyTroubled
     );
@@ -231,9 +239,15 @@ export class SubscriptionService {
       accountAccess = 'restricted';
       isRestricted = true;
     } else if (sub.status === 'cancelled') {
-      effectiveStatus = 'cancelled';
-      accountAccess = 'active';
-      isRestricted = false;
+      if (hasCancelledGrace) {
+        effectiveStatus = 'cancelled';
+        accountAccess = 'active';
+        isRestricted = false;
+      } else {
+        effectiveStatus = 'cancelled';
+        accountAccess = 'restricted';
+        isRestricted = true;
+      }
     } else if (hasConfirmedPayment) {
       effectiveStatus = 'active';
       accountAccess = 'active';
@@ -291,6 +305,13 @@ export class SubscriptionService {
       warningMessage = 'Your QuoteFlow free trial has expired. Please subscribe to restore access.';
     } else if (isTrial && daysRemainingInTrial <= 7) {
       warningMessage = `⚠️ Your free trial ends in ${daysRemainingInTrial} ${daysRemainingInTrial === 1 ? 'day' : 'days'}. After your trial: ₹99/month.`;
+    } else if (hasCancelledGrace) {
+      const activeUntilFormatted = new Date(sub.current_period_end!).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+      warningMessage = `Your subscription has been cancelled. You will continue to have full access until ${activeUntilFormatted}. Autopay has been turned off and no further charges will occur.`;
     } else if (isCancelled) {
       warningMessage = 'Your subscription has been cancelled.';
     }
@@ -327,7 +348,7 @@ export class SubscriptionService {
       graceDaysRemaining,
       trialStartedAt: sub.trial_start_at,
       trialEndsAt: sub.trial_end_at,
-      nextPaymentDue,
+      nextPaymentDue: hasCancelledGrace ? null : nextPaymentDue,
       planName: isTrial && !hasConfirmedPayment ? 'QuoteFlow Free Trial' : (sub.plan?.name || 'QuoteFlow Pro'),
       planAmount: 9900,
       promoActive: false,
@@ -335,11 +356,13 @@ export class SubscriptionService {
       promotionalCyclesCompleted: hasConfirmedPayment ? 1 : 0,
       isPrepaidTrial: Boolean(hasConfirmedPayment && daysRemainingInTrial > 0),
       planStartMode: sub.plan_start_mode || 'after_trial',
-      autopayEnabled: Boolean(hasConfirmedPayment && !sub.cancel_at_period_end && sub.status !== 'cancelled'),
-      autopayNextDate: nextPaymentDue,
+      autopayEnabled: Boolean(hasConfirmedPayment && !sub.cancel_at_period_end && sub.status !== 'cancelled' && !hasCancelledGrace),
+      autopayNextDate: hasCancelledGrace ? null : nextPaymentDue,
       autopayAmount: 9900,
       razorpaySubscriptionId: sub.razorpay_subscription_id || null,
       lastPaymentId: sub.last_payment_id || null,
+      cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end || hasCancelledGrace),
+      activeUntil: sub.current_period_end || null,
       warningMessage,
     };
   }
@@ -1090,10 +1113,12 @@ export class SubscriptionService {
     const sub = await store.getBusinessSubscription(params.businessId);
     if (!sub) throw new Error('Subscription record not found');
 
-    if (sub.cancel_at_period_end && sub.status === 'active') {
+    const hasValidPeriod = sub.current_period_end ? new Date(sub.current_period_end).getTime() > Date.now() : false;
+    if ((sub.cancel_at_period_end || sub.status === 'cancelled') && (sub.status === 'active' || hasValidPeriod)) {
       sub.cancel_at_period_end = false;
       sub.cancelled_at = null;
       sub.cancellation_reason = null;
+      sub.status = 'active';
       sub.updated_at = new Date().toISOString();
       await store.saveBusinessSubscription(sub);
       return { subscription: sub };

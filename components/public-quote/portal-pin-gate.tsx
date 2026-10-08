@@ -2,748 +2,167 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  ShieldCheck,
-  Lock,
-  Mail,
-  Smartphone,
-  KeyRound,
-  ArrowRight,
-  RotateCcw,
-  CheckCircle2,
-  AlertCircle,
-  Eye,
-  EyeOff,
-  Sparkles,
-} from 'lucide-react';
+import { Lock, ShieldCheck, AlertCircle, Eye, EyeOff, Loader2, ArrowRight } from 'lucide-react';
 
 interface PortalPinGateProps {
   token: string;
   quotationNumber: string;
   companyName: string;
-  hasPin: boolean;
-  authMethod?: 'MOBILE' | 'EMAIL' | 'BOTH';
+  hasPin?: boolean;
+  authMethod?: string;
   phoneCountryCode?: string;
   customerPhoneMasked?: string;
   customerEmailMasked?: string;
-  onAuthenticated: (deviceToken?: string) => void;
+  onAuthenticated: (authSecret?: string) => void;
 }
 
 export function PortalPinGate({
   token,
   quotationNumber,
   companyName,
-  hasPin: initialHasPin,
-  authMethod = 'EMAIL',
-  phoneCountryCode = '+91',
-  customerPhoneMasked,
-  customerEmailMasked,
   onAuthenticated,
 }: PortalPinGateProps) {
-  const isBoth = authMethod === 'BOTH';
-  const isDemo = token === 'sec_8f92m1k4092b' || quotationNumber === 'Q-000042';
-  const [selectedMethod, setSelectedMethod] = useState<'MOBILE' | 'EMAIL'>(
-    authMethod === 'EMAIL' ? 'EMAIL' : 'MOBILE'
-  );
-  const isMobile = selectedMethod === 'MOBILE';
-
-  const [mode, setMode] = useState<'VERIFY' | 'REGISTER_CREDENTIAL' | 'REGISTER_PIN' | 'RESET'>(
-    initialHasPin ? 'VERIFY' : 'REGISTER_CREDENTIAL'
-  );
-
-  const [credential, setCredential] = useState('');
   const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
 
-  // Step 1: Verify Credential (Mobile or Email) for First-Time Registration
-  const handleCheckCredential = async (e: React.FormEvent) => {
+  const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    const cleanCred = credential.trim();
-    if (!cleanCred) {
-      setError(
-        isMobile
-          ? 'Please enter your registered mobile number (without country code).'
-          : 'Please enter your registered email address.'
-      );
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const isEmailInput = cleanCred.includes('@') || !isMobile;
-      const res = await fetch('/api/public/portal-auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          action: 'check_credential',
-          authMethod,
-          credential: cleanCred,
-          phone: !isEmailInput ? cleanCred : undefined,
-          email: isEmailInput ? cleanCred : undefined,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          data.error ||
-            `${isMobile ? 'Mobile number' : 'Email'} does not match quotation records`
-        );
-      }
-
-      setMode('REGISTER_PIN');
-    } catch (err: any) {
-      setError(err.message || 'Verification failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Step 2: Register 6-Digit PIN
-  const handleRegisterPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+    if (loading || isLocked) return;
 
     const cleanPin = pin.trim();
-    if (!/^\d{6}$/.test(cleanPin)) {
-      setError('PIN must be exactly 6 digits (numbers 0-9 only).');
-      return;
-    }
-
-    if (cleanPin !== confirmPin.trim()) {
-      setError('PIN confirmation does not match. Please re-enter.');
+    if (!cleanPin) {
+      setError('Please enter the 6-digit access PIN.');
       return;
     }
 
     try {
       setLoading(true);
+      setError(null);
+
       const res = await fetch('/api/public/portal-auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
-          action: 'register',
-          authMethod,
-          credential: credential.trim(),
-          phone: isMobile ? credential.trim() : undefined,
-          email: !isMobile ? credential.trim() : undefined,
           pin: cleanPin,
         }),
       });
 
       const data = await res.json();
+
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to register PIN');
+        if (res.status === 429) {
+          setIsLocked(true);
+        }
+        throw new Error(data.error || 'Incorrect PIN. Please try again.');
       }
 
-      if (data.deviceToken && typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
-          if (data.customerId) {
-            localStorage.setItem(`quoteflow_portal_cust_${data.customerId}`, data.deviceToken);
-          }
-        } catch {}
-      }
-
-      setSuccessMsg('Security PIN registered! Unlocking portal...');
-      setTimeout(() => {
-        onAuthenticated(data.deviceToken);
-      }, 700);
+      onAuthenticated(data.secret);
     } catch (err: any) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || 'Verification failed. Please check the PIN.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Returning Client: Verify 6-Digit PIN
-  const handleVerifyPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    const cleanPin = pin.trim();
-    if (!/^\d{6}$/.test(cleanPin)) {
-      setError('Please enter your complete 6-digit PIN.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const res = await fetch('/api/public/portal-auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          action: 'verify',
-          pin: cleanPin,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setPin('');
-        throw new Error(data.error || 'Incorrect 6-digit PIN. Please try again.');
-      }
-
-      if (data.deviceToken && typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
-          if (data.customerId) {
-            localStorage.setItem(`quoteflow_portal_cust_${data.customerId}`, data.deviceToken);
-          }
-        } catch {}
-      }
-
-      setSuccessMsg('Access granted! Loading quotation...');
-      setTimeout(() => {
-        onAuthenticated(data.deviceToken);
-      }, 600);
-    } catch (err: any) {
-      setError(err.message || 'Verification failed');
-    } finally {
-      setLoading(false);
-    }
+  const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Only allow alphanumeric / digits, max 8 chars
+    const val = e.target.value.replace(/[^0-9a-zA-Z]/g, '').slice(0, 8);
+    setPin(val);
+    if (error) setError(null);
   };
-
-  // Reset PIN with Registered Credential
-  const handleResetPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!credential.trim()) {
-      setError(
-        isMobile
-          ? 'Please enter your registered mobile number.'
-          : 'Please enter your registered email.'
-      );
-      return;
-    }
-
-    const cleanPin = pin.trim();
-    if (!/^\d{6}$/.test(cleanPin)) {
-      setError('New PIN must be exactly 6 digits (numbers 0-9 only).');
-      return;
-    }
-
-    if (cleanPin !== confirmPin.trim()) {
-      setError('PIN confirmation does not match.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const res = await fetch('/api/public/portal-auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          action: 'reset',
-          authMethod,
-          credential: credential.trim(),
-          phone: isMobile ? credential.trim() : undefined,
-          email: !isMobile ? credential.trim() : undefined,
-          pin: cleanPin,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to reset PIN');
-      }
-
-      if (data.deviceToken && typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('quoteflow_portal_device_token', data.deviceToken);
-          if (data.customerId) {
-            localStorage.setItem(`quoteflow_portal_cust_${data.customerId}`, data.deviceToken);
-          }
-        } catch {}
-      }
-
-      setSuccessMsg('PIN updated successfully! Unlocking portal...');
-      setTimeout(() => {
-        onAuthenticated(data.deviceToken);
-      }, 700);
-    } catch (err: any) {
-      setError(err.message || 'Reset failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const maskedAccountDisplay = isMobile ? customerPhoneMasked : customerEmailMasked;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-md rounded-3xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6 sm:p-8 space-y-6">
-        {/* Brand Header */}
-        <div className="text-center space-y-2">
-          <div className="mx-auto h-14 w-14 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-inner">
-            <ShieldCheck className="h-8 w-8" />
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
+      {/* Background ambient gradient glow */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-80 h-80 bg-violet-600/10 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative w-full max-w-md bg-slate-850/90 dark:bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl text-center space-y-6">
+        {/* Security Icon Badge */}
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white shadow-lg shadow-indigo-500/25 ring-4 ring-indigo-500/10">
+          <Lock className="h-6 w-6" />
+        </div>
+
+        {/* Header Info */}
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            <span>PIN-Protected Quotation</span>
           </div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
-            Client Portal Security
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {companyName} • <span className="font-semibold text-slate-700 dark:text-slate-300">{quotationNumber}</span>
+
+          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+            Quotation {quotationNumber}
+          </h1>
+
+          <p className="text-xs sm:text-sm text-slate-400 max-w-xs mx-auto leading-relaxed">
+            This proposal from <span className="text-slate-200 font-semibold">{companyName}</span> is protected with a security PIN. Enter the PIN provided to view.
           </p>
         </div>
 
-        {/* Feedback Messages */}
+        {/* Error Alert */}
         {error && (
-          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs animate-in fade-in">
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <p className="leading-relaxed">{error}</p>
+          <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs flex items-center gap-2.5 text-left animate-in fade-in duration-150">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+            <span className="leading-snug">{error}</span>
           </div>
         )}
 
-        {successMsg && (
-          <div className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs animate-in fade-in">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            <p className="font-medium">{successMsg}</p>
+        {/* PIN Entry Form */}
+        <form onSubmit={handleVerify} className="space-y-4">
+          <div className="relative">
+            <input
+              type={showPin ? 'text' : 'password'}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              maxLength={8}
+              value={pin}
+              onChange={handlePinChange}
+              placeholder="••••••"
+              disabled={loading || isLocked}
+              autoFocus
+              className="w-full text-center tracking-[0.4em] font-mono text-2xl font-bold py-3.5 px-12 rounded-2xl bg-slate-800/80 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPin(!showPin)}
+              tabIndex={-1}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-200 transition-colors"
+              title={showPin ? 'Hide PIN' : 'Show PIN'}
+            >
+              {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
           </div>
-        )}
 
-        {/* MODE 1: Enter 6-Digit PIN (Returning Customer) */}
-        {mode === 'VERIFY' && (
-          <form onSubmit={handleVerifyPin} className="space-y-4">
-            {isDemo && (
-              <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 font-bold text-indigo-900 dark:text-indigo-200">
-                    <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>Demo Client Approval Gate</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
-                    DEMO PIN
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                  Experience the client-side approval security gate. Enter the demo PIN below or click the auto-fill button to unlock.
-                </p>
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-slate-500">Access PIN:</span>
-                    <span className="font-mono font-bold text-xs bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-300">
-                      123456
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPin('123456');
-                      setError(null);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] transition-all cursor-pointer shadow-xs active:scale-95"
-                  >
-                    Auto-Fill 123456
-                  </button>
-                </div>
-              </div>
+          <Button
+            type="submit"
+            disabled={loading || isLocked || pin.length < 4}
+            className="w-full py-6 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/40 transition-all flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Verifying PIN...</span>
+              </>
+            ) : (
+              <>
+                <span>Unlock Quotation</span>
+                <ArrowRight className="h-4 w-4" />
+              </>
             )}
+          </Button>
+        </form>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                Enter 6-Digit Access PIN
-              </label>
-              {maskedAccountDisplay && (
-                <p className="text-[11px] text-slate-400">
-                  Registered {isMobile ? 'Mobile' : 'Account'}:{' '}
-                  <span className="font-mono text-slate-600 dark:text-slate-300 font-semibold">
-                    {maskedAccountDisplay}
-                  </span>
-                </p>
-              )}
-              <div className="relative">
-                <input
-                  type={showPin ? "text" : "password"}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="••••••"
-                  autoFocus
-                  required
-                  className="w-full text-center tracking-[0.5em] text-2xl font-mono py-3.5 pl-11 pr-11 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                />
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                <button
-                  type="button"
-                  onClick={() => setShowPin(!showPin)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                  aria-label={showPin ? "Hide PIN" : "Show PIN"}
-                >
-                  {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading || pin.length !== 6}
-              isLoading={loading}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md"
-            >
-              <KeyRound className="h-4 w-4 mr-2" />
-              <span>Unlock Quotation</span>
-            </Button>
-
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setError(null);
-                  setPin('');
-                  setConfirmPin('');
-                  setCredential('');
-                  setMode('RESET');
-                }}
-                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-              >
-                Forgot your PIN? Reset with registered {isMobile ? 'mobile number' : 'email'}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* MODE 2: First-Time Setup - Step 1 Verification */}
-        {mode === 'REGISTER_CREDENTIAL' && (
-          <form onSubmit={handleCheckCredential} className="space-y-4">
-            <div className="space-y-2">
-              {isBoth && (
-                <div className="flex p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedMethod('MOBILE'); setCredential(''); setError(null); }}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                      isMobile
-                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    <Smartphone className="h-3.5 w-3.5" />
-                    <span>Mobile Number</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedMethod('EMAIL'); setCredential(''); setError(null); }}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                      !isMobile
-                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                    <span>Email Address</span>
-                  </button>
-                </div>
-              )}
-
-              <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-900 dark:text-indigo-200">
-                <p className="font-semibold mb-1 flex items-center gap-1.5">
-                  <Lock className="h-3.5 w-3.5 text-indigo-600" />
-                  First Time Setup ({isMobile ? 'Mobile Authentication' : 'Email Authentication'})
-                </p>
-                <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                  {isMobile
-                    ? `Please enter your registered mobile number (without country code) to establish your secure 6-digit access PIN.`
-                    : `Please enter the email address where this quotation was received to establish your secure 6-digit access PIN.`}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  {isMobile ? 'Registered Mobile Number' : 'Registered Email Address'}
-                </label>
-
-                {isMobile ? (
-                  <div className="flex rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
-                    <span className="flex items-center gap-1 px-3 bg-slate-100 dark:bg-slate-700/60 border-r border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0">
-                      <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
-                      <span>{phoneCountryCode}</span>
-                    </span>
-                    <input
-                      type="tel"
-                      value={credential}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^\d\s\+]/g, '');
-                        setCredential(val);
-                      }}
-                      placeholder="e.g. 98765 43210 (without country code)"
-                      autoFocus
-                      required
-                      className="w-full px-3 py-2.5 bg-transparent text-slate-900 dark:text-white text-sm focus:outline-none"
-                    />
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <input
-                      type="email"
-                      value={credential}
-                      onChange={(e) => setCredential(e.target.value)}
-                      placeholder="client@company.com"
-                      autoFocus
-                      required
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                  </div>
-                )}
-                {isMobile && (
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Enter the phone digits only. Country code ({phoneCountryCode}) is pre-applied.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading || !credential.trim()}
-              isLoading={loading}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md"
-            >
-              <span>Verify {isMobile ? 'Mobile Number' : 'Email'}</span>
-              <ArrowRight className="h-4 w-4 ml-1.5" />
-            </Button>
-          </form>
-        )}
-
-        {/* MODE 3: First-Time Setup - Step 2 Set 6-Digit PIN */}
-        {mode === 'REGISTER_PIN' && (
-          <form onSubmit={handleRegisterPin} className="space-y-4">
-            <div className="space-y-3">
-              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-xs text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                <p className="text-[11px]">
-                  {isMobile ? 'Mobile number' : 'Email'} verified! Now create your 6-digit access PIN for future visits.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Create 6-Digit PIN
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="••••••"
-                    autoFocus
-                    required
-                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPin(!showPin)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
-                  >
-                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Confirm 6-Digit PIN
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={confirmPin}
-                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="••••••"
-                    required
-                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPin(!showPin)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
-                  >
-                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading || pin.length !== 6 || confirmPin.length !== 6}
-              isLoading={loading}
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md"
-            >
-              <KeyRound className="h-4 w-4 mr-2" />
-              <span>Save PIN & Access Portal</span>
-            </Button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setPin('');
-                setConfirmPin('');
-                setMode('REGISTER_CREDENTIAL');
-              }}
-              className="w-full text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-center"
-            >
-              Change {isMobile ? 'Mobile Number' : 'Email'}
-            </button>
-          </form>
-        )}
-
-        {/* MODE 4: Reset PIN */}
-        {mode === 'RESET' && (
-          <form onSubmit={handleResetPin} className="space-y-4">
-            <div className="space-y-3">
-              <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-900 dark:text-indigo-200">
-                <p className="font-semibold mb-1">Reset Your Security PIN</p>
-                <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                  Enter your registered client {isMobile ? 'mobile number' : 'email'} to reset your 6-digit access PIN.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Registered {isMobile ? 'Mobile Number' : 'Email'}
-                </label>
-                {isMobile ? (
-                  <div className="flex rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
-                    <span className="flex items-center gap-1 px-3 bg-slate-100 dark:bg-slate-700/60 border-r border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0">
-                      <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
-                      <span>{phoneCountryCode}</span>
-                    </span>
-                    <input
-                      type="tel"
-                      value={credential}
-                      onChange={(e) => setCredential(e.target.value.replace(/[^\d\s]/g, ''))}
-                      placeholder="e.g. 98765 43210"
-                      autoFocus
-                      required
-                      className="w-full px-3 py-2.5 bg-transparent text-slate-900 dark:text-white text-sm focus:outline-none"
-                    />
-                  </div>
-                ) : (
-                  <input
-                    type="email"
-                    value={credential}
-                    onChange={(e) => setCredential(e.target.value)}
-                    placeholder="client@company.com"
-                    autoFocus
-                    required
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  New 6-Digit PIN
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="••••••"
-                    required
-                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPin(!showPin)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
-                  >
-                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Confirm New PIN
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={confirmPin}
-                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="••••••"
-                    required
-                    className="w-full text-center tracking-[0.4em] text-xl font-mono py-2.5 pl-10 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPin(!showPin)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
-                  >
-                    {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading || pin.length !== 6 || confirmPin.length !== 6 || !credential.trim()}
-              isLoading={loading}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md"
-            >
-              <RotateCcw className="h-4 w-4 mr-2" />
-              <span>Reset PIN & Unlock</span>
-            </Button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setPin('');
-                setConfirmPin('');
-                setMode('VERIFY');
-              }}
-              className="w-full text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-center"
-            >
-              Back to PIN Access
-            </button>
-          </form>
-        )}
-
-        {/* Security badge footer */}
-        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
-          <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1">
-            <Lock className="h-3 w-3" />
-            <span>256-Bit Encrypted Client Approval Portal</span>
-          </p>
-        </div>
+        {/* Footer Security Note */}
+        <p className="text-[11px] text-slate-500">
+          Secured by QuoteFlow. No account or password required.
+        </p>
       </div>
     </div>
   );

@@ -52,6 +52,9 @@ export const QuotationFormSchema = z.object({
       'CANCELLED',
     ])
     .default('DRAFT'),
+  pin_protection_enabled: z.boolean().optional().default(false),
+  pin: z.string().nullable().optional(),
+  pin_hash: z.string().nullable().optional(),
 }).passthrough();
 
 export const CustomerFormSchema = z
