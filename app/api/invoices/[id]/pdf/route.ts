@@ -27,12 +27,9 @@ export async function GET(
       }
     }
 
-    // 3. Fallback: if quotation exists, ensure invoice
+    // 3. Fallback: if id is a quotation ID, check if an invoice was already issued for it
     if (!invoice) {
-      const quote = await store.getQuotationById(id);
-      if (quote) {
-        invoice = await store.ensureInvoiceForQuotation(quote);
-      }
+      invoice = await store.getInvoiceByQuotationId(id, orgId);
     }
 
     if (!invoice) {

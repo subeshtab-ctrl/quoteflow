@@ -18,14 +18,14 @@ describe('Client Portal PIN Security & Invoice Audit History', () => {
       store.registerPortalPin(quote.id, 'wrong.email@randomdomain.com', '123456')
     ).rejects.toThrow(/does not match the registered client email/);
 
-    // 3. Registering with an invalid PIN (less than 6 digits or non-numeric) must fail
+    // 3. Registering with an invalid PIN (less than 4 digits or non-numeric) must fail
     await expect(
-      store.registerPortalPin(quote.id, customerEmail!, '1234')
-    ).rejects.toThrow(/exactly 6 digits/);
+      store.registerPortalPin(quote.id, customerEmail!, '123')
+    ).rejects.toThrow(/Security PIN/);
 
     await expect(
       store.registerPortalPin(quote.id, customerEmail!, 'abcdef')
-    ).rejects.toThrow(/exactly 6 digits/);
+    ).rejects.toThrow(/Security PIN/);
 
     // 4. Registering with correct email and 6-digit PIN must succeed
     const regResult = await store.registerPortalPin(quote.id, customerEmail!, '654321');

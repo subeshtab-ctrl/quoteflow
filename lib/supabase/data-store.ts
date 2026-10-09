@@ -2983,6 +2983,10 @@ class QuoteFlowStore {
 
             const finalIsPaid = completedInfo && completedInfo.unpaid ? false : payDetails.is_paid;
 
+            const existingIssuedInvoice = Array.from(this.invoices.values()).find(
+              (inv) => inv.quotation_id === q.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+            );
+
             const merged: Quotation = {
               ...(existing || {}),
               ...q,
@@ -3019,6 +3023,9 @@ class QuoteFlowStore {
               crypto_details: payDetails.crypto_details,
               payment_terms_instructions: payDetails.payment_terms_instructions || (q as any).payment_terms_instructions || existing?.payment_terms_instructions || '',
               accepted_payment_methods: payDetails.accepted_payment_methods || (q as any).accepted_payment_methods || existing?.accepted_payment_methods || null,
+              has_issued_invoice: Boolean(existingIssuedInvoice),
+              issued_invoice_id: existingIssuedInvoice ? existingIssuedInvoice.id : (existing?.issued_invoice_id || null),
+              invoice_number: existingIssuedInvoice ? existingIssuedInvoice.invoice_number : (existing?.invoice_number || null),
             };
             this.quotations.set(q.id, merged);
             if (q.customer) {
@@ -3315,9 +3322,19 @@ class QuoteFlowStore {
             show_crypto_details: payDetails.show_crypto_details,
             bank_details: payDetails.bank_details,
             upi_details: payDetails.upi_details,
-            crypto_details: payDetails.crypto_details,
             payment_terms_instructions: payDetails.payment_terms_instructions || (data as any).payment_terms_instructions || existing?.payment_terms_instructions || '',
             accepted_payment_methods: payDetails.accepted_payment_methods || (data as any).accepted_payment_methods || existing?.accepted_payment_methods || null,
+            has_issued_invoice: Boolean(
+              Array.from(this.invoices.values()).find(
+                (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+              )
+            ),
+            issued_invoice_id: Array.from(this.invoices.values()).find(
+              (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+            )?.id || existing?.issued_invoice_id || null,
+            invoice_number: Array.from(this.invoices.values()).find(
+              (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+            )?.invoice_number || existing?.invoice_number || null,
           };
           this.quotations.set(data.id, merged);
           if (data.customer) {
@@ -3390,8 +3407,15 @@ class QuoteFlowStore {
 
     const org = (await this.getOrganization(quote.organization_id)) || this.organizations.get(quote.organization_id);
 
+    const issuedInvoice = Array.from(this.invoices.values()).find(
+      (inv) => inv.quotation_id === quote.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+    );
+
     return {
       ...quote,
+      has_issued_invoice: Boolean(issuedInvoice || quote.has_issued_invoice),
+      issued_invoice_id: issuedInvoice ? issuedInvoice.id : (quote.issued_invoice_id || null),
+      invoice_number: issuedInvoice ? issuedInvoice.invoice_number : (quote.invoice_number || null),
       organization: org,
       customer: this.customers.get(quote.customer_id),
       items: (this.quotationItems.get(quote.id) || []).sort((a, b) => a.sort_order - b.sort_order),
@@ -3559,6 +3583,17 @@ class QuoteFlowStore {
             crypto_details: payDetails.crypto_details,
             payment_terms_instructions: payDetails.payment_terms_instructions || (data as any).payment_terms_instructions || existing?.payment_terms_instructions || '',
             accepted_payment_methods: payDetails.accepted_payment_methods || (data as any).accepted_payment_methods || existing?.accepted_payment_methods || null,
+            has_issued_invoice: Boolean(
+              Array.from(this.invoices.values()).find(
+                (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+              )
+            ),
+            issued_invoice_id: Array.from(this.invoices.values()).find(
+              (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+            )?.id || existing?.issued_invoice_id || null,
+            invoice_number: Array.from(this.invoices.values()).find(
+              (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
+            )?.invoice_number || existing?.invoice_number || null,
           };
 
           this.quotations.set(data.id, merged);
@@ -3736,7 +3771,9 @@ class QuoteFlowStore {
       pin_protection_enabled: pinProtectionEnabled,
       pin: pin,
       pin_hash: pinHash,
-      pin_created_at: pinProtectionEnabled ? new Date().toISOString() : null,
+      has_issued_invoice: false,
+      issued_invoice_id: null,
+      invoice_number: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -5182,21 +5219,9 @@ class QuoteFlowStore {
       if (['APPROVED', 'SENT', 'VIEWED', 'PENDING', 'PENDING_APPROVAL'].includes(quote.status)) {
         quote.status = 'PAYMENT_COMPLETED';
       }
-      try {
-        await this.ensureInvoiceForQuotation(quote);
-      } catch (e) {
-        console.warn('Auto invoice generation on payment failed:', e);
-      }
     } else {
       if (quote.status === 'PAYMENT_COMPLETED') {
         quote.status = 'APPROVED';
-      }
-      if (!requireFullPayment && quote.paid_amount && quote.paid_amount > 0) {
-        try {
-          await this.ensureInvoiceForQuotation(quote);
-        } catch (e) {
-          console.warn('Auto advance invoice generation failed:', e);
-        }
       }
     }
 
@@ -5396,10 +5421,15 @@ class QuoteFlowStore {
       if (!quote.paid_at) {
         quote.paid_at = now;
       }
-      try {
-        await this.ensureInvoiceForQuotation(quote);
-      } catch (e) {
-        console.warn('Auto invoice on completion failed:', e);
+      // Synchronize existing invoice if one was already issued by business
+      const existingInvoice = Array.from(this.invoices.values()).find((inv) => inv.quotation_id === id);
+      if (existingInvoice) {
+        existingInvoice.is_paid = true;
+        existingInvoice.status = 'PAID';
+        existingInvoice.paid_at = quote.paid_at;
+        this.invoices.set(existingInvoice.id, existingInvoice);
+        this.saveInvoicesToFile();
+        this.persistInvoiceToSupabase(existingInvoice).catch(() => {});
       }
     }
     quote.updated_at = now;
@@ -5645,10 +5675,18 @@ class QuoteFlowStore {
     // Filter quotes for this customer, excluding drafts and mismatched environments
     const customerQuotes: Quotation[] = allOrgQuotes
       .filter((q) => q.customer_id === customerId && q.status !== 'DRAFT' && q.status !== 'CANCELLED' && (q.environment || 'live') === activeEnv)
-      .map((q) => ({
-        ...q,
-        organization: org || activeQuotation.organization,
-      }))
+      .map((q) => {
+        const inv = Array.from(this.invoices.values()).find(
+          (i) => i.quotation_id === q.id && i.status !== 'DRAFT' && i.status !== 'CANCELLED' && i.status !== 'VOIDED'
+        );
+        return {
+          ...q,
+          organization: org || activeQuotation.organization,
+          has_issued_invoice: Boolean(inv || q.has_issued_invoice),
+          issued_invoice_id: inv ? inv.id : (q.issued_invoice_id || null),
+          invoice_number: inv ? inv.invoice_number : (q.invoice_number || null),
+        };
+      })
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     // Make sure active quotation is present in customerQuotes and has complete data
@@ -5689,19 +5727,17 @@ class QuoteFlowStore {
       }
     }
 
-    // 3. Auto-sync approved & paid quotes for this org into invoices
-    const quotes = Array.from(this.quotations.values()).filter(
-      (q) =>
-        q.organization_id === orgId &&
-        (q.status === 'APPROVED' || q.status === 'PAYMENT_COMPLETED' || q.status === 'COMPLETED') &&
-        Boolean(q.is_paid)
-    );
-    for (const q of quotes) {
-      const hasInv = Array.from(this.invoices.values()).some((inv) => inv.quotation_id === q.id);
-      if (!hasInv) {
-        try {
-          await this.ensureInvoiceForQuotation(q);
-        } catch {}
+    // 3. Synchronize payment status for existing invoices linked to quotes
+    for (const inv of this.invoices.values()) {
+      if (inv.organization_id === orgId && inv.quotation_id) {
+        const linkedQuote = this.quotations.get(inv.quotation_id);
+        if (linkedQuote && linkedQuote.is_paid && !inv.is_paid) {
+          inv.is_paid = true;
+          inv.status = 'PAID';
+          inv.paid_at = linkedQuote.paid_at || inv.paid_at;
+          inv.paid_amount = linkedQuote.paid_amount || inv.grand_total;
+          inv.balance_amount = 0;
+        }
       }
     }
 
@@ -5778,6 +5814,49 @@ class QuoteFlowStore {
         if (s.items) this.invoiceItems.set(s.id, s.items);
       }
       inv = this.invoices.get(id);
+    }
+
+    if (!inv) return null;
+    if (orgId && orgId !== DEFAULT_ORG_ID && inv.organization_id && inv.organization_id !== orgId) return null;
+
+    return {
+      ...inv,
+      environment: (inv.environment || 'live') as 'test' | 'live',
+      customer: inv.customer || this.customers.get(inv.customer_id),
+      organization: inv.organization || (await this.getOrganization(inv.organization_id)) || this.organizations.get(inv.organization_id),
+      items: inv.items || this.invoiceItems.get(inv.id) || [],
+    };
+  }
+
+  public async getInvoiceByQuotationId(
+    quotationId: string,
+    orgId?: string
+  ): Promise<Invoice | null> {
+    // 1. Check in-memory map
+    let inv = Array.from(this.invoices.values()).find((i) => i.quotation_id === quotationId);
+
+    // 2. Load from Supabase if not found
+    if (!inv) {
+      if (orgId && orgId !== DEFAULT_ORG_ID) {
+        const loaded = await this.loadInvoicesFromSupabase(orgId);
+        inv = loaded.find((i) => i.quotation_id === quotationId);
+      }
+      if (!inv) {
+        const loaded = await this.loadInvoicesFromSupabase();
+        inv = loaded.find((i) => i.quotation_id === quotationId);
+      }
+    }
+
+    // 3. Fallback to file storage
+    if (!inv) {
+      const saved = this.loadInvoicesFromFile();
+      for (const s of saved) {
+        this.invoices.set(s.id, s);
+        if (s.items) this.invoiceItems.set(s.id, s.items);
+        if (s.quotation_id === quotationId) {
+          inv = s;
+        }
+      }
     }
 
     if (!inv) return null;
@@ -6148,6 +6227,17 @@ class QuoteFlowStore {
     this.invoices.set(invId, newInvoice);
     this.invoiceItems.set(invId, invoiceItems);
     this.saveInvoicesToFile();
+
+    if (data.quotation_id) {
+      const q = this.quotations.get(data.quotation_id);
+      if (q) {
+        q.has_issued_invoice = true;
+        q.issued_invoice_id = invId;
+        q.invoice_number = invoiceNumber;
+        this.quotations.set(data.quotation_id, q);
+      }
+    }
+
     await this.persistInvoiceToSupabase(newInvoice);
     const customer = this.customers.get(data.customer_id);
 

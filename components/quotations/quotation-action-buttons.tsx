@@ -406,10 +406,10 @@ export function QuotationActionButtons({
                   size="xs"
                   onClick={() => setIsInvoiceOpen(true)}
                   className="gap-1 text-[11px] text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-semibold shadow-2xs"
-                  title="View / Print Commercial Tax Invoice"
+                  title="View / Issue Commercial Tax Invoice"
                 >
                   <Receipt className="h-3 w-3 text-indigo-600" />
-                  <span>View Invoice</span>
+                  <span>{currentQuotation.has_issued_invoice ? 'View Invoice' : 'Issue Invoice'}</span>
                 </Button>
 
                 <Button
@@ -470,10 +470,10 @@ export function QuotationActionButtons({
                 size="xs"
                 onClick={() => setIsInvoiceOpen(true)}
                 className="gap-1 text-[11px] bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs font-semibold"
-                title="View / Edit Commercial Tax Invoice"
+                title="View / Issue Commercial Tax Invoice"
               >
                 <Receipt className="h-3 w-3" />
-                <span>Invoice</span>
+                <span>{currentQuotation.has_issued_invoice ? 'Invoice' : 'Issue Invoice'}</span>
               </Button>
             ) : (
               <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
@@ -578,10 +578,10 @@ export function QuotationActionButtons({
                 size="xs"
                 onClick={() => setIsInvoiceOpen(true)}
                 className="gap-1 text-[11px] bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs font-semibold"
-                title="View / Edit Commercial Tax Invoice"
+                title="View / Issue Commercial Tax Invoice"
               >
                 <Receipt className="h-3 w-3" />
-                <span>Invoice</span>
+                <span>{currentQuotation.has_issued_invoice ? 'Invoice' : 'Issue Invoice'}</span>
               </Button>
             ) : (
               <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
@@ -791,6 +791,19 @@ export function QuotationActionButtons({
           quotation={currentQuotation}
           organization={organization}
           customer={customer}
+          onInvoiceIssued={(inv) => {
+            setCurrentQuotation((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    has_issued_invoice: true,
+                    issued_invoice_id: inv.id,
+                    invoice_number: inv.invoice_number,
+                  }
+                : prev
+            );
+            router.refresh();
+          }}
         />
       )}
 

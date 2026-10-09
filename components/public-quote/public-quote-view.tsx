@@ -680,14 +680,14 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         const data = await res.json().catch(() => ({}));
         throw new Error(
           data.error ||
-            'Commercial Tax Invoice is only generated once quotation is marked as fully paid.'
+            'Commercial Tax Invoice will be available once issued by the business.'
         );
       }
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Invoice-${quotation.quotation_number}.pdf`;
+      a.download = `Invoice-${quotation.invoice_number || quotation.quotation_number}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -1846,17 +1846,17 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                 <div className="space-y-1 flex-1">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <p className="font-semibold text-slate-800">
-                      {quotation.is_paid
+                      {quotation.has_issued_invoice
                         ? 'Commercial Tax Invoice Available'
-                        : 'Official Tax Invoice Policy'}
+                        : 'Official Tax Invoice'}
                     </p>
-                    {quotation.is_paid && (
+                    {quotation.has_issued_invoice && (
                       <Button
                         variant="primary"
                         size="sm"
                         onClick={handleDownloadInvoice}
                         isLoading={isDownloadingInvoice}
-                        className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                        className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs font-semibold"
                       >
                         <Download className="h-3.5 w-3.5" />
                         <span>Download Commercial Tax Invoice</span>
@@ -1864,9 +1864,11 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                     )}
                   </div>
                   <p className="text-slate-500 leading-relaxed">
-                    {quotation.is_paid
-                      ? 'This quotation is fully paid. Your official Commercial Tax Invoice has been generated with all statutory GST/VAT and HSN details.'
-                      : 'Note: Official Commercial Tax Invoice will only be generated once the quotation is marked as fully paid.'}
+                    {quotation.has_issued_invoice
+                      ? `Your official Commercial Tax Invoice (${quotation.invoice_number || 'INV'}) has been issued by the business with statutory tax and GST/VAT details.`
+                      : quotation.is_paid
+                        ? 'Quotation payment is recorded. Your official Commercial Tax Invoice will be available for download once issued by the business.'
+                        : 'Note: Official Commercial Tax Invoice will be available for download once issued by the business.'}
                   </p>
                 </div>
               </div>

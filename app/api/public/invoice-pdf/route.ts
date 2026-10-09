@@ -38,17 +38,22 @@ export async function GET(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              'Official Commercial Tax Invoice is only generated once the quotation is marked as fully paid.',
+              'Official Commercial Tax Invoice is only available once the quotation is marked as fully paid.',
           },
           { status: 403 }
         );
       }
 
-      invoice = await store.ensureInvoiceForQuotation(quote);
+      // Invoices must NOT be generated automatically on payment or download request.
+      // Only serve an official invoice that has been explicitly issued by the business.
+      invoice = await store.getInvoiceByQuotationId(quote.id, quote.organization_id);
     }
 
-    if (!invoice) {
-      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+    if (!invoice || invoice.status === 'DRAFT' || invoice.status === 'CANCELLED' || invoice.status === 'VOIDED') {
+      return NextResponse.json(
+        { error: 'An official tax invoice has not been issued by the business yet.' },
+        { status: 404 }
+      );
     }
 
     const pdfBytes = await generateInvoicePdf(invoice);

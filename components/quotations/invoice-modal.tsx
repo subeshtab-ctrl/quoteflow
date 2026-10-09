@@ -55,6 +55,7 @@ interface InvoiceModalProps {
   quotation: Quotation;
   organization?: Organization | null;
   customer?: Customer | null;
+  onInvoiceIssued?: (invoice: any) => void;
 }
 
 export function InvoiceModal({
@@ -63,6 +64,7 @@ export function InvoiceModal({
   quotation,
   organization,
   customer,
+  onInvoiceIssued,
 }: InvoiceModalProps) {
   const currency = quotation.currency || 'INR';
 
@@ -489,6 +491,7 @@ export function InvoiceModal({
 
       if (data.invoice?.id) {
         setInvoiceId(data.invoice.id);
+        onInvoiceIssued?.(data.invoice);
       }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
@@ -556,6 +559,24 @@ export function InvoiceModal({
 
             {activeTab === 'preview' ? (
               <>
+                {!invoiceId ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleSaveInvoiceChanges}
+                    isLoading={isSaving}
+                    className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs font-semibold"
+                    title="Issue this tax invoice and enable download on the client portal"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Issue Invoice</span>
+                  </Button>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>Invoice Issued</span>
+                  </span>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

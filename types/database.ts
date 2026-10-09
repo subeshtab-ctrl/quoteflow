@@ -397,6 +397,11 @@ export interface Quotation {
   completed_at?: string | null;
   completed_unpaid?: boolean;
 
+  // Invoice Tracking
+  has_issued_invoice?: boolean;
+  issued_invoice_id?: string | null;
+  invoice_number?: string | null;
+
   // PIN Protection Security
   pin_protection_enabled?: boolean;
   pin?: string | null;
