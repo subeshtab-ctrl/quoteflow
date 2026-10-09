@@ -257,12 +257,12 @@ export function QuotationBuilder({
   );
   const [pin, setPin] = useState<string>(() => {
     if (initialQuotation?.pin) return initialQuotation.pin;
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return Math.floor(1000 + Math.random() * 9000).toString();
   });
   const [copiedPin, setCopiedPin] = useState(false);
 
   const handleRegeneratePin = () => {
-    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const newPin = Math.floor(1000 + Math.random() * 9000).toString();
     setPin(newPin);
   };
 
@@ -1784,7 +1784,7 @@ export function QuotationBuilder({
                     7. Quotation Access Security (Optional PIN)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Require a 6-digit PIN to open and view this quotation
+                    Require a 4-digit PIN to open and view this quotation
                   </p>
                 </div>
               </div>
@@ -1804,7 +1804,7 @@ export function QuotationBuilder({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                      6-Digit Access PIN
+                      4-Digit Access PIN
                     </span>
                     <p className="text-[11px] text-slate-500">
                       Share this PIN with your customer along with the quotation link.
@@ -1813,10 +1813,10 @@ export function QuotationBuilder({
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
-                      maxLength={8}
+                      maxLength={4}
                       value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
-                      className="h-10 w-32 text-center font-mono font-black text-lg tracking-widest rounded-xl border border-indigo-300 bg-white text-indigo-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                      onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                      className="h-10 w-28 text-center font-mono font-black text-lg tracking-widest rounded-xl border border-indigo-300 bg-white text-indigo-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                     />
                     <Button
                       type="button"

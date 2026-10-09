@@ -94,7 +94,7 @@ export function buildInvoiceNotesWithPaymentRefs(
 export const DEMO_PORTAL_TOKEN = 'sec_8f92m1k4092b';
 export const DEMO_PORTAL_QUOTE_ID = 'd0000000-0000-0000-0000-000000000042';
 export const DEMO_PORTAL_CUSTOMER_ID = 'b0000000-0000-0000-0000-000000000042';
-export const DEMO_PORTAL_PIN = '123456';
+export const DEMO_PORTAL_PIN = '1234';
 
 class QuoteFlowStore {
   private organizations: Map<string, Organization> = new Map();
@@ -2843,13 +2843,14 @@ class QuoteFlowStore {
           // Fetch payment and chat events from Supabase to ensure accurate status across all clients
           const eventsByQuote: Record<string, any[]> = {};
           const completedMap: Record<string, { completed_at: string; unpaid: boolean }> = {};
+          const inProgressMap: Record<string, { in_progress_at: string; estimated_days?: number; estimated_completion_date?: string }> = {};
           const chatEventsByQuote: Record<string, { messages: Array<{ senderRole: string; createdAt: string }>; lastReadAt: string | null }> = {};
           try {
             const { data: orgEvents } = await supabase
               .from('quotation_events')
               .select('quotation_id, actor_type, event_type, metadata, created_at')
               .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG'])
+              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG', 'IN_PROGRESS', 'EXTEND_TIME'])
               .order('created_at', { ascending: true });
 
             if (orgEvents) {
@@ -2863,6 +2864,12 @@ class QuoteFlowStore {
                   completedMap[pe.quotation_id] = {
                     completed_at: pe.metadata?.completed_at || pe.created_at,
                     unpaid: Boolean(pe.metadata?.unpaid),
+                  };
+                } else if (pe.event_type === 'IN_PROGRESS' || pe.event_type === 'EXTEND_TIME') {
+                  inProgressMap[pe.quotation_id] = {
+                    in_progress_at: pe.metadata?.in_progress_at || pe.created_at,
+                    estimated_days: typeof pe.metadata?.estimated_days === 'number' ? pe.metadata.estimated_days : (typeof pe.metadata?.new_total_days === 'number' ? pe.metadata.new_total_days : undefined),
+                    estimated_completion_date: pe.metadata?.estimated_completion_date || pe.metadata?.new_estimated_completion_date,
                   };
                 } else if (pe.event_type === 'CHAT_MESSAGE') {
                   if (!chatEventsByQuote[pe.quotation_id]) {
@@ -2901,12 +2908,15 @@ class QuoteFlowStore {
               existing
             );
 
-            // Auto-expire at the end of valid_until date (23:59:59.999) or check COMPLETED
+            // Auto-expire at the end of valid_until date (23:59:59.999) or check COMPLETED / IN_PROGRESS
             let currentStatus = q.status;
             let expiredAt = q.expired_at || existing?.expired_at || null;
             const completedInfo = completedMap[q.id];
+            const inProgressInfo = inProgressMap[q.id];
             if (completedInfo) {
               currentStatus = 'COMPLETED';
+            } else if (inProgressInfo && (currentStatus === 'APPROVED' || (q.status as string) === 'IN_PROGRESS')) {
+              currentStatus = 'IN_PROGRESS';
             } else if (
               ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
               this.isPastEndOfValidityDate(q.valid_until)
@@ -2947,6 +2957,9 @@ class QuoteFlowStore {
               payment_confirmed_by_company: completedInfo && completedInfo.unpaid ? false : payDetails.payment_confirmed_by_company,
               payment_confirmed_at: completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_at,
               payment_confirmed_by: completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_by,
+              in_progress_at: inProgressInfo?.in_progress_at || (q as any).in_progress_at || existing?.in_progress_at || null,
+              estimated_days: inProgressInfo?.estimated_days ?? (q as any).estimated_days ?? existing?.estimated_days ?? null,
+              estimated_completion_date: inProgressInfo?.estimated_completion_date || (q as any).estimated_completion_date || existing?.estimated_completion_date || null,
               completed_at: completedInfo?.completed_at || existing?.completed_at || null,
               completed_unpaid: Boolean(completedInfo?.unpaid || existing?.completed_unpaid),
               chat_count: chatCount,
@@ -2991,7 +3004,21 @@ class QuoteFlowStore {
             };
           });
           if (filters?.status && filters.status !== 'ALL') {
-            results = results.filter((item) => item.status === filters.status);
+            if (filters.status === 'NEW') {
+              results = results.filter((item) => item.status === 'DRAFT' || (item.status as string) === 'NEW');
+            } else if (filters.status === 'PENDING') {
+              results = results.filter((item) => ['PENDING', 'SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(item.status));
+            } else if (filters.status === 'APPROVED') {
+              results = results.filter((item) => item.status === 'APPROVED');
+            } else if (filters.status === 'IN_PROGRESS') {
+              results = results.filter((item) => item.status === 'IN_PROGRESS');
+            } else if (filters.status === 'REJECTED') {
+              results = results.filter((item) => item.status === 'REJECTED');
+            } else if (filters.status === 'EXPIRED') {
+              results = results.filter((item) => item.status === 'EXPIRED');
+            } else {
+              results = results.filter((item) => item.status === filters.status);
+            }
           }
           if (filters?.environment && filters.environment !== 'ALL') {
             results = results.filter((item) => (item.environment || 'live') === filters.environment);
@@ -3019,7 +3046,21 @@ class QuoteFlowStore {
     );
 
     if (filters?.status && filters.status !== 'ALL') {
-      list = list.filter((q) => q.status === filters.status);
+      if (filters.status === 'NEW') {
+        list = list.filter((q) => q.status === 'DRAFT' || (q.status as string) === 'NEW');
+      } else if (filters.status === 'PENDING') {
+        list = list.filter((q) => ['PENDING', 'SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(q.status));
+      } else if (filters.status === 'APPROVED') {
+        list = list.filter((q) => q.status === 'APPROVED');
+      } else if (filters.status === 'IN_PROGRESS') {
+        list = list.filter((q) => q.status === 'IN_PROGRESS');
+      } else if (filters.status === 'REJECTED') {
+        list = list.filter((q) => q.status === 'REJECTED');
+      } else if (filters.status === 'EXPIRED') {
+        list = list.filter((q) => q.status === 'EXPIRED');
+      } else {
+        list = list.filter((q) => q.status === filters.status);
+      }
     }
 
     if (filters?.environment && filters.environment !== 'ALL') {
@@ -4358,8 +4399,8 @@ class QuoteFlowStore {
     if (!quote) throw new Error('Quotation not found');
 
     const cleanPin = pin.trim();
-    if (!/^\d{6}$/.test(cleanPin)) {
-      throw new Error('Security PIN must be exactly 6 digits (numbers only).');
+    if (!/^\d{4,6}$/.test(cleanPin)) {
+      throw new Error('Security PIN must be 4 digits (numbers only).');
     }
 
     const rawEmail = quote.customer?.email || '';
@@ -4495,7 +4536,7 @@ class QuoteFlowStore {
   public async verifyPortalPin(quotationId: string, pin: string): Promise<boolean> {
     if (quotationId === DEMO_PORTAL_QUOTE_ID) {
       const clean = (pin || '').trim();
-      if (clean === DEMO_PORTAL_PIN) {
+      if (clean === DEMO_PORTAL_PIN || clean === '1234' || clean === '123456') {
         return true;
       }
     }
@@ -5266,6 +5307,142 @@ class QuoteFlowStore {
       signature: this.signatures.get(id) || quote.signature || null,
       events: this.events.get(id) || quote.events || [],
     };
+  }
+
+  public async markQuotationInProgress(
+    id: string,
+    orgId: string = DEFAULT_ORG_ID,
+    user: string = 'Business User',
+    options?: { estimatedDays?: number; estimatedCompletionDate?: string; notes?: string }
+  ): Promise<Quotation> {
+    const quote = (await this.getQuotationById(id, orgId)) || this.quotations.get(id);
+    if (!quote) throw new Error('Quotation not found');
+
+    const now = new Date().toISOString();
+    const estDays = options?.estimatedDays !== undefined && options?.estimatedDays !== null ? Number(options.estimatedDays) : 7;
+    let estDate = options?.estimatedCompletionDate;
+    if (!estDate && estDays > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + estDays);
+      estDate = d.toISOString().split('T')[0];
+    }
+
+    quote.status = 'IN_PROGRESS';
+    quote.in_progress_at = now;
+    quote.estimated_days = estDays;
+    quote.estimated_completion_date = estDate || null;
+    quote.updated_at = now;
+
+    this.quotations.set(id, quote);
+
+    // Audit Log Event
+    this.logEvent(quote.organization_id, id, 'USER', 'IN_PROGRESS', {
+      in_progress_by: user,
+      in_progress_at: now,
+      estimated_days: estDays,
+      estimated_completion_date: estDate,
+      notes: options?.notes || null,
+    });
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('quotation_events').insert({
+          organization_id: quote.organization_id,
+          quotation_id: id,
+          actor_type: 'USER',
+          actor_name: user,
+          event_type: 'IN_PROGRESS',
+          metadata: {
+            in_progress_at: now,
+            estimated_days: estDays,
+            estimated_completion_date: estDate,
+            notes: options?.notes || null,
+          },
+          created_at: now,
+        });
+
+        await supabase
+          .from('quotations')
+          .update({ updated_at: now })
+          .eq('id', id);
+      }
+    } catch (err) {
+      console.warn('Failed to sync quotation in_progress status to Supabase:', err);
+    }
+
+    return {
+      ...quote,
+      items: this.quotationItems.get(id) || quote.items || [],
+      customer: this.customers.get(quote.customer_id) || quote.customer,
+      organization: this.organizations.get(quote.organization_id) || quote.organization,
+      signature: this.signatures.get(id) || quote.signature || null,
+      events: this.events.get(id) || quote.events || [],
+    };
+  }
+
+  public async extendQuotationTime(
+    id: string,
+    orgId: string = DEFAULT_ORG_ID,
+    user: string = 'Business User',
+    options: { additionalDays: number; newEstimatedCompletionDate?: string; notes?: string }
+  ): Promise<Quotation> {
+    const quote = (await this.getQuotationById(id, orgId)) || this.quotations.get(id);
+    if (!quote) throw new Error('Quotation not found');
+
+    const now = new Date().toISOString();
+    const currentDays = quote.estimated_days || 7;
+    const additional = Number(options.additionalDays) || 0;
+    const newTotalDays = currentDays + additional;
+
+    let targetDate = options.newEstimatedCompletionDate;
+    if (!targetDate) {
+      const baseDate = quote.estimated_completion_date ? new Date(quote.estimated_completion_date) : new Date();
+      baseDate.setDate(baseDate.getDate() + additional);
+      targetDate = baseDate.toISOString().split('T')[0];
+    }
+
+    quote.estimated_days = newTotalDays;
+    quote.estimated_completion_date = targetDate;
+    quote.updated_at = now;
+    this.quotations.set(id, quote);
+
+    this.logEvent(quote.organization_id, id, 'USER', 'EXTEND_TIME', {
+      extended_by: user,
+      additional_days: additional,
+      new_total_days: newTotalDays,
+      new_estimated_completion_date: targetDate,
+      extended_at: now,
+      notes: options?.notes || null,
+    });
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('quotation_events').insert({
+          organization_id: quote.organization_id,
+          quotation_id: id,
+          actor_type: 'USER',
+          actor_name: user,
+          event_type: 'EXTEND_TIME',
+          metadata: {
+            additional_days: additional,
+            new_total_days: newTotalDays,
+            new_estimated_completion_date: targetDate,
+            extended_at: now,
+            notes: options?.notes || null,
+          },
+          created_at: now,
+        });
+
+        await supabase
+          .from('quotations')
+          .update({ updated_at: now })
+          .eq('id', id);
+      }
+    } catch {}
+
+    return quote;
   }
 
   // --- MULTI-QUOTE CUSTOMER PORTAL RESOLVER ---

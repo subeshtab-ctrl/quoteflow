@@ -123,6 +123,19 @@ export function StatusBadge({
           Approved
         </Badge>
       );
+    case 'IN_PROGRESS':
+      return (
+        <Badge
+          variant="cyan"
+          className={cn(
+            'bg-sky-100/90 text-sky-900 border-sky-300 dark:bg-sky-950/80 dark:text-sky-200 dark:border-sky-700 font-bold',
+            className
+          )}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+          In Progress
+        </Badge>
+      );
     case 'SENT':
       return (
         <Badge variant="secondary" className={cn('bg-blue-100/70 text-blue-800 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800', className)}>

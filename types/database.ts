@@ -7,6 +7,7 @@ export type QuotationStatus =
   | 'VIEWED'
   | 'PENDING_APPROVAL'
   | 'APPROVED'
+  | 'IN_PROGRESS'
   | 'PAYMENT_COMPLETED'
   | 'COMPLETED'
   | 'REJECTED'
@@ -370,7 +371,11 @@ export interface Quotation {
   unread_chat_count?: number;
   chat_count?: number;
 
-  // Completion Tracking
+  // Completion & In-Progress Tracking
+  in_progress_at?: string | null;
+  estimated_days?: number | null;
+  estimated_completion_date?: string | null;
+  estimated_time_text?: string | null;
   completed_at?: string | null;
   completed_unpaid?: boolean;
 

@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
 
     const cleanPin = (pin || '').toString().trim();
     if (!cleanPin) {
-      return NextResponse.json({ error: 'Please enter the 6-digit access PIN.' }, { status: 400 });
+      return NextResponse.json({ error: 'Please enter the 4-digit access PIN.' }, { status: 400 });
     }
 
     // Verify PIN

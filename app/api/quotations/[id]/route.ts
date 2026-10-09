@@ -56,6 +56,32 @@ export async function PATCH(req: NextRequest, { params }: RouteProps) {
       const updated = await store.markQuotationApproved(id, body.signer_name || auth?.fullName || 'Admin');
       return NextResponse.json({ success: true, quotation: updated });
     }
+    if (body.status === 'IN_PROGRESS') {
+      const updated = await store.markQuotationInProgress(
+        id,
+        orgId,
+        body.signer_name || auth?.fullName || 'Business User',
+        {
+          estimatedDays: body.estimated_days !== undefined ? Number(body.estimated_days) : 7,
+          estimatedCompletionDate: body.estimated_completion_date,
+          notes: body.notes,
+        }
+      );
+      return NextResponse.json({ success: true, quotation: updated });
+    }
+    if (body.action === 'EXTEND_TIME') {
+      const updated = await store.extendQuotationTime(
+        id,
+        orgId,
+        body.signer_name || auth?.fullName || 'Business User',
+        {
+          additionalDays: Number(body.additional_days) || 0,
+          newEstimatedCompletionDate: body.new_estimated_completion_date,
+          notes: body.notes,
+        }
+      );
+      return NextResponse.json({ success: true, quotation: updated });
+    }
     if (body.status === 'COMPLETED') {
       const updated = await store.markQuotationCompleted(
         id,

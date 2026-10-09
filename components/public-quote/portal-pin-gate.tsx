@@ -34,7 +34,7 @@ export function PortalPinGate({
 
     const cleanPin = pin.trim();
     if (!cleanPin) {
-      setError('Please enter the 6-digit access PIN.');
+      setError('Please enter the 4-digit access PIN.');
       return;
     }
 
@@ -69,8 +69,8 @@ export function PortalPinGate({
   };
 
   const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Only allow alphanumeric / digits, max 8 chars
-    const val = e.target.value.replace(/[^0-9a-zA-Z]/g, '').slice(0, 8);
+    // Only allow alphanumeric / digits, max 4 chars
+    const val = e.target.value.replace(/[^0-9a-zA-Z]/g, '').slice(0, 4);
     setPin(val);
     if (error) setError(null);
   };
@@ -101,7 +101,7 @@ export function PortalPinGate({
           </h1>
 
           <p className="text-xs sm:text-sm text-slate-400 max-w-xs mx-auto leading-relaxed">
-            This proposal from <span className="text-slate-200 font-semibold">{companyName}</span> is protected with a security PIN. Enter the PIN provided to view.
+            This proposal from <span className="text-slate-200 font-semibold">{companyName}</span> is protected with a security PIN. Enter the 4-digit PIN provided to view.
           </p>
         </div>
 
@@ -121,13 +121,13 @@ export function PortalPinGate({
               inputMode="numeric"
               pattern="[0-9]*"
               autoComplete="one-time-code"
-              maxLength={8}
+              maxLength={4}
               value={pin}
               onChange={handlePinChange}
-              placeholder="••••••"
+              placeholder="••••"
               disabled={loading || isLocked}
               autoFocus
-              className="w-full text-center tracking-[0.4em] font-mono text-2xl font-bold py-3.5 px-12 rounded-2xl bg-slate-800/80 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
+              className="w-full text-center tracking-[0.6em] font-mono text-2xl font-bold py-3.5 px-12 rounded-2xl bg-slate-800/80 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
             />
             <button
               type="button"
@@ -142,7 +142,7 @@ export function PortalPinGate({
 
           <Button
             type="submit"
-            disabled={loading || isLocked || pin.length < 4}
+            disabled={loading || isLocked || pin.length !== 4}
             className="w-full py-6 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/40 transition-all flex items-center justify-center gap-2"
           >
             {loading ? (

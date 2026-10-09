@@ -42,6 +42,7 @@ import { QuotationActionButtons } from '@/components/quotations/quotation-action
 import { QuotationPaymentButton } from '@/components/quotations/quotation-payment-button';
 import { QuotationChatPanel } from '@/components/quotations/quotation-chat-panel';
 import { QuotationAuditHistory } from '@/components/quotations/quotation-audit-history';
+import { QuotationFlowChart } from '@/components/quotations/quotation-flow-chart';
 
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
@@ -118,6 +119,9 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
           />
         </div>
 
+        {/* Visual Lifecycle Flow Chart */}
+        <QuotationFlowChart quotation={quotation} />
+
         {/* Draft Notice Banner */}
         {quotation.status === 'DRAFT' && (
           <div className="rounded-2xl bg-amber-50 border border-amber-200 p-5 shadow-sm space-y-1 text-amber-900">
@@ -127,6 +131,28 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
             </div>
             <p className="text-xs text-amber-700 leading-relaxed">
               This quotation is currently saved as a draft. Customer approval links and online signing are hidden. Click <strong>&ldquo;Save &amp; Generate Approval Link&rdquo;</strong> above to issue this quotation and generate approval links for your client.
+            </p>
+          </div>
+        )}
+
+        {/* In Progress Banner */}
+        {quotation.status === 'IN_PROGRESS' && (
+          <div className="rounded-2xl bg-sky-50 border border-sky-200 p-5 shadow-sm space-y-2 text-sky-950">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 font-bold text-sm text-sky-900">
+                <span className="h-2.5 w-2.5 rounded-full bg-sky-500 animate-ping" />
+                <span>Work In Progress • Delivery Tracking Active</span>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-bold border border-sky-300">
+                {quotation.estimated_days || 7} Days Estimated
+              </span>
+            </div>
+            <p className="text-xs text-sky-800 leading-relaxed">
+              This quotation is actively in progress.
+              {quotation.estimated_completion_date && (
+                <> Target completion date: <strong>{formatDate(quotation.estimated_completion_date)}</strong>.</>
+              )}
+              {' '}Your client can monitor live progress and timeline updates directly on their portal.
             </p>
           </div>
         )}
