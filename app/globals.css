@@ -157,4 +157,172 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
 }
 
+/* ========================================================
+   GLOBAL ACCENT THEME SYSTEM (Emerald, Blue, Orange, Rose)
+   Dynamically styles all buttons, links, borders, focus rings
+   ======================================================== */
+
+/* --- EMERALD GREEN --- */
+[data-accent="emerald"],
+html[data-accent="emerald"] {
+  --brand-color: #059669;
+  --brand-rgb: 5, 150, 105;
+}
+
+[data-accent="emerald"] .bg-indigo-600,
+[data-accent="emerald"] .bg-indigo-500,
+[data-accent="emerald"] .bg-indigo-700,
+[data-accent="emerald"] .bg-blue-600,
+[data-accent="emerald"] .bg-blue-500 {
+  background-color: #059669 !important;
+}
+
+[data-accent="emerald"] .hover\:bg-indigo-700:hover,
+[data-accent="emerald"] .hover\:bg-indigo-600:hover,
+[data-accent="emerald"] .hover\:bg-blue-700:hover {
+  background-color: #047857 !important;
+}
+
+[data-accent="emerald"] .text-indigo-600,
+[data-accent="emerald"] .text-indigo-500,
+[data-accent="emerald"] .text-blue-600 {
+  color: #059669 !important;
+}
+
+[data-accent="emerald"] .text-indigo-700,
+[data-accent="emerald"] .text-indigo-800,
+[data-accent="emerald"] .text-indigo-900 {
+  color: #065f46 !important;
+}
+
+[data-accent="emerald"] .border-indigo-600,
+[data-accent="emerald"] .border-indigo-500,
+[data-accent="emerald"] .border-indigo-400,
+[data-accent="emerald"] .border-indigo-300,
+[data-accent="emerald"] .border-indigo-200 {
+  border-color: #059669 !important;
+}
+
+[data-accent="emerald"] .bg-indigo-50,
+[data-accent="emerald"] .bg-indigo-100 {
+  background-color: #ecfdf5 !important;
+}
+
+[data-accent="emerald"] .focus\:ring-indigo-500:focus,
+[data-accent="emerald"] .focus\:ring-indigo-600:focus,
+[data-accent="emerald"] .focus-visible\:ring-indigo-500:focus-visible {
+  --tw-ring-color: #059669 !important;
+  outline-color: #059669 !important;
+}
+
+[data-accent="emerald"] .ring-indigo-500,
+[data-accent="emerald"] .ring-indigo-600 {
+  --tw-ring-color: #059669 !important;
+}
+
+/* --- OCEAN BLUE --- */
+[data-accent="blue"],
+html[data-accent="blue"] {
+  --brand-color: #2563eb;
+  --brand-rgb: 37, 99, 235;
+}
+
+[data-accent="blue"] .bg-indigo-600,
+[data-accent="blue"] .bg-indigo-500,
+[data-accent="blue"] .bg-indigo-700 {
+  background-color: #2563eb !important;
+}
+
+[data-accent="blue"] .hover\:bg-indigo-700:hover,
+[data-accent="blue"] .hover\:bg-indigo-600:hover {
+  background-color: #1d4ed8 !important;
+}
+
+[data-accent="blue"] .text-indigo-600,
+[data-accent="blue"] .text-indigo-500 {
+  color: #2563eb !important;
+}
+
+[data-accent="blue"] .border-indigo-600,
+[data-accent="blue"] .border-indigo-500,
+[data-accent="blue"] .border-indigo-300,
+[data-accent="blue"] .border-indigo-200 {
+  border-color: #2563eb !important;
+}
+
+[data-accent="blue"] .bg-indigo-50,
+[data-accent="blue"] .bg-indigo-100 {
+  background-color: #eff6ff !important;
+}
+
+/* --- SUNSET ORANGE --- */
+[data-accent="orange"],
+html[data-accent="orange"] {
+  --brand-color: #ea580c;
+  --brand-rgb: 234, 88, 12;
+}
+
+[data-accent="orange"] .bg-indigo-600,
+[data-accent="orange"] .bg-indigo-500,
+[data-accent="orange"] .bg-indigo-700 {
+  background-color: #ea580c !important;
+}
+
+[data-accent="orange"] .hover\:bg-indigo-700:hover,
+[data-accent="orange"] .hover\:bg-indigo-600:hover {
+  background-color: #c2410c !important;
+}
+
+[data-accent="orange"] .text-indigo-600,
+[data-accent="orange"] .text-indigo-500 {
+  color: #ea580c !important;
+}
+
+[data-accent="orange"] .border-indigo-600,
+[data-accent="orange"] .border-indigo-500,
+[data-accent="orange"] .border-indigo-300,
+[data-accent="orange"] .border-indigo-200 {
+  border-color: #ea580c !important;
+}
+
+[data-accent="orange"] .bg-indigo-50,
+[data-accent="orange"] .bg-indigo-100 {
+  background-color: #fff7ed !important;
+}
+
+/* --- ROSE RED --- */
+[data-accent="rose"],
+html[data-accent="rose"] {
+  --brand-color: #e11d48;
+  --brand-rgb: 225, 29, 72;
+}
+
+[data-accent="rose"] .bg-indigo-600,
+[data-accent="rose"] .bg-indigo-500,
+[data-accent="rose"] .bg-indigo-700 {
+  background-color: #e11d48 !important;
+}
+
+[data-accent="rose"] .hover\:bg-indigo-700:hover,
+[data-accent="rose"] .hover\:bg-indigo-600:hover {
+  background-color: #be123c !important;
+}
+
+[data-accent="rose"] .text-indigo-600,
+[data-accent="rose"] .text-indigo-500 {
+  color: #e11d48 !important;
+}
+
+[data-accent="rose"] .border-indigo-600,
+[data-accent="rose"] .border-indigo-500,
+[data-accent="rose"] .border-indigo-300,
+[data-accent="rose"] .border-indigo-200 {
+  border-color: #e11d48 !important;
+}
+
+[data-accent="rose"] .bg-indigo-50,
+[data-accent="rose"] .bg-indigo-100 {
+  background-color: #fff1f2 !important;
+}
+
 

@@ -35,6 +35,7 @@ export async function PATCH(
         advance_payment_notes: body.advance_payment_notes || null,
         final_payment_notes: body.final_payment_notes || null,
         confirmed_by: auth?.fullName || auth?.email || 'Company Finance Team',
+        payment_records: Array.isArray(body.payment_records) ? body.payment_records : undefined,
       },
       orgId
     );

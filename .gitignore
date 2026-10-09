@@ -38,3 +38,6 @@ supabase/.temp/
 # Admin credentials & local caches
 data/admin-config.json
 data/admin-otp.json
+
+.vercel
+.env*

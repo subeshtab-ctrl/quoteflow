@@ -46,11 +46,35 @@ export function AppearanceSettingsView() {
     resetToDefaults,
   } = useThemeCustomization();
 
+  const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  const handleSave = () => {
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const selectedAccent = ACCENT_COLOR_MAP[accentColor] || ACCENT_COLOR_MAP.purple;
+      if (typeof window !== 'undefined') {
+        const root = document.documentElement;
+        root.setAttribute('data-accent', accentColor);
+        root.style.setProperty('--brand-color', selectedAccent.hex);
+        root.style.setProperty('--brand-rgb', selectedAccent.rgb);
+      }
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brand_color: selectedAccent.hex,
+        }),
+      });
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (e) {
+      console.warn('Could not sync brand color:', e);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const accentOptions: { key: AccentColor; label: string; hex: string }[] = [

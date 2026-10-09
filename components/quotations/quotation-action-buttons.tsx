@@ -162,6 +162,7 @@ export function QuotationActionButtons({
         body: JSON.stringify({
           status: 'IN_PROGRESS',
           estimated_days: Number(estimatedDaysInput) || 7,
+          notes: estimatedNotesInput,
           estimated_time_text: estimatedNotesInput,
         }),
       });
@@ -171,10 +172,17 @@ export function QuotationActionButtons({
       if (data.quotation) {
         setCurrentQuotation(data.quotation);
         setCurrentStatus('IN_PROGRESS');
+      } else {
+        setCurrentStatus('IN_PROGRESS');
       }
 
       setIsInProgressModalOpen(false);
       router.refresh();
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+      }, 200);
     } catch (err: any) {
       alert(err.message || 'Error setting quotation to In Progress');
     } finally {
@@ -192,6 +200,7 @@ export function QuotationActionButtons({
           action: 'EXTEND_TIME',
           additional_days: Number(additionalDaysInput) || 7,
           reason: extendReasonInput,
+          notes: extendReasonInput,
         }),
       });
       const data = await res.json();
@@ -204,6 +213,11 @@ export function QuotationActionButtons({
       setIsExtendModalOpen(false);
       setExtendReasonInput('');
       router.refresh();
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+      }, 200);
     } catch (err: any) {
       alert(err.message || 'Error extending quotation time');
     } finally {
@@ -781,67 +795,61 @@ export function QuotationActionButtons({
       <Modal
         isOpen={isInProgressModalOpen}
         onClose={() => !isSettingInProgress && setIsInProgressModalOpen(false)}
-        title="Start Work • Mark as In Progress"
-        maxWidth="md"
+        title="Mark as In Progress"
+        description={`Set completion timeline for ${quotationNumber}`}
+        maxWidth="sm"
       >
-        <div className="space-y-4">
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Transition quotation <strong>{quotationNumber}</strong> into execution. You can configure an estimated timeline for completion, which will be visible to your client on their live quotation portal.
-          </p>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-700">Estimated Days to Complete</label>
-            <div className="flex items-center gap-2">
+        <div className="space-y-3.5 pt-1">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Estimated Duration</label>
+            <div className="grid grid-cols-4 gap-1.5 mb-2">
               {[3, 7, 14, 30].map((days) => (
                 <button
                   key={days}
                   type="button"
                   onClick={() => setEstimatedDaysInput(days)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
                     estimatedDaysInput === days
                       ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  {days} Days {days === 7 ? '(Default)' : ''}
+                  {days}d {days === 7 ? '★' : ''}
                 </button>
               ))}
             </div>
-            <div className="pt-1 flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <input
                 type="number"
                 min={1}
                 max={365}
                 value={estimatedDaysInput}
                 onChange={(e) => setEstimatedDaysInput(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-24 px-3 py-1.5 text-xs rounded-lg border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-20 px-2.5 py-1 text-xs rounded-lg border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <span className="text-xs text-slate-500 font-medium">calendar days</span>
             </div>
           </div>
 
-          {/* Target completion date preview */}
-          <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 space-y-1">
-            <div className="flex items-center gap-2 text-xs font-bold text-sky-900">
-              <Calendar className="h-4 w-4 text-sky-600" />
-              <span>Target Completion Date</span>
-            </div>
-            <p className="text-xs font-bold text-sky-800">
+          {/* Compact Target Date Box */}
+          <div className="p-2.5 rounded-lg bg-sky-50/80 border border-sky-200/80 flex items-center justify-between text-xs">
+            <span className="text-sky-800 font-medium flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5 text-sky-600" />
+              Target Date:
+            </span>
+            <span className="font-bold text-sky-950">
               {formatDate(new Date(Date.now() + (Number(estimatedDaysInput) || 7) * 86400000).toISOString())}
-            </p>
-            <p className="text-[11px] text-sky-700">
-              Client portal will display this timeline and status bar.
-            </p>
+            </span>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700">Scope / Notes (Optional)</label>
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-slate-600">Scope / Notes (Optional)</label>
             <input
               type="text"
-              placeholder="e.g. Design review complete, manufacturing & assembly starting"
+              placeholder="e.g. Design finalized, execution started"
               value={estimatedNotesInput}
               onChange={(e) => setEstimatedNotesInput(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
 
@@ -852,7 +860,7 @@ export function QuotationActionButtons({
               size="sm"
               onClick={() => setIsInProgressModalOpen(false)}
               disabled={isSettingInProgress}
-              className="text-xs"
+              className="text-xs h-8 px-3"
             >
               Cancel
             </Button>
@@ -861,10 +869,10 @@ export function QuotationActionButtons({
               size="sm"
               onClick={handleSetInProgress}
               isLoading={isSettingInProgress}
-              className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm"
+              className="text-xs h-8 px-3.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm"
             >
               <Play className="h-3.5 w-3.5 fill-current mr-1" />
-              <span>Confirm &amp; Start Work</span>
+              <span>Confirm &amp; Start</span>
             </Button>
           </div>
         </div>
@@ -874,61 +882,56 @@ export function QuotationActionButtons({
       <Modal
         isOpen={isExtendModalOpen}
         onClose={() => !isExtendingTime && setIsExtendModalOpen(false)}
-        title="Extend Estimated Completion Time"
-        maxWidth="md"
+        title="Extend Completion Time"
+        description={`Add extra days for ${quotationNumber}`}
+        maxWidth="sm"
       >
-        <div className="space-y-4">
-          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
-            <div className="flex items-center justify-between font-semibold">
-              <span>Current Estimate:</span>
-              <span className="font-bold text-slate-900">{currentQuotation?.estimated_days || 7} Days</span>
-            </div>
+        <div className="space-y-3.5 pt-1">
+          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 flex items-center justify-between">
+            <span>Current: <strong>{currentQuotation?.estimated_days || 7} Days</strong></span>
             {currentQuotation?.estimated_completion_date && (
-              <div className="flex items-center justify-between text-slate-500">
-                <span>Current Target:</span>
-                <span>{formatDate(currentQuotation.estimated_completion_date)}</span>
-              </div>
+              <span className="text-slate-500">({formatDate(currentQuotation.estimated_completion_date)})</span>
             )}
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-700">Add Days to Timeline</label>
-            <div className="flex items-center gap-2">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Add Days</label>
+            <div className="grid grid-cols-4 gap-1.5 mb-2">
               {[3, 7, 14, 30].map((days) => (
                 <button
                   key={days}
                   type="button"
                   onClick={() => setAdditionalDaysInput(days)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
                     additionalDaysInput === days
                       ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  +{days} Days
+                  +{days}d
                 </button>
               ))}
             </div>
-            <div className="pt-1 flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <input
                 type="number"
                 min={1}
                 max={90}
                 value={additionalDaysInput}
                 onChange={(e) => setAdditionalDaysInput(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-24 px-3 py-1.5 text-xs rounded-lg border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-20 px-2.5 py-1 text-xs rounded-lg border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <span className="text-xs text-slate-500 font-medium">additional days</span>
             </div>
           </div>
 
           {/* New target preview */}
-          <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 space-y-1">
-            <div className="flex items-center gap-2 text-xs font-bold text-sky-900">
-              <Clock className="h-4 w-4 text-sky-600" />
-              <span>New Target Completion Date</span>
-            </div>
-            <p className="text-xs font-bold text-sky-800">
+          <div className="p-2.5 rounded-lg bg-sky-50/80 border border-sky-200/80 flex items-center justify-between text-xs">
+            <span className="text-sky-800 font-medium flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5 text-sky-600" />
+              New Target:
+            </span>
+            <span className="font-bold text-sky-950">
               {formatDate(
                 new Date(
                   (currentQuotation?.estimated_completion_date
@@ -936,20 +939,17 @@ export function QuotationActionButtons({
                     : Date.now()) + (Number(additionalDaysInput) || 7) * 86400000
                 ).toISOString()
               )}
-            </p>
-            <p className="text-[11px] text-sky-700">
-              Total timeline: {(currentQuotation?.estimated_days || 7) + (Number(additionalDaysInput) || 7)} days
-            </p>
+            </span>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700">Reason / Update Note (Optional)</label>
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-slate-600">Reason (Optional)</label>
             <input
               type="text"
-              placeholder="e.g. Additional specifications requested by client"
+              placeholder="e.g. Scope extension or extra materials"
               value={extendReasonInput}
               onChange={(e) => setExtendReasonInput(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
 
@@ -960,7 +960,7 @@ export function QuotationActionButtons({
               size="sm"
               onClick={() => setIsExtendModalOpen(false)}
               disabled={isExtendingTime}
-              className="text-xs"
+              className="text-xs h-8 px-3"
             >
               Cancel
             </Button>
@@ -969,10 +969,10 @@ export function QuotationActionButtons({
               size="sm"
               onClick={handleExtendTime}
               isLoading={isExtendingTime}
-              className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm"
+              className="text-xs h-8 px-3.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm"
             >
               <Clock className="h-3.5 w-3.5 mr-1" />
-              <span>Save &amp; Update Portal</span>
+              <span>Save Timeline</span>
             </Button>
           </div>
         </div>

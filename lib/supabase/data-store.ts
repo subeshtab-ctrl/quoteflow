@@ -5,6 +5,8 @@ import {
   Organization,
   Product,
   Quotation,
+  QuotationStatus,
+  PaymentRecord,
   QuotationChatMessage,
   ChatAttachment,
   QuotationEvent,
@@ -624,12 +626,22 @@ class QuoteFlowStore {
       payment_display_mode?: PaymentDisplayMode;
       show_bank_details?: boolean;
       show_upi_details?: boolean;
+      show_cash_details?: boolean;
       show_crypto_details?: boolean;
+      cash_instructions?: string | null;
       bank_details?: BankAccountDetails | null;
       upi_details?: UpiPaymentDetails | null;
       crypto_details?: CryptoPaymentDetails | null;
       payment_terms_instructions?: string | null;
       accepted_payment_methods?: string[] | null;
+      status?: string;
+      in_progress_at?: string | null;
+      estimated_days?: number | null;
+      estimated_completion_date?: string | null;
+      estimated_time_text?: string | null;
+      completed_at?: string | null;
+      completed_unpaid?: boolean;
+      payment_records?: PaymentRecord[];
     }
   > {
     try {
@@ -647,7 +659,7 @@ class QuoteFlowStore {
   private savePaymentToFile(
     quotationId: string,
     data: {
-      is_paid: boolean;
+      is_paid?: boolean;
       paid_at?: string | null;
       payment_method?: string | null;
       payment_notes?: string | null;
@@ -663,12 +675,22 @@ class QuoteFlowStore {
       payment_display_mode?: PaymentDisplayMode;
       show_bank_details?: boolean;
       show_upi_details?: boolean;
+      show_cash_details?: boolean;
       show_crypto_details?: boolean;
+      cash_instructions?: string | null;
       bank_details?: BankAccountDetails | null;
       upi_details?: UpiPaymentDetails | null;
       crypto_details?: CryptoPaymentDetails | null;
       payment_terms_instructions?: string | null;
       accepted_payment_methods?: string[] | null;
+      status?: QuotationStatus | string;
+      in_progress_at?: string | null;
+      estimated_days?: number | null;
+      estimated_completion_date?: string | null;
+      estimated_time_text?: string | null;
+      completed_at?: string | null;
+      completed_unpaid?: boolean;
+      payment_records?: PaymentRecord[];
     }
   ): void {
     try {
@@ -713,6 +735,7 @@ class QuoteFlowStore {
     crypto_details?: CryptoPaymentDetails | null;
     payment_terms_instructions?: string | null;
     accepted_payment_methods?: string[] | null;
+    payment_records?: any[];
   } {
     const filePayment = filePayments[quotationId];
 
@@ -757,29 +780,40 @@ class QuoteFlowStore {
         ? Boolean(configMeta.show_crypto_details)
         : (filePayment?.show_crypto_details ?? existingQuote?.show_crypto_details);
 
+    let showCash =
+      configMeta.show_cash_details !== undefined
+        ? Boolean(configMeta.show_cash_details)
+        : (filePayment?.show_cash_details ?? existingQuote?.show_cash_details);
+
     if (paymentDisplayMode === 'CRYPTO_ONLY') {
       showBank = false;
       showUpi = false;
+      showCash = false;
       showCrypto = true;
     } else if (paymentDisplayMode === 'BANK_ONLY') {
       showBank = true;
       showUpi = false;
+      showCash = false;
       showCrypto = false;
     } else if (paymentDisplayMode === 'UPI_ONLY') {
       showBank = false;
       showUpi = true;
+      showCash = false;
       showCrypto = false;
     } else if (paymentDisplayMode === 'BOTH') {
       if (showBank === undefined) showBank = true;
       if (showUpi === undefined) showUpi = true;
+      if (showCash === undefined) showCash = false;
       if (showCrypto === undefined) showCrypto = false;
     } else if (paymentDisplayMode === 'ALL') {
       if (showBank === undefined) showBank = true;
       if (showUpi === undefined) showUpi = true;
+      if (showCash === undefined) showCash = true;
       if (showCrypto === undefined) showCrypto = true;
     } else {
       if (showBank === undefined) showBank = true;
       if (showUpi === undefined) showUpi = true;
+      if (showCash === undefined) showCash = true;
       if (showCrypto === undefined) showCrypto = false;
     }
 
@@ -787,7 +821,9 @@ class QuoteFlowStore {
       payment_display_mode: paymentDisplayMode,
       show_bank_details: showBank,
       show_upi_details: showUpi,
+      show_cash_details: showCash,
       show_crypto_details: showCrypto,
+      cash_instructions: configMeta.cash_instructions !== undefined ? configMeta.cash_instructions : (filePayment?.cash_instructions ?? existingQuote?.cash_instructions ?? null),
       bank_details: configMeta.bank_details !== undefined ? configMeta.bank_details : (filePayment?.bank_details ?? existingQuote?.bank_details ?? null),
       upi_details: configMeta.upi_details !== undefined ? configMeta.upi_details : (filePayment?.upi_details ?? existingQuote?.upi_details ?? null),
       crypto_details: configMeta.crypto_details !== undefined ? configMeta.crypto_details : (filePayment?.crypto_details ?? existingQuote?.crypto_details ?? null),
@@ -795,8 +831,11 @@ class QuoteFlowStore {
       accepted_payment_methods: configMeta.accepted_payment_methods !== undefined ? configMeta.accepted_payment_methods : (filePayment?.accepted_payment_methods ?? existingQuote?.accepted_payment_methods ?? null),
     };
 
+    const fileRecords = filePayment?.payment_records || existingQuote?.payment_records || [];
+
     if (latestPaymentEvent) {
       const meta = latestPaymentEvent.metadata || {};
+      const eventRecords = meta.payment_records || fileRecords;
       if (latestPaymentEvent.event_type === 'MARKED_PAID') {
         const pAmt = meta.paid_amount !== undefined ? Number(meta.paid_amount) : grandTotal;
         const advRef = meta.advance_payment_notes || historicalAdvanceRef || filePayment?.advance_payment_notes || existingQuote?.advance_payment_notes || null;
@@ -816,6 +855,7 @@ class QuoteFlowStore {
           payment_confirmed_by_company: meta.payment_confirmed_by_company !== undefined ? Boolean(meta.payment_confirmed_by_company) : true,
           payment_confirmed_at: meta.payment_confirmed_at || latestPaymentEvent.created_at,
           payment_confirmed_by: meta.confirmed_by || meta.payment_confirmed_by || null,
+          payment_records: eventRecords,
         };
       } else if (latestPaymentEvent.event_type === 'ADVANCE_PAID') {
         const pAmt = meta.paid_amount !== undefined ? Number(meta.paid_amount) : 0;
@@ -839,6 +879,7 @@ class QuoteFlowStore {
           payment_confirmed_by_company: meta.payment_confirmed_by_company !== undefined ? Boolean(meta.payment_confirmed_by_company) : true,
           payment_confirmed_at: meta.payment_confirmed_at || latestPaymentEvent.created_at,
           payment_confirmed_by: meta.confirmed_by || meta.payment_confirmed_by || null,
+          payment_records: eventRecords,
         };
       } else if (latestPaymentEvent.event_type === 'MARKED_UNPAID') {
         return {
@@ -856,6 +897,7 @@ class QuoteFlowStore {
           payment_confirmed_by_company: false,
           payment_confirmed_at: null,
           payment_confirmed_by: null,
+          payment_records: [],
         };
       }
     }
@@ -881,6 +923,7 @@ class QuoteFlowStore {
         payment_confirmed_by_company: filePayment.payment_confirmed_by_company !== undefined ? Boolean(filePayment.payment_confirmed_by_company) : isPaid,
         payment_confirmed_at: filePayment.payment_confirmed_at || null,
         payment_confirmed_by: filePayment.payment_confirmed_by || null,
+        payment_records: fileRecords,
       };
     }
 
@@ -903,6 +946,7 @@ class QuoteFlowStore {
         payment_confirmed_by_company: existingQuote.payment_confirmed_by_company ?? isPaid,
         payment_confirmed_at: existingQuote.payment_confirmed_at || null,
         payment_confirmed_by: existingQuote.payment_confirmed_by || null,
+        payment_records: fileRecords,
       };
     }
 
@@ -916,11 +960,12 @@ class QuoteFlowStore {
       final_payment_notes: null,
       paid_amount: 0,
       balance_amount: grandTotal,
-      advance_percentage: null,
+      advance_percentage: 0,
       payment_status: 'UNPAID',
       payment_confirmed_by_company: false,
       payment_confirmed_at: null,
       payment_confirmed_by: null,
+      payment_records: [],
     };
   }
 
@@ -3179,6 +3224,9 @@ class QuoteFlowStore {
           const latestCompletedEvent = eventsData?.find(
             (e: any) => e.event_type === 'COMPLETED'
           );
+          const latestInProgressEvent = eventsData?.find(
+            (e: any) => e.event_type === 'IN_PROGRESS' || e.event_type === 'EXTEND_TIME'
+          );
 
           let isPaid = payDetails.is_paid;
 
@@ -3187,6 +3235,12 @@ class QuoteFlowStore {
             if (latestCompletedEvent.metadata?.unpaid) {
               isPaid = false;
             }
+          } else if (
+            latestInProgressEvent ||
+            filePayment?.status === 'IN_PROGRESS' ||
+            existing?.status === 'IN_PROGRESS'
+          ) {
+            currentStatus = 'IN_PROGRESS';
           } else if (
             ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
             this.isPastEndOfValidityDate(data.valid_until)
@@ -3206,6 +3260,21 @@ class QuoteFlowStore {
             ...(existing || {}),
             ...data,
             status: currentStatus,
+            in_progress_at: latestInProgressEvent
+              ? (latestInProgressEvent.metadata?.in_progress_at || latestInProgressEvent.created_at)
+              : (filePayment?.in_progress_at || existing?.in_progress_at || null),
+            estimated_days: latestInProgressEvent
+              ? (typeof latestInProgressEvent.metadata?.new_total_days === 'number'
+                  ? latestInProgressEvent.metadata.new_total_days
+                  : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
+                      ? latestInProgressEvent.metadata.estimated_days
+                      : filePayment?.estimated_days || existing?.estimated_days || 7))
+              : (filePayment?.estimated_days || existing?.estimated_days || null),
+            estimated_completion_date: latestInProgressEvent
+              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
+              : (filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
+            estimated_time_text: latestInProgressEvent?.metadata?.notes || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
+            payment_records: payDetails.payment_records || filePayment?.payment_records || existing?.payment_records || [],
             expired_at: expiredAt,
             is_paid: isPaid,
             paid_at: payDetails.paid_at,
@@ -3381,6 +3450,9 @@ class QuoteFlowStore {
           const latestCompletedEvent = eventsData?.find(
             (e: any) => e.event_type === 'COMPLETED'
           );
+          const latestInProgressEvent = eventsData?.find(
+            (e: any) => e.event_type === 'IN_PROGRESS' || e.event_type === 'EXTEND_TIME'
+          );
 
           let isPaid = payDetails.is_paid;
 
@@ -3389,6 +3461,12 @@ class QuoteFlowStore {
             if (latestCompletedEvent.metadata?.unpaid) {
               isPaid = false;
             }
+          } else if (
+            latestInProgressEvent ||
+            filePayment?.status === 'IN_PROGRESS' ||
+            existing?.status === 'IN_PROGRESS'
+          ) {
+            currentStatus = 'IN_PROGRESS';
           } else if (
             ['SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) &&
             this.isPastEndOfValidityDate(data.valid_until)
@@ -3408,6 +3486,21 @@ class QuoteFlowStore {
             ...(existing || {}),
             ...data,
             status: currentStatus,
+            in_progress_at: latestInProgressEvent
+              ? (latestInProgressEvent.metadata?.in_progress_at || latestInProgressEvent.created_at)
+              : (filePayment?.in_progress_at || existing?.in_progress_at || null),
+            estimated_days: latestInProgressEvent
+              ? (typeof latestInProgressEvent.metadata?.new_total_days === 'number'
+                  ? latestInProgressEvent.metadata.new_total_days
+                  : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
+                      ? latestInProgressEvent.metadata.estimated_days
+                      : filePayment?.estimated_days || existing?.estimated_days || 7))
+              : (filePayment?.estimated_days || existing?.estimated_days || null),
+            estimated_completion_date: latestInProgressEvent
+              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
+              : (filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
+            estimated_time_text: latestInProgressEvent?.metadata?.notes || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
+            payment_records: payDetails.payment_records || filePayment?.payment_records || existing?.payment_records || [],
             expired_at: expiredAt,
             is_paid: isPaid,
             paid_at: payDetails.paid_at,
@@ -3530,7 +3623,9 @@ class QuoteFlowStore {
     payment_display_mode?: PaymentDisplayMode;
     show_bank_details?: boolean;
     show_upi_details?: boolean;
+    show_cash_details?: boolean;
     show_crypto_details?: boolean;
+    cash_instructions?: string | null;
     bank_details?: BankAccountDetails | null;
     upi_details?: UpiPaymentDetails | null;
     crypto_details?: CryptoPaymentDetails | null;
@@ -3559,7 +3654,9 @@ class QuoteFlowStore {
     const paymentDisplayMode = data.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
     const showBank = data.show_bank_details !== undefined ? data.show_bank_details : (org?.default_show_bank_details ?? true);
     const showUpi = data.show_upi_details !== undefined ? data.show_upi_details : (org?.default_show_upi_details ?? true);
+    const showCash = data.show_cash_details !== undefined ? data.show_cash_details : (org?.default_show_cash_details ?? true);
     const showCrypto = data.show_crypto_details !== undefined ? data.show_crypto_details : (org?.default_show_crypto_details ?? false);
+    const cashInstructions = data.cash_instructions !== undefined ? data.cash_instructions : (org?.default_cash_instructions || '');
     const bankDetails = data.bank_details !== undefined ? data.bank_details : (org?.default_bank_details || null);
     const upiDetails = data.upi_details !== undefined ? data.upi_details : (org?.default_upi_details || null);
     const cryptoDetails = data.crypto_details !== undefined ? data.crypto_details : (org?.default_crypto_details || null);
@@ -3600,7 +3697,9 @@ class QuoteFlowStore {
       payment_display_mode: paymentDisplayMode,
       show_bank_details: showBank,
       show_upi_details: showUpi,
+      show_cash_details: showCash,
       show_crypto_details: showCrypto,
+      cash_instructions: cashInstructions,
       bank_details: bankDetails,
       upi_details: upiDetails,
       crypto_details: cryptoDetails,
@@ -3618,7 +3717,9 @@ class QuoteFlowStore {
       payment_display_mode: paymentDisplayMode,
       show_bank_details: showBank,
       show_upi_details: showUpi,
+      show_cash_details: showCash,
       show_crypto_details: showCrypto,
+      cash_instructions: cashInstructions,
       bank_details: bankDetails,
       upi_details: upiDetails,
       crypto_details: cryptoDetails,
@@ -3859,7 +3960,9 @@ class QuoteFlowStore {
       payment_display_mode?: PaymentDisplayMode;
       show_bank_details?: boolean;
       show_upi_details?: boolean;
+      show_cash_details?: boolean;
       show_crypto_details?: boolean;
+      cash_instructions?: string | null;
       bank_details?: BankAccountDetails | null;
       upi_details?: UpiPaymentDetails | null;
       crypto_details?: CryptoPaymentDetails | null;
@@ -3959,7 +4062,9 @@ class QuoteFlowStore {
       payment_display_mode: data.payment_display_mode !== undefined ? data.payment_display_mode : existing.payment_display_mode,
       show_bank_details: data.show_bank_details !== undefined ? data.show_bank_details : existing.show_bank_details,
       show_upi_details: data.show_upi_details !== undefined ? data.show_upi_details : existing.show_upi_details,
+      show_cash_details: data.show_cash_details !== undefined ? data.show_cash_details : existing.show_cash_details,
       show_crypto_details: data.show_crypto_details !== undefined ? data.show_crypto_details : existing.show_crypto_details,
+      cash_instructions: data.cash_instructions !== undefined ? data.cash_instructions : existing.cash_instructions,
       bank_details: data.bank_details !== undefined ? data.bank_details : existing.bank_details,
       upi_details: data.upi_details !== undefined ? data.upi_details : existing.upi_details,
       crypto_details: data.crypto_details !== undefined ? data.crypto_details : existing.crypto_details,
@@ -3986,7 +4091,9 @@ class QuoteFlowStore {
       payment_display_mode: updated.payment_display_mode,
       show_bank_details: updated.show_bank_details,
       show_upi_details: updated.show_upi_details,
+      show_cash_details: updated.show_cash_details,
       show_crypto_details: updated.show_crypto_details,
+      cash_instructions: updated.cash_instructions,
       bank_details: updated.bank_details,
       upi_details: updated.upi_details,
       crypto_details: updated.crypto_details,
@@ -4881,6 +4988,7 @@ class QuoteFlowStore {
       advance_payment_notes?: string | null;
       final_payment_notes?: string | null;
       confirmed_by?: string | null;
+      payment_records?: PaymentRecord[];
     },
     orgId?: string
   ): Promise<Quotation> {
@@ -4973,6 +5081,9 @@ class QuoteFlowStore {
     quote.payment_confirmed_by = confirmed ? (paymentData.confirmed_by || 'Company Finance Team') : null;
     quote.paid_at = paidAt;
     quote.payment_method = paymentStatus !== 'UNPAID' ? (paymentData.payment_method ?? quote.payment_method ?? null) : null;
+    if (paymentData.payment_records !== undefined) {
+      quote.payment_records = paymentData.payment_records;
+    }
     quote.updated_at = now;
 
     if (confirmed) {
@@ -5099,6 +5210,7 @@ class QuoteFlowStore {
       payment_status: quote.payment_status,
       payment_confirmed_by_company: quote.payment_confirmed_by_company,
       payment_confirmed_at: quote.payment_confirmed_at,
+      payment_records: quote.payment_records,
     });
 
     // Audit Log Event
@@ -5124,6 +5236,7 @@ class QuoteFlowStore {
         advance_payment_notes: quote.advance_payment_notes,
         final_payment_notes: quote.final_payment_notes,
         status: quote.status,
+        payment_records: quote.payment_records,
       }
     );
 
@@ -5157,6 +5270,7 @@ class QuoteFlowStore {
               advance_payment_notes: quote.advance_payment_notes,
               final_payment_notes: quote.final_payment_notes,
               status: quote.status,
+              payment_records: quote.payment_records || [],
             },
             created_at: now,
           });
@@ -5196,6 +5310,7 @@ class QuoteFlowStore {
       is_paid?: boolean;
       advance_percentage?: number | null;
       payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+      payment_records?: PaymentRecord[];
     },
     orgId?: string
   ): Promise<Quotation> {
@@ -5212,6 +5327,7 @@ class QuoteFlowStore {
         is_paid: data.is_paid,
         advance_percentage: data.advance_percentage,
         payment_status: data.payment_status || (data.confirmed ? 'PAID' : undefined),
+        payment_records: data.payment_records,
       },
       orgId
     );
@@ -5257,6 +5373,11 @@ class QuoteFlowStore {
     quote.updated_at = now;
 
     this.quotations.set(id, quote);
+    this.savePaymentToFile(id, {
+      status: 'COMPLETED',
+      completed_at: now,
+      completed_unpaid: isUnpaid,
+    });
 
     // Audit Log Event
     this.logEvent(quote.organization_id, id, 'USER', 'COMPLETED', {
@@ -5334,6 +5455,13 @@ class QuoteFlowStore {
     quote.updated_at = now;
 
     this.quotations.set(id, quote);
+    this.savePaymentToFile(id, {
+      status: 'IN_PROGRESS',
+      in_progress_at: now,
+      estimated_days: estDays,
+      estimated_completion_date: estDate || null,
+      estimated_time_text: options?.notes || null,
+    });
 
     // Audit Log Event
     this.logEvent(quote.organization_id, id, 'USER', 'IN_PROGRESS', {
@@ -5406,6 +5534,12 @@ class QuoteFlowStore {
     quote.estimated_completion_date = targetDate;
     quote.updated_at = now;
     this.quotations.set(id, quote);
+    this.savePaymentToFile(id, {
+      status: 'IN_PROGRESS',
+      estimated_days: newTotalDays,
+      estimated_completion_date: targetDate,
+      estimated_time_text: options?.notes || quote.estimated_time_text || null,
+    });
 
     this.logEvent(quote.organization_id, id, 'USER', 'EXTEND_TIME', {
       extended_by: user,

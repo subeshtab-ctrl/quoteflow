@@ -70,6 +70,19 @@ export interface CryptoPaymentDetails {
   qr_code_url?: string;
 }
 
+export interface PaymentRecord {
+  id: string;
+  amount: number;
+  percentage?: number;
+  method: string;
+  date: string;
+  notes?: string;
+  is_cash?: boolean;
+  cash_receipt_no?: string;
+  cash_received_by?: string;
+  created_at?: string;
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -108,6 +121,8 @@ export interface Organization {
   default_show_bank_details?: boolean;
   default_show_upi_details?: boolean;
   default_show_crypto_details?: boolean;
+  default_show_cash_details?: boolean;
+  default_cash_instructions?: string | null;
   default_bank_details?: BankAccountDetails | null;
   default_upi_details?: UpiPaymentDetails | null;
   default_crypto_details?: CryptoPaymentDetails | null;
@@ -362,9 +377,12 @@ export interface Quotation {
   show_bank_details?: boolean;
   show_upi_details?: boolean;
   show_crypto_details?: boolean;
+  show_cash_details?: boolean;
+  cash_instructions?: string | null;
   bank_details?: BankAccountDetails | null;
   upi_details?: UpiPaymentDetails | null;
   crypto_details?: CryptoPaymentDetails | null;
+  payment_records?: PaymentRecord[];
 
   // Chat Tracking
   has_unread_chat?: boolean;

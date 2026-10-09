@@ -31,6 +31,7 @@ import {
   Landmark,
   QrCode,
   Bitcoin,
+  Banknote,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -451,23 +452,29 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   const mode = quotation.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
                   let showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
                   let showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
+                  let showCash = quotation.show_cash_details ?? org?.default_show_cash_details ?? true;
                   let showCrypto = quotation.show_crypto_details ?? org?.default_show_crypto_details ?? false;
+                  const cashInstructions = quotation.cash_instructions || org?.default_cash_instructions;
 
                   if (mode === 'CRYPTO_ONLY') {
                     showBank = false;
                     showUpi = false;
+                    showCash = false;
                     showCrypto = true;
                   } else if (mode === 'BANK_ONLY') {
                     showBank = true;
                     showUpi = false;
+                    showCash = false;
                     showCrypto = false;
                   } else if (mode === 'UPI_ONLY') {
                     showBank = false;
                     showUpi = true;
+                    showCash = false;
                     showCrypto = false;
                   } else if (mode === 'ALL') {
                     showBank = true;
                     showUpi = true;
+                    showCash = true;
                     showCrypto = true;
                   }
 
@@ -477,6 +484,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                     Boolean(quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
                     Boolean(showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
                     Boolean(showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+                    Boolean(showCash && cashInstructions) ||
                     Boolean(showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url));
 
                   if (!hasPaymentInfo) return null;
@@ -577,6 +585,22 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                               />
                             ) : null;
                           })()}
+                        </div>
+                      )}
+
+                      {/* Cash Payment / Counter Handover */}
+                      {showCash && cashInstructions && (
+                        <div className="rounded-lg bg-white p-3 border border-amber-100 flex items-center justify-between text-xs">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                              <Banknote className="h-3.5 w-3.5 text-amber-600" />
+                              <span>Cash Payment / Counter Handover</span>
+                            </div>
+                            <p className="text-[11px] text-slate-700 font-medium">{cashInstructions}</p>
+                          </div>
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+                            Cash Accepted
+                          </span>
                         </div>
                       )}
 

@@ -44,7 +44,9 @@ import {
   ArrowRight,
   LifeBuoy,
   Crop,
+  Banknote,
 } from 'lucide-react';
+import { IOSSwitch } from '@/components/ui/ios-switch';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
 import { ThemeSegmentedControl } from '@/components/theme/theme-toggle';
 import {
@@ -1325,571 +1327,593 @@ export function SettingsClientView({
             </p>
           </div>
 
-          {/* Visibility / Display Mode Selector */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-              <div>
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <Eye className="h-3.5 w-3.5 text-indigo-500" />
-                  <span>Default Customer Payment Display Mode</span>
-                </h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Select which payment option(s) are visible to your clients by default on quotes and the client portal.
-                </p>
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 bg-indigo-100/70 dark:bg-indigo-950/60 px-2 py-0.5 rounded self-start sm:self-auto">
-                Mode: {org.default_payment_display_mode || 'BOTH'}
+          {/* Quick Selection Pills */}
+          <div className="flex items-center justify-between flex-wrap gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 text-xs">
+            <div>
+              <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                Payment Option Selection
               </span>
+              <p className="text-[11px] text-slate-400">
+                Turn switches ON to expand and enter payment details. Switched OFF methods remain hidden.
+              </p>
             </div>
-
-            {/* Mode selection buttons */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 pt-1">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => handleSelectDefaultPaymentMode('BOTH')}
-                className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                  (org.default_payment_display_mode || 'BOTH') === 'BOTH'
-                    ? 'border-indigo-600 bg-white dark:bg-slate-800 ring-2 ring-indigo-500/20 text-indigo-700 dark:text-indigo-400 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                }`}
+                onClick={() => {
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_bank_details: true,
+                    default_show_upi_details: true,
+                    default_show_cash_details: true,
+                    default_show_crypto_details: true,
+                    accepted_payment_methods: ['BANK_TRANSFER', 'UPI', 'CASH', 'CRYPTO'],
+                    default_payment_display_mode: 'ALL',
+                  }));
+                }}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 shadow-2xs"
               >
-                <div className="flex items-center gap-1 mb-1">
-                  <Landmark className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                  <span className="text-xs font-black">+</span>
-                  <QrCode className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <span className="text-xs font-bold">Both</span>
-                <span className="text-[10px] text-slate-400">Bank & UPI</span>
+                Select All
               </button>
-
               <button
                 type="button"
-                onClick={() => handleSelectDefaultPaymentMode('BANK_ONLY')}
-                className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                  org.default_payment_display_mode === 'BANK_ONLY'
-                    ? 'border-indigo-600 bg-white dark:bg-slate-800 ring-2 ring-indigo-500/20 text-indigo-700 dark:text-indigo-400 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                }`}
+                onClick={() => {
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_bank_details: true,
+                    default_show_upi_details: true,
+                    default_show_cash_details: false,
+                    default_show_crypto_details: false,
+                    accepted_payment_methods: ['BANK_TRANSFER', 'UPI'],
+                    default_payment_display_mode: 'BOTH',
+                  }));
+                }}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 shadow-2xs"
               >
-                <Landmark className="h-4 w-4 text-indigo-600 dark:text-indigo-400 mb-1" />
-                <span className="text-xs font-bold">Bank Only</span>
-                <span className="text-[10px] text-slate-400">Account Wire</span>
+                Bank + UPI
               </button>
-
               <button
                 type="button"
-                onClick={() => handleSelectDefaultPaymentMode('UPI_ONLY')}
-                className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                  org.default_payment_display_mode === 'UPI_ONLY'
-                    ? 'border-emerald-600 bg-white dark:bg-slate-800 ring-2 ring-emerald-500/20 text-emerald-700 dark:text-emerald-400 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                }`}
+                onClick={() => {
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_bank_details: false,
+                    default_show_upi_details: false,
+                    default_show_cash_details: false,
+                    default_show_crypto_details: false,
+                    accepted_payment_methods: [],
+                    default_payment_display_mode: 'CUSTOM',
+                  }));
+                }}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 hover:bg-slate-100 shadow-2xs"
               >
-                <QrCode className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mb-1" />
-                <span className="text-xs font-bold">UPI / QR Only</span>
-                <span className="text-[10px] text-slate-400">India VPA & QR</span>
+                Deselect All
               </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectDefaultPaymentMode('CRYPTO_ONLY')}
-                className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                  org.default_payment_display_mode === 'CRYPTO_ONLY'
-                    ? 'border-amber-600 bg-white dark:bg-slate-800 ring-2 ring-amber-500/20 text-amber-700 dark:text-amber-400 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                }`}
-              >
-                <Bitcoin className="h-4 w-4 text-amber-600 dark:text-amber-400 mb-1" />
-                <span className="text-xs font-bold">Crypto Only</span>
-                <span className="text-[10px] text-slate-400">USDT / Web3</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectDefaultPaymentMode('ALL')}
-                className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                  org.default_payment_display_mode === 'ALL'
-                    ? 'border-indigo-600 bg-white dark:bg-slate-800 ring-2 ring-indigo-500/20 text-indigo-700 dark:text-indigo-400 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                }`}
-              >
-                <Globe className="h-4 w-4 text-indigo-600 dark:text-indigo-400 mb-1" />
-                <span className="text-xs font-bold">All Options</span>
-                <span className="text-[10px] text-slate-400">Bank, UPI & Crypto</span>
-              </button>
-            </div>
-
-            {/* Granular Checkboxes */}
-            <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={org.default_show_bank_details ?? true}
-                  onChange={(e) =>
-                    setOrg((prev) => ({
-                      ...prev,
-                      default_show_bank_details: e.target.checked,
-                      default_payment_display_mode: 'CUSTOM',
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                />
-                <span>Show Bank Details by Default</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={org.default_show_upi_details ?? true}
-                  onChange={(e) =>
-                    setOrg((prev) => ({
-                      ...prev,
-                      default_show_upi_details: e.target.checked,
-                      default_payment_display_mode: 'CUSTOM',
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                />
-                <span>Show UPI ID & QR Code by Default</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={org.default_show_crypto_details ?? false}
-                  onChange={(e) =>
-                    setOrg((prev) => ({
-                      ...prev,
-                      default_show_crypto_details: e.target.checked,
-                      default_payment_display_mode: 'CUSTOM',
-                    }))
-                  }
-                  className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                />
-                <span>Show Crypto Payment by Default</span>
-              </label>
             </div>
           </div>
 
-          {/* Bank Details Inputs */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 bg-white dark:bg-slate-900/60 space-y-3">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-                  <Landmark className="h-4 w-4" />
+          {/* Option 1: Bank Transfer / Wire */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
+            <div className="p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <Landmark className="h-5 w-5" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">Default Bank Transfer / Remittance Details</h4>
-                  <p className="text-[11px] text-slate-400">Domestic & International bank wire coordinates</p>
-                </div>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                (org.default_show_bank_details ?? true)
-                  ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
-                  : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-              }`}>
-                {(org.default_show_bank_details ?? true) ? 'Visible' : 'Hidden'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <Input
-                label="Bank Name"
-                value={org.default_bank_details?.bank_name || ''}
-                onChange={(e) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_bank_details: {
-                      ...(prev.default_bank_details || {}),
-                      bank_name: e.target.value,
-                    },
-                  }))
-                }
-                placeholder="e.g. HDFC Bank, Emirates NBD, Chase"
-              />
-
-              <Input
-                label="Account Holder / Beneficiary Name"
-                value={org.default_bank_details?.account_name || ''}
-                onChange={(e) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_bank_details: {
-                      ...(prev.default_bank_details || {}),
-                      account_name: e.target.value,
-                    },
-                  }))
-                }
-                placeholder="e.g. SUBESH M LLC"
-              />
-
-              <Input
-                label="Account Number / IBAN"
-                value={org.default_bank_details?.account_number || ''}
-                onChange={(e) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_bank_details: {
-                      ...(prev.default_bank_details || {}),
-                      account_number: e.target.value,
-                    },
-                  }))
-                }
-                placeholder="e.g. 50200012345678 or AE07033123456789"
-              />
-
-              <Input
-                label="IFSC Code (India)"
-                value={org.default_bank_details?.ifsc_code || ''}
-                onChange={(e) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_bank_details: {
-                      ...(prev.default_bank_details || {}),
-                      ifsc_code: e.target.value.toUpperCase(),
-                    },
-                  }))
-                }
-                placeholder="e.g. HDFC0001234"
-              />
-
-              <Input
-                label="SWIFT / BIC Code (International)"
-                value={org.default_bank_details?.swift_code || ''}
-                onChange={(e) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_bank_details: {
-                      ...(prev.default_bank_details || {}),
-                      swift_code: e.target.value.toUpperCase(),
-                    },
-                  }))
-                }
-                placeholder="e.g. HDFCINBBXXX"
-              />
-
-              <Input
-                label="Branch Name & City"
-                value={org.default_bank_details?.branch_name || ''}
-                onChange={(e) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_bank_details: {
-                      ...(prev.default_bank_details || {}),
-                      branch_name: e.target.value,
-                    },
-                  }))
-                }
-                placeholder="e.g. Downtown Branch, Kochi"
-              />
-            </div>
-          </div>
-
-          {/* UPI ID & Attachment UPI QR Code Card */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 bg-white dark:bg-slate-900/60 space-y-3">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
-                  <QrCode className="h-4 w-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">Default UPI ID & UPI QR Code (India)</h4>
-                  <p className="text-[11px] text-slate-400">Instant scan & pay via Google Pay, PhonePe, Paytm, BHIM</p>
-                </div>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                (org.default_show_upi_details ?? true)
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                  : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-              }`}>
-                {(org.default_show_upi_details ?? true) ? 'Visible' : 'Hidden'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 pt-1 text-xs">
-              <div className="sm:col-span-7 space-y-3">
-                <Input
-                  label="UPI ID / VPA"
-                  value={org.default_upi_details?.upi_id || ''}
-                  onChange={(e) =>
-                    setOrg((prev) => ({
-                      ...prev,
-                      default_upi_details: {
-                        ...(prev.default_upi_details || {}),
-                        upi_id: e.target.value,
-                      },
-                    }))
-                  }
-                  placeholder="e.g. yourbusiness@okhdfcbank"
-                />
-
-                <Input
-                  label="Payee / Merchant Name"
-                  value={org.default_upi_details?.payee_name || ''}
-                  onChange={(e) =>
-                    setOrg((prev) => ({
-                      ...prev,
-                      default_upi_details: {
-                        ...(prev.default_upi_details || {}),
-                        payee_name: e.target.value,
-                      },
-                    }))
-                  }
-                  placeholder="e.g. SUBESH M LLC"
-                />
-              </div>
-
-              {/* UPI QR Code upload/preview */}
-              <div className="sm:col-span-5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Default Attachment UPI QR Code
-                </label>
-                {org.default_upi_details?.qr_code_url ? (
-                  <div className="relative p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 flex items-center gap-3">
-                    <img
-                      src={org.default_upi_details.qr_code_url}
-                      alt="UPI QR Code"
-                      className="h-16 w-16 object-contain rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1"
-                    />
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>Bank Transfer / Wire Remittance</span>
+                    {(org.default_show_bank_details ?? true) && (
+                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                        Active
                       </span>
-                      <div className="flex gap-2 items-center">
-                        <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
-                          {isUploadingDefaultUpiQr ? (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              <span>Uploading...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>Change</span>
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleDefaultUpiQrUpload}
-                                className="hidden"
-                                disabled={isUploadingDefaultUpiQr}
-                              />
-                            </>
-                          )}
-                        </label>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const updated = {
-                              ...(org.default_upi_details || {}),
-                              qr_code_url: '',
-                            };
-                            setOrg((prev) => ({
-                              ...prev,
-                              default_upi_details: updated,
-                            }));
-                            await fetch('/api/settings', {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                ...org,
-                                default_upi_details: updated,
-                              }),
-                            });
-                            setSuccessMsg('UPI QR code removed.');
-                            setTimeout(() => setSuccessMsg(null), 2500);
-                          }}
-                          className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30 ${isUploadingDefaultUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
-                    {isUploadingDefaultUpiQr ? (
-                      <>
-                        <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
-                      </>
-                    ) : (
-                      <>
-                        <QrCode className="h-6 w-6 text-slate-400 mb-1" />
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload UPI QR Code</span>
-                        <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleDefaultUpiQrUpload}
-                          className="hidden"
-                        />
-                      </>
                     )}
-                  </label>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Crypto Payment Options Card */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 bg-white dark:bg-slate-900/60 space-y-3">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
-                  <Bitcoin className="h-4 w-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">Default Crypto Payment Options (International)</h4>
-                  <p className="text-[11px] text-slate-400">USDT, USDC, BTC wallets for global clients</p>
+                  </h4>
+                  <p className="text-[11px] text-slate-400">Domestic &amp; international direct bank wire coordinates</p>
                 </div>
               </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                (org.default_show_crypto_details ?? false)
-                  ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                  : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-              }`}>
-                {(org.default_show_crypto_details ?? false) ? 'Visible' : 'Hidden'}
-              </span>
+
+              <IOSSwitch
+                checked={org.default_show_bank_details ?? true}
+                onChange={(checked) =>
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_bank_details: checked,
+                    default_payment_display_mode: 'CUSTOM',
+                  }))
+                }
+                ariaLabel="Toggle Bank Transfer"
+              />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 pt-1 text-xs">
-              <div className="sm:col-span-7 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+            {/* Collapsible Bank Fields */}
+            {(org.default_show_bank_details ?? true) && (
+              <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-3 animate-fade-in-up">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <Input
-                    label="Coin / Token"
-                    value={org.default_crypto_details?.currency || 'USDT'}
+                    label="Bank Name"
+                    value={org.default_bank_details?.bank_name || ''}
                     onChange={(e) =>
                       setOrg((prev) => ({
                         ...prev,
-                        default_crypto_details: {
-                          ...(prev.default_crypto_details || {}),
-                          currency: e.target.value.toUpperCase(),
+                        default_bank_details: {
+                          ...(prev.default_bank_details || {}),
+                          bank_name: e.target.value,
                         },
                       }))
                     }
-                    placeholder="e.g. USDT, BTC"
+                    placeholder="e.g. HDFC Bank, Emirates NBD, Chase"
                   />
 
                   <Input
-                    label="Network / Chain"
-                    value={org.default_crypto_details?.network || 'TRC20'}
+                    label="Account Holder / Beneficiary Name"
+                    value={org.default_bank_details?.account_name || ''}
                     onChange={(e) =>
                       setOrg((prev) => ({
                         ...prev,
-                        default_crypto_details: {
-                          ...(prev.default_crypto_details || {}),
-                          network: e.target.value.toUpperCase(),
+                        default_bank_details: {
+                          ...(prev.default_bank_details || {}),
+                          account_name: e.target.value,
                         },
                       }))
                     }
-                    placeholder="e.g. TRC20, ERC20"
+                    placeholder="e.g. SUBESH M LLC"
+                  />
+
+                  <Input
+                    label="Account Number / IBAN"
+                    value={org.default_bank_details?.account_number || ''}
+                    onChange={(e) =>
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_bank_details: {
+                          ...(prev.default_bank_details || {}),
+                          account_number: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. 50200012345678 or AE07033123456789"
+                  />
+
+                  <Input
+                    label="IFSC Code (India)"
+                    value={org.default_bank_details?.ifsc_code || ''}
+                    onChange={(e) =>
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_bank_details: {
+                          ...(prev.default_bank_details || {}),
+                          ifsc_code: e.target.value.toUpperCase(),
+                        },
+                      }))
+                    }
+                    placeholder="e.g. HDFC0001234"
+                  />
+
+                  <Input
+                    label="SWIFT / BIC Code (International)"
+                    value={org.default_bank_details?.swift_code || ''}
+                    onChange={(e) =>
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_bank_details: {
+                          ...(prev.default_bank_details || {}),
+                          swift_code: e.target.value.toUpperCase(),
+                        },
+                      }))
+                    }
+                    placeholder="e.g. HDFCINBBXXX"
+                  />
+
+                  <Input
+                    label="Branch Name & City"
+                    value={org.default_bank_details?.branch_name || ''}
+                    onChange={(e) =>
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_bank_details: {
+                          ...(prev.default_bank_details || {}),
+                          branch_name: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. Downtown Branch, Kochi"
                   />
                 </div>
+              </div>
+            )}
+          </div>
 
-                <Input
-                  label="Wallet Address"
-                  value={org.default_crypto_details?.wallet_address || ''}
+          {/* Option 2: UPI ID & QR Code */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
+            <div className="p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <QrCode className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>UPI ID &amp; QR Code (India)</span>
+                    {(org.default_show_upi_details ?? true) && (
+                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                        Active
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-slate-400">Instant scan &amp; pay via Google Pay, PhonePe, Paytm, BHIM</p>
+                </div>
+              </div>
+
+              <IOSSwitch
+                checked={org.default_show_upi_details ?? true}
+                onChange={(checked) =>
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_upi_details: checked,
+                    default_payment_display_mode: 'CUSTOM',
+                  }))
+                }
+                ariaLabel="Toggle UPI Payment"
+              />
+            </div>
+
+            {/* Collapsible UPI Fields */}
+            {(org.default_show_upi_details ?? true) && (
+              <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-3 animate-fade-in-up">
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
+                  <div className="sm:col-span-7 space-y-3">
+                    <Input
+                      label="UPI ID / VPA"
+                      value={org.default_upi_details?.upi_id || ''}
+                      onChange={(e) =>
+                        setOrg((prev) => ({
+                          ...prev,
+                          default_upi_details: {
+                            ...(prev.default_upi_details || {}),
+                            upi_id: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="e.g. yourbusiness@okhdfcbank"
+                    />
+
+                    <Input
+                      label="Payee / Merchant Name"
+                      value={org.default_upi_details?.payee_name || ''}
+                      onChange={(e) =>
+                        setOrg((prev) => ({
+                          ...prev,
+                          default_upi_details: {
+                            ...(prev.default_upi_details || {}),
+                            payee_name: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="e.g. SUBESH M LLC"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-5">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      UPI QR Code Image
+                    </label>
+                    {org.default_upi_details?.qr_code_url ? (
+                      <div className="relative p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 flex items-center gap-3">
+                        <img
+                          src={org.default_upi_details.qr_code_url}
+                          alt="UPI QR Code"
+                          className="h-16 w-16 object-contain rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1"
+                        />
+                        <div className="space-y-1">
+                          <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
+                          </span>
+                          <div className="flex gap-2 items-center">
+                            <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
+                              {isUploadingDefaultUpiQr ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  <span>Uploading...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>Change</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleDefaultUpiQrUpload}
+                                    className="hidden"
+                                    disabled={isUploadingDefaultUpiQr}
+                                  />
+                                </>
+                              )}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const updated = {
+                                  ...(org.default_upi_details || {}),
+                                  qr_code_url: '',
+                                };
+                                setOrg((prev) => ({
+                                  ...prev,
+                                  default_upi_details: updated,
+                                }));
+                                await fetch('/api/settings', {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    ...org,
+                                    default_upi_details: updated,
+                                  }),
+                                });
+                                setSuccessMsg('UPI QR code removed.');
+                                setTimeout(() => setSuccessMsg(null), 2500);
+                              }}
+                              className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30 ${isUploadingDefaultUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                        {isUploadingDefaultUpiQr ? (
+                          <>
+                            <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
+                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
+                          </>
+                        ) : (
+                          <>
+                            <QrCode className="h-6 w-6 text-slate-400 mb-1" />
+                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload UPI QR Code</span>
+                            <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleDefaultUpiQrUpload}
+                              className="hidden"
+                            />
+                          </>
+                        )}
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Option 3: Cash Payment */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
+            <div className="p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 shrink-0">
+                  <Banknote className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>Cash Payment / Counter Handover</span>
+                    {(org.default_show_cash_details ?? true) && (
+                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                        Active
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-slate-400">Accept physical cash payments with custom instructions</p>
+                </div>
+              </div>
+
+              <IOSSwitch
+                checked={org.default_show_cash_details ?? true}
+                onChange={(checked) =>
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_cash_details: checked,
+                  }))
+                }
+                ariaLabel="Toggle Cash Payment"
+              />
+            </div>
+
+            {/* Collapsible Cash Fields */}
+            {(org.default_show_cash_details ?? true) && (
+              <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-2 animate-fade-in-up">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Cash Payment Instructions &amp; Receipt Policy
+                </label>
+                <input
+                  type="text"
+                  value={org.default_cash_instructions || ''}
                   onChange={(e) =>
                     setOrg((prev) => ({
                       ...prev,
-                      default_crypto_details: {
-                        ...(prev.default_crypto_details || {}),
-                        wallet_address: e.target.value,
-                      },
+                      default_cash_instructions: e.target.value,
                     }))
                   }
-                  placeholder="e.g. TXYZ1234567890abcdef..."
+                  placeholder="e.g. Cash accepted at store billing desk. Official signed receipt will be issued immediately."
+                  className="w-full h-9 px-3 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
                 />
               </div>
+            )}
+          </div>
 
-              {/* Crypto QR Code upload/preview */}
-              <div className="sm:col-span-5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Default Attachment Crypto QR Code
-                </label>
-                {org.default_crypto_details?.qr_code_url ? (
-                  <div className="relative p-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/20 flex items-center gap-3">
-                    <img
-                      src={org.default_crypto_details.qr_code_url}
-                      alt="Crypto QR Code"
-                      className="h-16 w-16 object-contain rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1"
-                    />
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3 text-amber-600" /> Attached
+          {/* Option 4: Cryptocurrency */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
+            <div className="p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-orange-50 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 shrink-0">
+                  <Bitcoin className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>Cryptocurrency / Web3 (Global)</span>
+                    {(org.default_show_crypto_details ?? false) && (
+                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                        Active
                       </span>
-                      <div className="flex gap-2 items-center">
-                        <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
-                          {isUploadingDefaultCryptoQr ? (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              <span>Uploading...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>Change</span>
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleDefaultCryptoQrUpload}
-                                className="hidden"
-                                disabled={isUploadingDefaultCryptoQr}
-                              />
-                            </>
-                          )}
-                        </label>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const updated = {
-                              ...(org.default_crypto_details || {}),
-                              qr_code_url: '',
-                            };
-                            setOrg((prev) => ({
-                              ...prev,
-                              default_crypto_details: updated,
-                            }));
-                            await fetch('/api/settings', {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                ...org,
-                                default_crypto_details: updated,
-                              }),
-                            });
-                            setSuccessMsg('Crypto QR code removed.');
-                            setTimeout(() => setSuccessMsg(null), 2500);
-                          }}
-                          className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-amber-50/30 ${isUploadingDefaultCryptoQr ? 'opacity-60 pointer-events-none' : ''}`}>
-                    {isUploadingDefaultCryptoQr ? (
-                      <>
-                        <Loader2 className="h-6 w-6 text-amber-600 animate-spin mb-1" />
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload Crypto QR Code</span>
-                        <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleDefaultCryptoQrUpload}
-                          className="hidden"
-                        />
-                      </>
                     )}
-                  </label>
-                )}
+                  </h4>
+                  <p className="text-[11px] text-slate-400">USDT, USDC, BTC wallets for international clients</p>
+                </div>
               </div>
+
+              <IOSSwitch
+                checked={org.default_show_crypto_details ?? false}
+                onChange={(checked) =>
+                  setOrg((prev) => ({
+                    ...prev,
+                    default_show_crypto_details: checked,
+                    default_payment_display_mode: 'CUSTOM',
+                  }))
+                }
+                ariaLabel="Toggle Crypto Payment"
+              />
             </div>
+
+            {/* Collapsible Crypto Fields */}
+            {(org.default_show_crypto_details ?? false) && (
+              <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-3 animate-fade-in-up">
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
+                  <div className="sm:col-span-7 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        label="Coin / Token"
+                        value={org.default_crypto_details?.currency || 'USDT'}
+                        onChange={(e) =>
+                          setOrg((prev) => ({
+                            ...prev,
+                            default_crypto_details: {
+                              ...(prev.default_crypto_details || {}),
+                              currency: e.target.value.toUpperCase(),
+                            },
+                          }))
+                        }
+                        placeholder="e.g. USDT, BTC"
+                      />
+
+                      <Input
+                        label="Network / Chain"
+                        value={org.default_crypto_details?.network || 'TRC20'}
+                        onChange={(e) =>
+                          setOrg((prev) => ({
+                            ...prev,
+                            default_crypto_details: {
+                              ...(prev.default_crypto_details || {}),
+                              network: e.target.value.toUpperCase(),
+                            },
+                          }))
+                        }
+                        placeholder="e.g. TRC20, ERC20"
+                      />
+                    </div>
+
+                    <Input
+                      label="Wallet Address"
+                      value={org.default_crypto_details?.wallet_address || ''}
+                      onChange={(e) =>
+                        setOrg((prev) => ({
+                          ...prev,
+                          default_crypto_details: {
+                            ...(prev.default_crypto_details || {}),
+                            wallet_address: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="e.g. TXYZ1234567890abcdef..."
+                    />
+                  </div>
+
+                  <div className="sm:col-span-5">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Crypto QR Code Image
+                    </label>
+                    {org.default_crypto_details?.qr_code_url ? (
+                      <div className="relative p-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/20 flex items-center gap-3">
+                        <img
+                          src={org.default_crypto_details.qr_code_url}
+                          alt="Crypto QR Code"
+                          className="h-16 w-16 object-contain rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1"
+                        />
+                        <div className="space-y-1">
+                          <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3 text-amber-600" /> Attached
+                          </span>
+                          <div className="flex gap-2 items-center">
+                            <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
+                              {isUploadingDefaultCryptoQr ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  <span>Uploading...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>Change</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleDefaultCryptoQrUpload}
+                                    className="hidden"
+                                    disabled={isUploadingDefaultCryptoQr}
+                                  />
+                                </>
+                              )}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const updated = {
+                                  ...(org.default_crypto_details || {}),
+                                  qr_code_url: '',
+                                };
+                                setOrg((prev) => ({
+                                  ...prev,
+                                  default_crypto_details: updated,
+                                }));
+                                await fetch('/api/settings', {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    ...org,
+                                    default_crypto_details: updated,
+                                  }),
+                                });
+                                setSuccessMsg('Crypto QR code removed.');
+                                setTimeout(() => setSuccessMsg(null), 2500);
+                              }}
+                              className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-amber-50/30 ${isUploadingDefaultCryptoQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                        {isUploadingDefaultCryptoQr ? (
+                          <>
+                            <Loader2 className="h-6 w-6 text-amber-600 animate-spin mb-1" />
+                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
+                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload Crypto QR Code</span>
+                            <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleDefaultCryptoQrUpload}
+                              className="hidden"
+                            />
+                          </>
+                        )}
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

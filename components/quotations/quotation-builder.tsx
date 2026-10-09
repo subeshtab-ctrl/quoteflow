@@ -39,6 +39,7 @@ import {
   QrCode,
   Landmark,
   Bitcoin,
+  Banknote,
   Image as ImageIcon,
   X,
   Smartphone,
@@ -47,6 +48,7 @@ import {
   Loader2,
   Lock,
 } from 'lucide-react';
+import { IOSSwitch } from '@/components/ui/ios-switch';
 import { formatDate } from '@/lib/utils';
 import {
   parseLogoUrl,
@@ -195,8 +197,14 @@ export function QuotationBuilder({
   const [showUpiDetails, setShowUpiDetails] = useState<boolean>(
     initialQuotation?.show_upi_details ?? organization?.default_show_upi_details ?? true
   );
+  const [showCashDetails, setShowCashDetails] = useState<boolean>(
+    initialQuotation?.show_cash_details ?? organization?.default_show_cash_details ?? true
+  );
   const [showCryptoDetails, setShowCryptoDetails] = useState<boolean>(
     initialQuotation?.show_crypto_details ?? organization?.default_show_crypto_details ?? false
+  );
+  const [cashInstructions, setCashInstructions] = useState<string>(
+    initialQuotation?.cash_instructions ?? organization?.default_cash_instructions ?? ''
   );
   const [bankDetails, setBankDetails] = useState<BankAccountDetails>(
     initialQuotation?.bank_details || organization?.default_bank_details || {
@@ -231,22 +239,27 @@ export function QuotationBuilder({
     if (mode === 'BOTH') {
       setShowBankDetails(true);
       setShowUpiDetails(true);
+      setShowCashDetails(false);
       setShowCryptoDetails(false);
     } else if (mode === 'BANK_ONLY') {
       setShowBankDetails(true);
       setShowUpiDetails(false);
+      setShowCashDetails(false);
       setShowCryptoDetails(false);
     } else if (mode === 'UPI_ONLY') {
       setShowBankDetails(false);
       setShowUpiDetails(true);
+      setShowCashDetails(false);
       setShowCryptoDetails(false);
     } else if (mode === 'CRYPTO_ONLY') {
       setShowBankDetails(false);
       setShowUpiDetails(false);
+      setShowCashDetails(false);
       setShowCryptoDetails(true);
     } else if (mode === 'ALL') {
       setShowBankDetails(true);
       setShowUpiDetails(true);
+      setShowCashDetails(true);
       setShowCryptoDetails(true);
     }
   };
@@ -544,7 +557,9 @@ export function QuotationBuilder({
         payment_display_mode: paymentDisplayMode,
         show_bank_details: showBankDetails,
         show_upi_details: showUpiDetails,
+        show_cash_details: showCashDetails,
         show_crypto_details: showCryptoDetails,
+        cash_instructions: cashInstructions,
         bank_details: bankDetails,
         upi_details: upiDetails,
         crypto_details: cryptoDetails,
@@ -1237,514 +1252,518 @@ export function QuotationBuilder({
               </div>
             </div>
 
-            {/* Client Payment Visibility / Display Mode Selector */}
-            <div className="rounded-xl bg-slate-50/80 border border-slate-200 p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+            {/* Customer Payment Options with iPhone-Style Toggles */}
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                 <div>
                   <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <Eye className="h-3.5 w-3.5 text-indigo-600" />
                     <span>Customer Payment Display Options</span>
                   </h4>
                   <p className="text-[11px] text-slate-500">
-                    Choose what payment method(s) the customer sees in their quotation and online client portal.
+                    Toggle which payment methods appear on this quotation. Pre-filled from settings and fully editable.
                   </p>
                 </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded self-start sm:self-auto">
-                  Mode: {paymentDisplayMode}
-                </span>
-              </div>
 
-              {/* Preset mode selection buttons */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => handleSelectPaymentMode('BOTH')}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                    paymentDisplayMode === 'BOTH'
-                      ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 text-indigo-700 shadow-xs'
-                      : 'border-slate-200 bg-white/70 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-1 mb-1">
-                    <Landmark className="h-3.5 w-3.5 text-indigo-600" />
-                    <span className="text-xs font-black">+</span>
-                    <QrCode className="h-3.5 w-3.5 text-emerald-600" />
-                  </div>
-                  <span className="text-xs font-bold">Both</span>
-                  <span className="text-[10px] text-slate-400">Bank & UPI</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPaymentMode('BANK_ONLY')}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                    paymentDisplayMode === 'BANK_ONLY'
-                      ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 text-indigo-700 shadow-xs'
-                      : 'border-slate-200 bg-white/70 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <Landmark className="h-4 w-4 text-indigo-600 mb-1" />
-                  <span className="text-xs font-bold">Bank Only</span>
-                  <span className="text-[10px] text-slate-400">Account Wire</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPaymentMode('UPI_ONLY')}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                    paymentDisplayMode === 'UPI_ONLY'
-                      ? 'border-emerald-600 bg-white ring-2 ring-emerald-500/20 text-emerald-700 shadow-xs'
-                      : 'border-slate-200 bg-white/70 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <QrCode className="h-4 w-4 text-emerald-600 mb-1" />
-                  <span className="text-xs font-bold">UPI / QR Only</span>
-                  <span className="text-[10px] text-slate-400">India VPA & QR</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPaymentMode('CRYPTO_ONLY')}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                    paymentDisplayMode === 'CRYPTO_ONLY'
-                      ? 'border-amber-600 bg-white ring-2 ring-amber-500/20 text-amber-700 shadow-xs'
-                      : 'border-slate-200 bg-white/70 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <Bitcoin className="h-4 w-4 text-amber-600 mb-1" />
-                  <span className="text-xs font-bold">Crypto Only</span>
-                  <span className="text-[10px] text-slate-400">USDT / Web3</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPaymentMode('ALL')}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all ${
-                    paymentDisplayMode === 'ALL'
-                      ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 text-indigo-700 shadow-xs'
-                      : 'border-slate-200 bg-white/70 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <Globe className="h-4 w-4 text-indigo-600 mb-1" />
-                  <span className="text-xs font-bold">All Options</span>
-                  <span className="text-[10px] text-slate-400">Bank, UPI & Crypto</span>
-                </button>
-              </div>
-
-              {/* Granular Checkboxes */}
-              <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-slate-200/60 text-xs">
-                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={showBankDetails}
-                    onChange={(e) => {
-                      setShowBankDetails(e.target.checked);
+                {/* Quick Selection Buttons */}
+                <div className="flex items-center gap-1.5 self-start sm:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBankDetails(true);
+                      setShowUpiDetails(true);
+                      setShowCashDetails(true);
+                      setShowCryptoDetails(true);
+                      setPaymentDisplayMode('ALL');
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 shadow-2xs"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBankDetails(true);
+                      setShowUpiDetails(true);
+                      setShowCashDetails(false);
+                      setShowCryptoDetails(false);
+                      setPaymentDisplayMode('BOTH');
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 shadow-2xs"
+                  >
+                    Bank + UPI
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBankDetails(false);
+                      setShowUpiDetails(false);
+                      setShowCashDetails(false);
+                      setShowCryptoDetails(false);
                       setPaymentDisplayMode('CUSTOM');
                     }}
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>Show Bank Details</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={showUpiDetails}
-                    onChange={(e) => {
-                      setShowUpiDetails(e.target.checked);
-                      setPaymentDisplayMode('CUSTOM');
-                    }}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>Show UPI ID & QR Code</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={showCryptoDetails}
-                    onChange={(e) => {
-                      setShowCryptoDetails(e.target.checked);
-                      setPaymentDisplayMode('CUSTOM');
-                    }}
-                    className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                  />
-                  <span>Show Crypto Payment Details</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Bank Details Form Card */}
-            <div className={`rounded-xl border p-4 transition-all ${
-              showBankDetails
-                ? 'border-indigo-200 bg-white shadow-xs'
-                : 'border-slate-200 bg-slate-50/60 opacity-60'
-            }`}>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
-                    <Landmark className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">Bank Transfer / Remittance Details</h4>
-                    <p className="text-[11px] text-slate-400">Domestic & International bank remittance information</p>
-                  </div>
-                </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  showBankDetails ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-200 text-slate-600'
-                }`}>
-                  {showBankDetails ? '✓ Client Visible' : 'Hidden'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 text-xs">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    Bank Name
-                  </label>
-                  <input
-                    type="text"
-                    value={bankDetails.bank_name || ''}
-                    onChange={(e) => setBankDetails({ ...bankDetails, bank_name: e.target.value })}
-                    placeholder="e.g. HDFC Bank, Chase, Emirates NBD"
-                    className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    Account Holder / Beneficiary Name
-                  </label>
-                  <input
-                    type="text"
-                    value={bankDetails.account_name || ''}
-                    onChange={(e) => setBankDetails({ ...bankDetails, account_name: e.target.value })}
-                    placeholder="e.g. SUBESH M LLC"
-                    className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    Account Number / IBAN
-                  </label>
-                  <input
-                    type="text"
-                    value={bankDetails.account_number || ''}
-                    onChange={(e) => setBankDetails({ ...bankDetails, account_number: e.target.value })}
-                    placeholder="e.g. 50200012345678 or AE07033123456789"
-                    className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    IFSC Code <span className="text-slate-400 font-normal">(India)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={bankDetails.ifsc_code || ''}
-                    onChange={(e) => setBankDetails({ ...bankDetails, ifsc_code: e.target.value.toUpperCase() })}
-                    placeholder="e.g. HDFC0001234"
-                    className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono uppercase focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    SWIFT / BIC Code <span className="text-slate-400 font-normal">(International)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={bankDetails.swift_code || ''}
-                    onChange={(e) => setBankDetails({ ...bankDetails, swift_code: e.target.value.toUpperCase() })}
-                    placeholder="e.g. HDFCINBBXXX"
-                    className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono uppercase focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    Branch Name & City
-                  </label>
-                  <input
-                    type="text"
-                    value={bankDetails.branch_name || ''}
-                    onChange={(e) => setBankDetails({ ...bankDetails, branch_name: e.target.value })}
-                    placeholder="e.g. Nariman Point, Mumbai"
-                    className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 shadow-2xs"
+                  >
+                    Deselect All
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {/* UPI ID & UPI QR Code Attachment Card */}
-            <div className={`rounded-xl border p-4 transition-all ${
-              showUpiDetails
-                ? 'border-emerald-200 bg-white shadow-xs'
-                : 'border-slate-200 bg-slate-50/60 opacity-60'
-            }`}>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
-                    <QrCode className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">UPI ID & Attachment UPI QR Code (India)</h4>
-                    <p className="text-[11px] text-slate-400">Accept direct payments via GPay, PhonePe, Paytm, BHIM</p>
-                  </div>
-                </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  showUpiDetails ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600'
-                }`}>
-                  {showUpiDetails ? '✓ Client Visible' : 'Hidden'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 pt-3 text-xs">
-                <div className="sm:col-span-7 space-y-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      UPI ID / VPA
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={upiDetails.upi_id || ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setUpiDetails({ ...upiDetails, upi_id: val });
-                          setBankDetails({ ...bankDetails, upi_id: val });
-                        }}
-                        placeholder="e.g. subeshtab@okhdfcbank or business@upi"
-                        className="h-9 w-full rounded-lg border border-slate-300 px-3 pr-8 text-xs font-mono focus:ring-1 focus:ring-emerald-500"
-                      />
-                      <Smartphone className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400 pointer-events-none" />
+              {/* Option 1: Bank Transfer / Wire Remittance */}
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs transition-all">
+                <div className="p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 shrink-0">
+                      <Landmark className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                        <span>Bank Transfer / Wire Remittance</span>
+                        {showBankDetails && (
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Domestic &amp; international direct bank wire coordinates</p>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Payee / Merchant Name
-                    </label>
-                    <input
-                      type="text"
-                      value={upiDetails.payee_name || ''}
-                      onChange={(e) => setUpiDetails({ ...upiDetails, payee_name: e.target.value })}
-                      placeholder="e.g. SUBESH M LLC"
-                      className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-emerald-500"
-                    />
-                  </div>
+                  <IOSSwitch
+                    checked={showBankDetails}
+                    onChange={(checked) => {
+                      setShowBankDetails(checked);
+                      setPaymentDisplayMode('CUSTOM');
+                    }}
+                    ariaLabel="Toggle Bank Transfer"
+                  />
                 </div>
 
-                {/* QR Code Upload / Preview */}
-                <div className="sm:col-span-5">
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    Attachment UPI QR Code
-                  </label>
-                  {upiDetails.qr_code_url ? (
-                    <div className="relative p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/30 flex items-center gap-3">
-                      <img
-                        src={upiDetails.qr_code_url}
-                        alt="UPI QR Code"
-                        className="h-16 w-16 object-contain rounded-lg border border-slate-200 bg-white p-1"
-                      />
-                      <div className="space-y-1">
-                        <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
-                        </span>
-                        <div className="flex gap-2 items-center">
-                          <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline flex items-center gap-1">
+                {/* Collapsible Bank Fields */}
+                {showBankDetails && (
+                  <div className="p-4 pt-2 border-t border-slate-100 bg-slate-50/40 space-y-3 animate-fade-in-up">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Bank Name
+                        </label>
+                        <input
+                          type="text"
+                          value={bankDetails.bank_name || ''}
+                          onChange={(e) => setBankDetails({ ...bankDetails, bank_name: e.target.value })}
+                          placeholder="e.g. HDFC Bank, Chase, Emirates NBD"
+                          className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Account Holder / Beneficiary Name
+                        </label>
+                        <input
+                          type="text"
+                          value={bankDetails.account_name || ''}
+                          onChange={(e) => setBankDetails({ ...bankDetails, account_name: e.target.value })}
+                          placeholder="e.g. SUBESH M LLC"
+                          className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Account Number / IBAN
+                        </label>
+                        <input
+                          type="text"
+                          value={bankDetails.account_number || ''}
+                          onChange={(e) => setBankDetails({ ...bankDetails, account_number: e.target.value })}
+                          placeholder="e.g. 50200012345678 or AE07033123456789"
+                          className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          IFSC Code <span className="text-slate-400 font-normal">(India)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={bankDetails.ifsc_code || ''}
+                          onChange={(e) => setBankDetails({ ...bankDetails, ifsc_code: e.target.value.toUpperCase() })}
+                          placeholder="e.g. HDFC0001234"
+                          className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          SWIFT / BIC Code <span className="text-slate-400 font-normal">(International)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={bankDetails.swift_code || ''}
+                          onChange={(e) => setBankDetails({ ...bankDetails, swift_code: e.target.value.toUpperCase() })}
+                          placeholder="e.g. HDFCINBBXXX"
+                          className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono uppercase focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Branch Name & City
+                        </label>
+                        <input
+                          type="text"
+                          value={bankDetails.branch_name || ''}
+                          onChange={(e) => setBankDetails({ ...bankDetails, branch_name: e.target.value })}
+                          placeholder="e.g. Nariman Point, Mumbai"
+                          className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Option 2: UPI ID & QR Code */}
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs transition-all">
+                <div className="p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 shrink-0">
+                      <QrCode className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                        <span>UPI ID &amp; QR Code (India)</span>
+                        {showUpiDetails && (
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Instant scan &amp; pay via Google Pay, PhonePe, Paytm, BHIM</p>
+                    </div>
+                  </div>
+
+                  <IOSSwitch
+                    checked={showUpiDetails}
+                    onChange={(checked) => {
+                      setShowUpiDetails(checked);
+                      setPaymentDisplayMode('CUSTOM');
+                    }}
+                    ariaLabel="Toggle UPI Payment"
+                  />
+                </div>
+
+                {/* Collapsible UPI Fields */}
+                {showUpiDetails && (
+                  <div className="p-4 pt-2 border-t border-slate-100 bg-slate-50/40 space-y-3 animate-fade-in-up">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
+                      <div className="sm:col-span-7 space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            UPI ID / VPA
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={upiDetails.upi_id || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUpiDetails({ ...upiDetails, upi_id: val });
+                                setBankDetails({ ...bankDetails, upi_id: val });
+                              }}
+                              placeholder="e.g. subeshtab@okhdfcbank or business@upi"
+                              className="h-9 w-full rounded-lg border border-slate-300 px-3 pr-8 text-xs font-mono focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <Smartphone className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400 pointer-events-none" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Payee / Merchant Name
+                          </label>
+                          <input
+                            type="text"
+                            value={upiDetails.payee_name || ''}
+                            onChange={(e) => setUpiDetails({ ...upiDetails, payee_name: e.target.value })}
+                            placeholder="e.g. SUBESH M LLC"
+                            className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* QR Code Upload / Preview */}
+                      <div className="sm:col-span-5">
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Attachment UPI QR Code
+                        </label>
+                        {upiDetails.qr_code_url ? (
+                          <div className="relative p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/30 flex items-center gap-3">
+                            <img
+                              src={upiDetails.qr_code_url}
+                              alt="UPI QR Code"
+                              className="h-16 w-16 object-contain rounded-lg border border-slate-200 bg-white p-1"
+                            />
+                            <div className="space-y-1">
+                              <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
+                              </span>
+                              <div className="flex gap-2 items-center">
+                                <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline flex items-center gap-1">
+                                  {isUploadingUpiQr ? (
+                                    <>
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span>Uploading...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>Change</span>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleUpiQrUpload}
+                                        className="hidden"
+                                        disabled={isUploadingUpiQr}
+                                      />
+                                    </>
+                                  )}
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => setUpiDetails({ ...upiDetails, qr_code_url: '' })}
+                                  className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <label className={`border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-emerald-50/30 ${isUploadingUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
                             {isUploadingUpiQr ? (
                               <>
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>Uploading...</span>
+                                <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
+                                <span className="text-[11px] font-semibold text-slate-700">Uploading QR Code...</span>
                               </>
                             ) : (
                               <>
-                                <span>Change</span>
+                                <QrCode className="h-6 w-6 text-slate-400 mb-1" />
+                                <span className="text-[11px] font-semibold text-slate-700">Attach UPI QR Code</span>
+                                <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
                                 <input
                                   type="file"
                                   accept="image/*"
                                   onChange={handleUpiQrUpload}
                                   className="hidden"
-                                  disabled={isUploadingUpiQr}
                                 />
                               </>
                             )}
                           </label>
-                          <button
-                            type="button"
-                            onClick={() => setUpiDetails({ ...upiDetails, qr_code_url: '' })}
-                            className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
-                          >
-                            Remove
-                          </button>
-                        </div>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <label className={`border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-emerald-50/30 ${isUploadingUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
-                      {isUploadingUpiQr ? (
-                        <>
-                          <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
-                          <span className="text-[11px] font-semibold text-slate-700">Uploading QR Code...</span>
-                        </>
-                      ) : (
-                        <>
-                          <QrCode className="h-6 w-6 text-slate-400 mb-1" />
-                          <span className="text-[11px] font-semibold text-slate-700">Attach UPI QR Code</span>
-                          <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleUpiQrUpload}
-                            className="hidden"
-                          />
-                        </>
-                      )}
-                    </label>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Crypto Payment Options Card (International) */}
-            <div className={`rounded-xl border p-4 transition-all ${
-              showCryptoDetails
-                ? 'border-amber-200 bg-white shadow-xs'
-                : 'border-slate-200 bg-slate-50/60 opacity-60'
-            }`}>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
-                    <Bitcoin className="h-4 w-4" />
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">Crypto Payment Options (International / Cross-Border)</h4>
-                    <p className="text-[11px] text-slate-400">USDT, USDC, BTC or other crypto addresses for global settlement</p>
-                  </div>
-                </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  showCryptoDetails ? 'bg-amber-50 text-amber-700' : 'bg-slate-200 text-slate-600'
-                }`}>
-                  {showCryptoDetails ? '✓ Client Visible' : 'Hidden'}
-                </span>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 pt-3 text-xs">
-                <div className="sm:col-span-7 space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                        Coin / Token
-                      </label>
-                      <input
-                        type="text"
-                        value={cryptoDetails.currency || 'USDT'}
-                        onChange={(e) => setCryptoDetails({ ...cryptoDetails, currency: e.target.value.toUpperCase() })}
-                        placeholder="e.g. USDT, BTC, ETH, USDC"
-                        className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs uppercase font-semibold focus:ring-1 focus:ring-amber-500"
-                      />
+              {/* Option 3: Cash Payment / Counter Handover */}
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs transition-all">
+                <div className="p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-amber-50 text-amber-600 shrink-0">
+                      <Banknote className="h-5 w-5" />
                     </div>
-
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                        Network / Chain
-                      </label>
-                      <input
-                        type="text"
-                        value={cryptoDetails.network || 'TRC20'}
-                        onChange={(e) => setCryptoDetails({ ...cryptoDetails, network: e.target.value.toUpperCase() })}
-                        placeholder="e.g. TRC20, ERC20, Polygon"
-                        className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs uppercase font-semibold focus:ring-1 focus:ring-amber-500"
-                      />
+                      <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                        <span>Cash Payment / Counter Handover</span>
+                        {showCashDetails && (
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Accept physical cash payments with custom instructions</p>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Wallet Address
+                  <IOSSwitch
+                    checked={showCashDetails}
+                    onChange={(checked) => {
+                      setShowCashDetails(checked);
+                      setPaymentDisplayMode('CUSTOM');
+                    }}
+                    ariaLabel="Toggle Cash Payment"
+                  />
+                </div>
+
+                {/* Collapsible Cash Fields */}
+                {showCashDetails && (
+                  <div className="p-4 pt-2 border-t border-slate-100 bg-slate-50/40 space-y-2 animate-fade-in-up">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Cash Payment Instructions &amp; Receipt Policy
                     </label>
                     <input
                       type="text"
-                      value={cryptoDetails.wallet_address || ''}
-                      onChange={(e) => setCryptoDetails({ ...cryptoDetails, wallet_address: e.target.value })}
-                      placeholder="e.g. TXYZ1234567890abcdef..."
-                      className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono focus:ring-1 focus:ring-amber-500"
+                      value={cashInstructions}
+                      onChange={(e) => setCashInstructions(e.target.value)}
+                      placeholder="e.g. Cash accepted at store billing desk. Official signed receipt will be issued immediately."
+                      className="w-full h-9 px-3 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
                     />
                   </div>
+                )}
+              </div>
+
+              {/* Option 4: Cryptocurrency / Web3 (Global) */}
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs transition-all">
+                <div className="p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-orange-50 text-orange-600 shrink-0">
+                      <Bitcoin className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                        <span>Cryptocurrency / Web3 (Global)</span>
+                        {showCryptoDetails && (
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-slate-400">USDT, USDC, BTC wallets for international clients</p>
+                    </div>
+                  </div>
+
+                  <IOSSwitch
+                    checked={showCryptoDetails}
+                    onChange={(checked) => {
+                      setShowCryptoDetails(checked);
+                      setPaymentDisplayMode('CUSTOM');
+                    }}
+                    ariaLabel="Toggle Crypto Payment"
+                  />
                 </div>
 
-                {/* Crypto QR Upload */}
-                <div className="sm:col-span-5">
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    Attachment Crypto QR Code
-                  </label>
-                  {cryptoDetails.qr_code_url ? (
-                    <div className="relative p-2.5 rounded-xl border border-amber-200 bg-amber-50/30 flex items-center gap-3">
-                      <img
-                        src={cryptoDetails.qr_code_url}
-                        alt="Crypto QR Code"
-                        className="h-16 w-16 object-contain rounded-lg border border-slate-200 bg-white p-1"
-                      />
-                      <div className="space-y-1">
-                        <span className="text-[11px] font-bold text-amber-800 flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3 text-amber-600" /> Attached
-                        </span>
-                        <div className="flex gap-2 items-center">
-                          <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline flex items-center gap-1">
+                {/* Collapsible Crypto Fields */}
+                {showCryptoDetails && (
+                  <div className="p-4 pt-2 border-t border-slate-100 bg-slate-50/40 space-y-3 animate-fade-in-up">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
+                      <div className="sm:col-span-7 space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                              Coin / Token
+                            </label>
+                            <input
+                              type="text"
+                              value={cryptoDetails.currency || 'USDT'}
+                              onChange={(e) => setCryptoDetails({ ...cryptoDetails, currency: e.target.value.toUpperCase() })}
+                              placeholder="e.g. USDT, BTC, ETH, USDC"
+                              className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs uppercase font-semibold focus:ring-1 focus:ring-amber-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                              Network / Chain
+                            </label>
+                            <input
+                              type="text"
+                              value={cryptoDetails.network || 'TRC20'}
+                              onChange={(e) => setCryptoDetails({ ...cryptoDetails, network: e.target.value.toUpperCase() })}
+                              placeholder="e.g. TRC20, ERC20, Polygon"
+                              className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs uppercase font-semibold focus:ring-1 focus:ring-amber-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Wallet Address
+                          </label>
+                          <input
+                            type="text"
+                            value={cryptoDetails.wallet_address || ''}
+                            onChange={(e) => setCryptoDetails({ ...cryptoDetails, wallet_address: e.target.value })}
+                            placeholder="e.g. TXYZ1234567890abcdef..."
+                            className="h-9 w-full rounded-lg border border-slate-300 px-3 text-xs font-mono focus:ring-1 focus:ring-amber-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Crypto QR Upload */}
+                      <div className="sm:col-span-5">
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Attachment Crypto QR Code
+                        </label>
+                        {cryptoDetails.qr_code_url ? (
+                          <div className="relative p-2.5 rounded-xl border border-amber-200 bg-amber-50/30 flex items-center gap-3">
+                            <img
+                              src={cryptoDetails.qr_code_url}
+                              alt="Crypto QR Code"
+                              className="h-16 w-16 object-contain rounded-lg border border-slate-200 bg-white p-1"
+                            />
+                            <div className="space-y-1">
+                              <span className="text-[11px] font-bold text-amber-800 flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3 text-amber-600" /> Attached
+                              </span>
+                              <div className="flex gap-2 items-center">
+                                <label className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer underline flex items-center gap-1">
+                                  {isUploadingCryptoQr ? (
+                                    <>
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span>Uploading...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>Change</span>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleCryptoQrUpload}
+                                        className="hidden"
+                                        disabled={isUploadingCryptoQr}
+                                      />
+                                    </>
+                                  )}
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => setCryptoDetails({ ...cryptoDetails, qr_code_url: '' })}
+                                  className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <label className={`border-2 border-dashed border-slate-200 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-amber-50/30 ${isUploadingCryptoQr ? 'opacity-60 pointer-events-none' : ''}`}>
                             {isUploadingCryptoQr ? (
                               <>
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>Uploading...</span>
+                                <Loader2 className="h-6 w-6 text-amber-600 animate-spin mb-1" />
+                                <span className="text-[11px] font-semibold text-slate-700">Uploading QR Code...</span>
                               </>
                             ) : (
                               <>
-                                <span>Change</span>
+                                <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
+                                <span className="text-[11px] font-semibold text-slate-700">Attach Crypto QR Code</span>
+                                <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
                                 <input
                                   type="file"
                                   accept="image/*"
                                   onChange={handleCryptoQrUpload}
                                   className="hidden"
-                                  disabled={isUploadingCryptoQr}
                                 />
                               </>
                             )}
                           </label>
-                          <button
-                            type="button"
-                            onClick={() => setCryptoDetails({ ...cryptoDetails, qr_code_url: '' })}
-                            className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
-                          >
-                            Remove
-                          </button>
-                        </div>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <label className={`border-2 border-dashed border-slate-200 hover:border-amber-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-amber-50/30 ${isUploadingCryptoQr ? 'opacity-60 pointer-events-none' : ''}`}>
-                      {isUploadingCryptoQr ? (
-                        <>
-                          <Loader2 className="h-6 w-6 text-amber-600 animate-spin mb-1" />
-                          <span className="text-[11px] font-semibold text-slate-700">Uploading QR Code...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Bitcoin className="h-6 w-6 text-slate-400 mb-1" />
-                          <span className="text-[11px] font-semibold text-slate-700">Attach Crypto QR Code</span>
-                          <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleCryptoQrUpload}
-                            className="hidden"
-                          />
-                        </>
-                      )}
-                    </label>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2056,6 +2075,20 @@ export function QuotationBuilder({
                         />
                       ) : null;
                     })()}
+                  </div>
+                )}
+
+                {showCashDetails && (
+                  <div className="p-2 rounded-lg bg-amber-50/40 border border-amber-200/80 space-y-1 text-[11px]">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <Banknote className="h-3 w-3 text-amber-600" />
+                      <span>Cash Payment / Counter Handover</span>
+                    </div>
+                    {cashInstructions ? (
+                      <p className="text-amber-800 text-[10px]">{cashInstructions}</p>
+                    ) : (
+                      <p className="text-slate-500 italic text-[10px]">Cash accepted with receipt</p>
+                    )}
                   </div>
                 )}
               </div>
