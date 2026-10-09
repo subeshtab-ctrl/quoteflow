@@ -10,7 +10,7 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Protected paths that require authentication
+  // Protected application paths that require valid user authentication
   const isProtectedPath =
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/onboarding') ||
@@ -22,7 +22,9 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/training') ||
     pathname.startsWith('/settings') ||
     pathname.startsWith('/templates') ||
-    pathname.startsWith('/test');
+    pathname.startsWith('/test') ||
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/billing');
 
   // Auth pages (login, register, forgot-password)
   const isAuthPage =
@@ -31,9 +33,33 @@ export async function middleware(request: NextRequest) {
     pathname === '/forgot-password';
 
   // Fast bypass: if not a protected path and not an auth page (e.g. /api/*, /q/*, /, /terms, /privacy, etc.)
-  // return response immediately without initializing Supabase Auth or making external network roundtrips.
-  // This drastically cuts down Vercel Active CPU execution time!
+  // return immediately without initializing Supabase Auth or making external network roundtrips.
   if (!isProtectedPath && !isAuthPage) {
+    return response;
+  }
+
+  // Check if any Supabase authentication cookies exist
+  const allCookies = request.cookies.getAll();
+  const hasAuthCookie = allCookies.some(
+    (c) =>
+      c.name.startsWith('sb-') ||
+      c.name.includes('auth-token') ||
+      c.name.includes('session')
+  );
+
+  // Fast Path 1: User accessing a protected route without any auth cookie -> redirect immediately
+  // Eliminates Supabase client instantiation and external network call overhead (0ms CPU)
+  if (isProtectedPath && !hasAuthCookie) {
+    const redirectUrl = new URL('/login', request.url);
+    const destination = pathname + (request.nextUrl.search || '');
+    if (destination !== '/dashboard') {
+      redirectUrl.searchParams.set('redirect', destination);
+    }
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // Fast Path 2: User accessing auth pages without any cookie -> render login/register immediately
+  if (isAuthPage && !hasAuthCookie) {
     return response;
   }
 
@@ -68,7 +94,7 @@ export async function middleware(request: NextRequest) {
               }
             });
           } catch {
-            // If cookie setting fails entirely, continue without setting
+            // Ignore cookie setting failures
           }
         },
       },
@@ -77,7 +103,6 @@ export async function middleware(request: NextRequest) {
     const result = await supabase.auth.getUser();
     user = result.data?.user ?? null;
   } catch {
-    // If Supabase auth check fails (e.g. network, oversized cookies), treat as unauthenticated
     user = null;
   }
 
@@ -126,12 +151,25 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for static files:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - static image formats (.svg, .png, .jpg, .jpeg, .gif, .webp)
+     * Match ONLY protected application routes and auth entry pages.
+     * All /api/*, /q/*, landing pages, static files, and assets bypass
+     * middleware entirely, reducing Vercel Edge Active CPU overhead to near zero.
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/dashboard/:path*',
+    '/onboarding/:path*',
+    '/quotations/:path*',
+    '/invoices/:path*',
+    '/customers/:path*',
+    '/products/:path*',
+    '/reports/:path*',
+    '/training/:path*',
+    '/settings/:path*',
+    '/templates/:path*',
+    '/test/:path*',
+    '/admin/:path*',
+    '/billing/:path*',
+    '/login',
+    '/register',
+    '/forgot-password',
   ],
 };

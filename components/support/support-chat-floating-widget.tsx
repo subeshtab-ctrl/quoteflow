@@ -66,6 +66,10 @@ export function SupportChatFloatingWidget({
   // Silent Background Polling (No UI flicker or reset)
   useEffect(() => {
     let isMounted = true;
+    if (ticket.status === 'resolved' || ticket.status === 'closed') {
+      return;
+    }
+
     const pollTicket = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
@@ -87,12 +91,22 @@ export function SupportChatFloatingWidget({
       }
     };
 
-    const interval = setInterval(pollTicket, 12000);
+    // CPU-Optimized: 60-second interval + instant refresh on window focus
+    const interval = setInterval(pollTicket, 60000);
+
+    const handleFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        pollTicket();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+
     return () => {
       isMounted = false;
       clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
     };
-  }, [ticket.id, onTicketUpdated]);
+  }, [ticket.id, ticket.status, onTicketUpdated]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

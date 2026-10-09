@@ -53,6 +53,15 @@ export function QuotationChatPanel({
 
   useEffect(() => {
     fetchAndMarkRead();
+
+    // CPU-Optimized: Refresh on window focus instead of background interval polling
+    const handleFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchAndMarkRead();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [quotationId]);
 
   useEffect(() => {

@@ -161,11 +161,23 @@ export function DashboardHeader({
       }
     };
     fetchNotifs();
+    // CPU-Optimized: 3-minute poll interval + instant refresh on window focus
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       fetchNotifs();
-    }, 60000);
-    return () => clearInterval(interval);
+    }, 180000);
+
+    const handleFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchNotifs();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;

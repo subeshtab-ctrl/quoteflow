@@ -114,15 +114,26 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
       .catch(() => {});
   };
 
-  // Poll open ticket for live developer responses
+  // Poll open ticket for live developer responses (CPU-Optimized)
   useEffect(() => {
-    if (!activeTicket) return;
+    if (!activeTicket || activeTicket.status === 'resolved' || activeTicket.status === 'closed') return;
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       loadTicketDetails(activeTicket.id);
-    }, 20000);
-    return () => clearInterval(interval);
-  }, [activeTicket?.id]);
+    }, 60000);
+
+    const handleFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        loadTicketDetails(activeTicket.id);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [activeTicket?.id, activeTicket?.status]);
 
   const handleFileUpload = async (file: File, isReply = false) => {
     if (!file) return;

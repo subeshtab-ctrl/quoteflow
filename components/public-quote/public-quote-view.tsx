@@ -340,28 +340,37 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
   useEffect(() => {
     prevChatCountRef.current = 0;
-    // Initial fetch to populate messages and unread badge count
+    // Initial fetch once on mount to populate existing messages
     loadChatMessages(false);
+  }, [currentToken]);
 
-    // CPU-optimized polling:
-    // 1. If tab is in background, do NOT poll (zero requests).
-    // 2. If chat popup is actively open, check every 8 seconds.
-    // 3. If chat popup is closed, check only once every 40 seconds for new badge alerts.
-    let tick = 0;
+  // CPU-Optimized: Poll ONLY when chat popup is actively open
+  // If closed, 0 requests are made, completely eliminating background CPU drain.
+  useEffect(() => {
+    if (!isChatPopupOpen) return;
+
+    // Refresh immediately upon opening
+    loadChatMessages(true);
+
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
       }
-      tick++;
-      if (isChatPopupOpenRef.current) {
-        loadChatMessages(false);
-      } else if (tick % 5 === 0) {
+      loadChatMessages(false);
+    }, 25000);
+
+    const handleFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         loadChatMessages(false);
       }
-    }, 8000);
+    };
+    window.addEventListener('focus', handleFocus);
 
-    return () => clearInterval(interval);
-  }, [currentToken]);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isChatPopupOpen, currentToken]);
 
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();

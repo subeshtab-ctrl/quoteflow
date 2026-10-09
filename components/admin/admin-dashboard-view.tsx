@@ -766,11 +766,23 @@ export function AdminDashboardView({ theme = 'dark' }: { theme?: 'light' | 'dark
 
   useEffect(() => {
     fetchTickets();
+    // CPU-Optimized: 3-minute interval + instant refresh on window focus
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       fetchTickets();
-    }, 60000);
-    return () => clearInterval(interval);
+    }, 180000);
+
+    const handleFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchTickets();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [ticketStatusFilter]);
 
   const handleCreateOffer = async (e: React.FormEvent) => {
