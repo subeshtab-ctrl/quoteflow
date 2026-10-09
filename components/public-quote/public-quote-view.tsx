@@ -205,18 +205,212 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     quotation.status === 'EXPIRED' ||
     (Date.now() > getValidityEndTime(quotation.valid_until) &&
       quotation.status !== 'APPROVED' &&
+      quotation.status !== 'IN_PROGRESS' &&
+      quotation.status !== 'COMPLETED' &&
       quotation.status !== 'REJECTED');
+
+  const isAlreadyApprovedOrSigned = Boolean(
+    quotation.status === 'APPROVED' ||
+    quotation.status === 'IN_PROGRESS' ||
+    quotation.status === 'COMPLETED' ||
+    quotation.status === 'PAYMENT_COMPLETED' ||
+    quotation.approved_at ||
+    quotation.signature
+  );
 
   const canTakeAction =
     !isExpired &&
     !isCompleted &&
     !isPaid &&
     !quotation.is_token_revoked &&
-    quotation.status !== 'APPROVED' &&
-    quotation.status !== 'REJECTED' &&
-    quotation.status !== 'EXPIRED' &&
-    quotation.status !== 'CANCELLED' &&
-    quotation.status !== 'DRAFT';
+    !isAlreadyApprovedOrSigned &&
+    ['SENT', 'VIEWED', 'PENDING', 'PENDING_APPROVAL'].includes(quotation.status);
+
+  // Helper: check if timestamp is within 24 hours
+  const isWithin24Hours = (dateStr?: string | null): boolean => {
+    if (!dateStr) return false;
+    const t = new Date(dateStr).getTime();
+    if (isNaN(t)) return false;
+    const diffMs = Date.now() - t;
+    const diffHours = diffMs / (1000 * 60 * 60);
+    return diffHours >= 0 && diffHours < 24;
+  };
+
+  const isQuoteActionableStatus = (q: Quotation): boolean => {
+    const isPastApproval = Boolean(
+      q.status === 'APPROVED' ||
+      q.status === 'IN_PROGRESS' ||
+      q.status === 'COMPLETED' ||
+      q.status === 'PAYMENT_COMPLETED' ||
+      q.approved_at ||
+      q.signature
+    );
+    const isExp =
+      q.status === 'EXPIRED' ||
+      (Date.now() > getValidityEndTime(q.valid_until) &&
+        !isPastApproval &&
+        q.status !== 'REJECTED');
+    return (
+      !isExp &&
+      !isPastApproval &&
+      q.status !== 'REJECTED' &&
+      q.status !== 'CANCELLED' &&
+      q.status !== 'DRAFT' &&
+      ['SENT', 'VIEWED', 'PENDING', 'PENDING_APPROVAL'].includes(q.status)
+    );
+  };
+
+  const isQuoteNew = (q: Quotation): boolean => {
+    return isQuoteActionableStatus(q) && isWithin24Hours(q.created_at || q.issue_date);
+  };
+
+  const isQuotePending = (q: Quotation): boolean => {
+    return isQuoteActionableStatus(q) && !isWithin24Hours(q.created_at || q.issue_date);
+  };
+
+  const isQuoteApproved = (q: Quotation): boolean => {
+    return (
+      q.status === 'APPROVED' ||
+      (Boolean(q.approved_at || q.signature) && q.status !== 'IN_PROGRESS' && q.status !== 'COMPLETED')
+    );
+  };
+
+  const isQuoteInProgress = (q: Quotation): boolean => {
+    return q.status === 'IN_PROGRESS';
+  };
+
+  const isQuoteRejected = (q: Quotation): boolean => {
+    return q.status === 'REJECTED';
+  };
+
+  const isQuoteExpired = (q: Quotation): boolean => {
+    const isPastApproval = Boolean(
+      q.status === 'APPROVED' ||
+      q.status === 'IN_PROGRESS' ||
+      q.status === 'COMPLETED' ||
+      q.status === 'PAYMENT_COMPLETED' ||
+      q.approved_at ||
+      q.signature
+    );
+    return (
+      q.status === 'EXPIRED' ||
+      (Date.now() > getValidityEndTime(q.valid_until) &&
+        !isPastApproval &&
+        q.status !== 'REJECTED')
+    );
+  };
+
+  const isQuoteInCategory = (q: Quotation, cat: string): boolean => {
+    if (cat === 'ALL') return true;
+    if (cat === 'NEW') return isQuoteNew(q);
+    if (cat === 'APPROVED') return isQuoteApproved(q);
+    if (cat === 'IN_PROGRESS') return isQuoteInProgress(q);
+    if (cat === 'PENDING') return isQuotePending(q);
+    if (cat === 'REJECTED') return isQuoteRejected(q);
+    if (cat === 'EXPIRED') return isQuoteExpired(q);
+    return true;
+  };
+
+  const clientCategoryTabs = [
+    {
+      label: 'All',
+      value: 'ALL',
+      active: 'bg-slate-900 text-white border-slate-900',
+      inactive: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200',
+      dot: 'bg-slate-400',
+    },
+    {
+      label: 'New',
+      value: 'NEW',
+      active: 'bg-blue-600 text-white border-blue-600',
+      inactive: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+      dot: 'bg-blue-500',
+    },
+    {
+      label: 'Approved',
+      value: 'APPROVED',
+      active: 'bg-emerald-600 text-white border-emerald-600',
+      inactive: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+      dot: 'bg-emerald-500',
+    },
+    {
+      label: 'In Progress',
+      value: 'IN_PROGRESS',
+      active: 'bg-sky-600 text-white border-sky-600',
+      inactive: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
+      dot: 'bg-sky-500',
+    },
+    {
+      label: 'Pending',
+      value: 'PENDING',
+      active: 'bg-amber-500 text-white border-amber-500',
+      inactive: 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100',
+      dot: 'bg-amber-500',
+    },
+    {
+      label: 'Rejected',
+      value: 'REJECTED',
+      active: 'bg-rose-600 text-white border-rose-600',
+      inactive: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
+      dot: 'bg-rose-500',
+    },
+    {
+      label: 'Expired',
+      value: 'EXPIRED',
+      active: 'bg-slate-700 text-white border-slate-700',
+      inactive: 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200',
+      dot: 'bg-slate-500',
+    },
+  ];
+
+  const getCategoryCount = (catValue: string) => {
+    if (!allQuotations) return 0;
+    return allQuotations.filter((q) => isQuoteInCategory(q, catValue)).length;
+  };
+
+  const selectQuotation = (target: Quotation) => {
+    setOpenedQuoteIds((prev) => {
+      const next = new Set(prev);
+      next.add(target.id);
+      try {
+        localStorage.setItem(
+          'quoteflow_client_opened_quotes',
+          JSON.stringify(Array.from(next))
+        );
+      } catch {}
+      return next;
+    });
+
+    const fullOrg = target.organization || quotation.organization || initialQuotation.organization;
+    const targetQuote: Quotation = {
+      ...target,
+      organization: fullOrg,
+    };
+    setQuotation(targetQuote);
+    window.history.pushState(null, '', `/q/${target.public_token}`);
+    fetch(`/api/public/quote?token=${encodeURIComponent(target.public_token)}&recordView=true`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success && data?.quotation) {
+          setQuotation({
+            ...data.quotation,
+            organization: data.quotation.organization || fullOrg,
+          });
+        }
+      })
+      .catch(() => {});
+  };
+
+  const handleCategoryTabClick = (catValue: string) => {
+    setClientCategory(catValue);
+    const matching = (allQuotations || []).filter((q) => isQuoteInCategory(q, catValue));
+    if (matching.length > 0) {
+      const isCurrentInMatches = matching.some((q) => q.id === quotation.id);
+      if (!isCurrentInMatches) {
+        selectQuotation(matching[0]);
+      }
+    }
+  };
 
   const validityDays = (() => {
     if (!quotation.issue_date || !quotation.valid_until) return 14;
@@ -628,6 +822,15 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               paymentStatus={quotation.payment_status}
               paidAmount={quotation.paid_amount}
             />
+            {isQuoteNew(quotation) && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-200 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                </span>
+                <span>NEW (24h)</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -695,27 +898,29 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
             {/* Client Portal Category Filter Tabs */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-              {[
-                { label: 'All', value: 'ALL', active: 'bg-slate-900 text-white border-slate-900', inactive: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200', dot: 'bg-slate-400' },
-                { label: 'New', value: 'NEW', active: 'bg-blue-600 text-white border-blue-600', inactive: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100', dot: 'bg-blue-500' },
-                { label: 'Approved', value: 'APPROVED', active: 'bg-emerald-600 text-white border-emerald-600', inactive: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100', dot: 'bg-emerald-500' },
-                { label: 'In Progress', value: 'IN_PROGRESS', active: 'bg-sky-600 text-white border-sky-600', inactive: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100', dot: 'bg-sky-500' },
-                { label: 'Pending', value: 'PENDING', active: 'bg-amber-500 text-white border-amber-500', inactive: 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100', dot: 'bg-amber-500' },
-                { label: 'Rejected', value: 'REJECTED', active: 'bg-rose-600 text-white border-rose-600', inactive: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100', dot: 'bg-rose-500' },
-                { label: 'Expired', value: 'EXPIRED', active: 'bg-slate-700 text-white border-slate-700', inactive: 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200', dot: 'bg-slate-500' },
-              ].map((tab) => {
+              {clientCategoryTabs.map((tab) => {
                 const isActive = clientCategory === tab.value;
+                const count = getCategoryCount(tab.value);
                 return (
                   <button
                     key={tab.value}
                     type="button"
-                    onClick={() => setClientCategory(tab.value)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-xl whitespace-nowrap transition-all border ${
+                    onClick={() => handleCategoryTabClick(tab.value)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-xl whitespace-nowrap transition-all border cursor-pointer ${
                       isActive ? tab.active : tab.inactive
                     }`}
                   >
                     <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-white' : tab.dot}`} />
                     <span>{tab.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        isActive
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-200/80 text-slate-700'
+                      }`}
+                    >
+                      {count}
+                    </span>
                   </button>
                 );
               })}
@@ -723,68 +928,47 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
             {/* Quotations List */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
-              {allQuotations
-                .filter((q) => {
-                  if (clientCategory === 'ALL') return true;
-                  if (clientCategory === 'NEW') return (q.status === 'SENT' || (q.view_count || 0) === 0) && !openedQuoteIds.has(q.id);
-                  if (clientCategory === 'APPROVED') return q.status === 'APPROVED';
-                  if (clientCategory === 'IN_PROGRESS') return q.status === 'IN_PROGRESS';
-                  if (clientCategory === 'PENDING') return ['PENDING', 'SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(q.status);
-                  if (clientCategory === 'REJECTED') return q.status === 'REJECTED';
-                  if (clientCategory === 'EXPIRED') return q.status === 'EXPIRED';
-                  return true;
-                })
-                .map((q) => {
+              {(() => {
+                const filtered = allQuotations.filter((q) => isQuoteInCategory(q, clientCategory));
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-2.5 px-3 text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-200 rounded-xl flex items-center justify-between w-full">
+                      <span>
+                        No {clientCategoryTabs.find((t) => t.value === clientCategory)?.label.toLowerCase()} quotes found.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCategoryTabClick('ALL')}
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline ml-2 cursor-pointer"
+                      >
+                        View All Quotes
+                      </button>
+                    </div>
+                  );
+                }
+
+                return filtered.map((q) => {
                   const isSelected = q.id === quotation.id;
-                  const isNew =
-                    (q.status === 'SENT' || (q.view_count || 0) === 0) &&
-                    !openedQuoteIds.has(q.id);
+                  const isNew = isQuoteNew(q);
 
                   return (
                     <button
                       key={q.id}
                       type="button"
-                      onClick={() => {
-                        setOpenedQuoteIds((prev) => {
-                          const next = new Set(prev);
-                          next.add(q.id);
-                          try {
-                            localStorage.setItem(
-                              'quoteflow_client_opened_quotes',
-                              JSON.stringify(Array.from(next))
-                            );
-                          } catch {}
-                          return next;
-                        });
-                        const fullOrg = q.organization || quotation.organization || initialQuotation.organization;
-                        const targetQuote: Quotation = {
-                          ...q,
-                          organization: fullOrg,
-                        };
-                        setQuotation(targetQuote);
-                        window.history.pushState(null, '', `/q/${q.public_token}`);
-                        fetch(`/api/public/quote?token=${encodeURIComponent(q.public_token)}&recordView=true`)
-                          .then((res) => res.json())
-                          .then((data) => {
-                            if (data?.success && data?.quotation) {
-                              setQuotation({
-                                ...data.quotation,
-                                organization: data.quotation.organization || fullOrg,
-                              });
-                            }
-                          })
-                          .catch(() => {});
-                      }}
-                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
+                      onClick={() => selectQuotation(q)}
+                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
                         isSelected
                           ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
                           : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
                       }`}
                     >
                       {isNew && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-600 text-white px-1.5 py-0.2 text-[9px] font-black uppercase tracking-wider shadow-xs animate-pulse">
-                          <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                          NEW
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[9px] font-black uppercase tracking-wider shadow-xs">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-200 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                          </span>
+                          <span>NEW</span>
                         </span>
                       )}
                       <span className="font-bold">{q.quotation_number}</span>
@@ -800,7 +984,8 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                       />
                     </button>
                   );
-                })}
+                });
+              })()}
             </div>
           </div>
         )}
@@ -1784,22 +1969,28 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                 ? 'Quotation Settled & Fully Paid'
                 : isCompleted
                   ? 'Quotation Scope Completed'
-                  : isExpired
-                    ? 'Quotation Expired'
-                    : quotation.status === 'REJECTED'
-                      ? 'Need to discuss changes or send a message?'
-                      : quotation.status === 'APPROVED'
-                        ? 'Have a question about your approved quotation?'
-                        : 'Need assistance with this quotation?'}
+                  : quotation.status === 'IN_PROGRESS'
+                    ? 'Work In Progress'
+                    : isExpired
+                      ? 'Quotation Expired'
+                      : quotation.status === 'REJECTED'
+                        ? 'Need to discuss changes or send a message?'
+                        : quotation.status === 'APPROVED' || isAlreadyApprovedOrSigned
+                          ? 'Quotation Approved'
+                          : 'Need assistance with this quotation?'}
             </h3>
             <p className="text-xs text-slate-300 max-w-md mx-auto">
               {isPaid
                 ? 'Your payment has been received and confirmed. Contact us anytime if you need receipts or assistance.'
                 : isCompleted
                   ? 'This quotation lifecycle is completed and locked. Reach out to our team via chat anytime.'
-                  : isExpired
-                    ? 'This quotation validity period has ended. Contact us via chat if you would like a renewed estimate.'
-                    : `Click Chat below to open the live chat box with ${org?.name || 'our team'}.`}
+                  : quotation.status === 'IN_PROGRESS'
+                    ? 'This quotation is actively in progress. The team is fulfilling deliverables. Reach out via chat anytime.'
+                    : isExpired
+                      ? 'This quotation validity period has ended. Contact us via chat if you would like a revised estimate.'
+                      : quotation.status === 'APPROVED' || isAlreadyApprovedOrSigned
+                        ? 'This quotation has been officially approved. You can track progress, download documents, or chat with our team.'
+                        : `Click Chat below to open the live chat box with ${org?.name || 'our team'}.`}
             </p>
             <div className="flex justify-center">
               <Button
