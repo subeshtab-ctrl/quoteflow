@@ -8,6 +8,35 @@ export async function middleware(request: NextRequest) {
     },
   });
 
+  const pathname = request.nextUrl.pathname;
+
+  // Protected paths that require authentication
+  const isProtectedPath =
+    pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/onboarding') ||
+    pathname.startsWith('/quotations') ||
+    pathname.startsWith('/invoices') ||
+    pathname.startsWith('/customers') ||
+    pathname.startsWith('/products') ||
+    pathname.startsWith('/reports') ||
+    pathname.startsWith('/training') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/templates') ||
+    pathname.startsWith('/test');
+
+  // Auth pages (login, register, forgot-password)
+  const isAuthPage =
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password';
+
+  // Fast bypass: if not a protected path and not an auth page (e.g. /api/*, /q/*, /, /terms, /privacy, etc.)
+  // return response immediately without initializing Supabase Auth or making external network roundtrips.
+  // This drastically cuts down Vercel Active CPU execution time!
+  if (!isProtectedPath && !isAuthPage) {
+    return response;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -51,28 +80,6 @@ export async function middleware(request: NextRequest) {
     // If Supabase auth check fails (e.g. network, oversized cookies), treat as unauthenticated
     user = null;
   }
-
-  const pathname = request.nextUrl.pathname;
-
-  // Protected paths that require authentication
-  const isProtectedPath =
-    pathname.startsWith('/dashboard') ||
-    pathname.startsWith('/onboarding') ||
-    pathname.startsWith('/quotations') ||
-    pathname.startsWith('/invoices') ||
-    pathname.startsWith('/customers') ||
-    pathname.startsWith('/products') ||
-    pathname.startsWith('/reports') ||
-    pathname.startsWith('/training') ||
-    pathname.startsWith('/settings') ||
-    pathname.startsWith('/templates') ||
-    pathname.startsWith('/test');
-
-  // Auth pages (login, register, forgot-password)
-  const isAuthPage =
-    pathname === '/login' ||
-    pathname === '/register' ||
-    pathname === '/forgot-password';
 
   const mustChangePassword = Boolean(user?.user_metadata?.must_change_password);
 

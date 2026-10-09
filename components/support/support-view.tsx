@@ -120,7 +120,7 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       loadTicketDetails(activeTicket.id);
-    }, 15000);
+    }, 20000);
     return () => clearInterval(interval);
   }, [activeTicket?.id]);
 

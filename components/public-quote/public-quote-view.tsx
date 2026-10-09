@@ -333,8 +333,26 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
   useEffect(() => {
     prevChatCountRef.current = 0;
+    // Initial fetch to populate messages and unread badge count
     loadChatMessages(false);
-    const interval = setInterval(() => loadChatMessages(false), 2500);
+
+    // CPU-optimized polling:
+    // 1. If tab is in background, do NOT poll (zero requests).
+    // 2. If chat popup is actively open, check every 8 seconds.
+    // 3. If chat popup is closed, check only once every 40 seconds for new badge alerts.
+    let tick = 0;
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      tick++;
+      if (isChatPopupOpenRef.current) {
+        loadChatMessages(false);
+      } else if (tick % 5 === 0) {
+        loadChatMessages(false);
+      }
+    }, 8000);
+
     return () => clearInterval(interval);
   }, [currentToken]);
 

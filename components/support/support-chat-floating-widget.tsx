@@ -67,6 +67,9 @@ export function SupportChatFloatingWidget({
   useEffect(() => {
     let isMounted = true;
     const pollTicket = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
       try {
         const res = await fetch(`/api/support/tickets/${ticket.id}`, { cache: 'no-store' });
         if (res.ok) {
@@ -84,7 +87,7 @@ export function SupportChatFloatingWidget({
       }
     };
 
-    const interval = setInterval(pollTicket, 3500);
+    const interval = setInterval(pollTicket, 12000);
     return () => {
       isMounted = false;
       clearInterval(interval);

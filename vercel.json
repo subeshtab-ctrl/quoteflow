@@ -3,5 +3,10 @@
   "buildCommand": "next build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
-  "regions": ["sin1"]
+  "regions": ["sin1"],
+  "functions": {
+    "app/api/**/*": {
+      "maxDuration": 15
+    }
+  }
 }
