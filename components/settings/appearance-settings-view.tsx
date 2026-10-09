@@ -58,6 +58,20 @@ export function AppearanceSettingsView() {
         root.setAttribute('data-accent', accentColor);
         root.style.setProperty('--brand-color', selectedAccent.hex);
         root.style.setProperty('--brand-rgb', selectedAccent.rgb);
+        try {
+          localStorage.setItem('quoteflow_brand_color', selectedAccent.hex);
+          localStorage.setItem(
+            'quoteflow-customization-v2',
+            JSON.stringify({
+              theme,
+              accentColor,
+              sidebarStyle,
+              cardStyle,
+              borderRadius,
+              density,
+            })
+          );
+        } catch {}
       }
       await fetch('/api/settings', {
         method: 'PATCH',

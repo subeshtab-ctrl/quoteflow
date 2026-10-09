@@ -60,3 +60,28 @@ export async function PUT(req: NextRequest) {
     );
   }
 }
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const auth = await getAuthenticatedUserContext();
+    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+
+    if (auth && auth.role === 'STAFF') {
+      return NextResponse.json(
+        { error: 'Staff members cannot modify organization settings.' },
+        { status: 403 }
+      );
+    }
+
+    const body = await req.json();
+    const updated = await store.updateOrganization(orgId, body as Partial<Organization>);
+
+    return NextResponse.json({ success: true, organization: updated });
+  } catch (err: any) {
+    console.error('Error in settings PATCH:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to update settings' },
+      { status: 400 }
+    );
+  }
+}

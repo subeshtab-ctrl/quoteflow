@@ -302,7 +302,7 @@ export function SettingsClientView({
     }));
   };
 
-  // Synchronize CSS variable when brand color changes
+  // Synchronize CSS variable and data-accent when brand color changes
   useEffect(() => {
     if (org.brand_color) {
       document.documentElement.style.setProperty('--brand-color', org.brand_color);
@@ -310,8 +310,23 @@ export function SettingsClientView({
       if (root) {
         root.style.setProperty('--brand-color', org.brand_color);
       }
+      let matchedAccent = 'purple';
+      const c = org.brand_color.toLowerCase();
+      if (c === '#059669' || c.includes('059669') || c.includes('10b981') || c.includes('047857')) {
+        matchedAccent = 'emerald';
+      } else if (c === '#2563eb' || c.includes('2563eb') || c.includes('3b82f6')) {
+        matchedAccent = 'blue';
+      } else if (c === '#ea580c' || c.includes('ea580c') || c.includes('f97316')) {
+        matchedAccent = 'orange';
+      } else if (c === '#e11d48' || c.includes('e11d48') || c.includes('f43f5e')) {
+        matchedAccent = 'rose';
+      }
+      document.documentElement.setAttribute('data-accent', matchedAccent);
       try {
         localStorage.setItem('quoteflow_brand_color', org.brand_color);
+        const curCustom = localStorage.getItem('quoteflow-customization-v2');
+        const parsed = curCustom ? JSON.parse(curCustom) : {};
+        localStorage.setItem('quoteflow-customization-v2', JSON.stringify({ ...parsed, accentColor: matchedAccent }));
       } catch {}
     }
   }, [org.brand_color]);

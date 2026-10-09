@@ -3175,11 +3175,12 @@ class QuoteFlowStore {
           const filePayments = this.loadPaymentsFromFile();
           const filePayment = filePayments[data.id];
 
-          // Fetch signature, events, views from Supabase first
+          // Fetch signature, events, views, and persisted templates from Supabase first
           const [
             { data: sigData },
             { data: eventsData },
-            { data: viewsData }
+            { data: viewsData },
+            { data: tmplData }
           ] = await Promise.all([
             supabase
               .from('quotation_signatures')
@@ -3197,7 +3198,19 @@ class QuoteFlowStore {
               .from('quotation_views')
               .select('*')
               .eq('quotation_id', data.id),
+            supabase
+              .from('templates')
+              .select('layout_style')
+              .eq('name', `QUOTE:${data.id}`)
+              .maybeSingle(),
           ]);
+
+          let persistedQuote: any = null;
+          if (tmplData?.layout_style) {
+            try {
+              persistedQuote = JSON.parse(tmplData.layout_style);
+            } catch {}
+          }
 
           if (sigData) {
             this.signatures.set(data.id, sigData as QuotationSignature);
@@ -3217,7 +3230,7 @@ class QuoteFlowStore {
             existing
           );
 
-          // Check for COMPLETED event or auto-expire at end of valid_until date
+          // Check for COMPLETED event, IN_PROGRESS event, or auto-expire at end of valid_until date
           let currentStatus = data.status;
           let expiredAt = data.expired_at || existing?.expired_at || null;
 
@@ -3230,13 +3243,14 @@ class QuoteFlowStore {
 
           let isPaid = payDetails.is_paid;
 
-          if (latestCompletedEvent) {
+          if (latestCompletedEvent || persistedQuote?.status === 'COMPLETED') {
             currentStatus = 'COMPLETED';
-            if (latestCompletedEvent.metadata?.unpaid) {
+            if (latestCompletedEvent?.metadata?.unpaid || persistedQuote?.completed_unpaid) {
               isPaid = false;
             }
           } else if (
             latestInProgressEvent ||
+            persistedQuote?.status === 'IN_PROGRESS' ||
             filePayment?.status === 'IN_PROGRESS' ||
             existing?.status === 'IN_PROGRESS'
           ) {
@@ -3258,23 +3272,24 @@ class QuoteFlowStore {
 
           const merged: Quotation = {
             ...(existing || {}),
+            ...(persistedQuote || {}),
             ...data,
             status: currentStatus,
             in_progress_at: latestInProgressEvent
               ? (latestInProgressEvent.metadata?.in_progress_at || latestInProgressEvent.created_at)
-              : (filePayment?.in_progress_at || existing?.in_progress_at || null),
+              : (persistedQuote?.in_progress_at || filePayment?.in_progress_at || existing?.in_progress_at || null),
             estimated_days: latestInProgressEvent
               ? (typeof latestInProgressEvent.metadata?.new_total_days === 'number'
                   ? latestInProgressEvent.metadata.new_total_days
                   : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
                       ? latestInProgressEvent.metadata.estimated_days
-                      : filePayment?.estimated_days || existing?.estimated_days || 7))
-              : (filePayment?.estimated_days || existing?.estimated_days || null),
+                      : persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || 7))
+              : (persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || null),
             estimated_completion_date: latestInProgressEvent
-              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
-              : (filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
-            estimated_time_text: latestInProgressEvent?.metadata?.notes || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
-            payment_records: payDetails.payment_records || filePayment?.payment_records || existing?.payment_records || [],
+              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
+              : (persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
+            estimated_time_text: latestInProgressEvent?.metadata?.notes || persistedQuote?.estimated_time_text || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
+            payment_records: payDetails.payment_records || persistedQuote?.payment_records || filePayment?.payment_records || existing?.payment_records || [],
             expired_at: expiredAt,
             is_paid: isPaid,
             paid_at: payDetails.paid_at,
@@ -3409,10 +3424,11 @@ class QuoteFlowStore {
           const filePayments = this.loadPaymentsFromFile();
           const filePayment = filePayments[data.id];
 
-          // Fetch signatures and events
+          // Fetch signatures, events, and persisted template from Supabase
           const [
             { data: sigData },
             { data: eventsData },
+            { data: tmplData }
           ] = await Promise.all([
             supabase
               .from('quotation_signatures')
@@ -3426,7 +3442,19 @@ class QuoteFlowStore {
               .select('*')
               .eq('quotation_id', data.id)
               .order('created_at', { ascending: false }),
+            supabase
+              .from('templates')
+              .select('layout_style')
+              .eq('name', `QUOTE:${data.id}`)
+              .maybeSingle(),
           ]);
+
+          let persistedQuote: any = null;
+          if (tmplData?.layout_style) {
+            try {
+              persistedQuote = JSON.parse(tmplData.layout_style);
+            } catch {}
+          }
 
           if (sigData) {
             this.signatures.set(data.id, sigData as QuotationSignature);
@@ -3443,7 +3471,7 @@ class QuoteFlowStore {
             existing
           );
 
-          // Check for COMPLETED event or auto-expire at end of valid_until date
+          // Check for COMPLETED event, IN_PROGRESS event, or auto-expire at end of valid_until date
           let currentStatus = data.status;
           let expiredAt = data.expired_at || existing?.expired_at || null;
 
@@ -3456,13 +3484,14 @@ class QuoteFlowStore {
 
           let isPaid = payDetails.is_paid;
 
-          if (latestCompletedEvent) {
+          if (latestCompletedEvent || persistedQuote?.status === 'COMPLETED') {
             currentStatus = 'COMPLETED';
-            if (latestCompletedEvent.metadata?.unpaid) {
+            if (latestCompletedEvent?.metadata?.unpaid || persistedQuote?.completed_unpaid) {
               isPaid = false;
             }
           } else if (
             latestInProgressEvent ||
+            persistedQuote?.status === 'IN_PROGRESS' ||
             filePayment?.status === 'IN_PROGRESS' ||
             existing?.status === 'IN_PROGRESS'
           ) {
@@ -3484,23 +3513,24 @@ class QuoteFlowStore {
 
           const merged: Quotation = {
             ...(existing || {}),
+            ...(persistedQuote || {}),
             ...data,
             status: currentStatus,
             in_progress_at: latestInProgressEvent
               ? (latestInProgressEvent.metadata?.in_progress_at || latestInProgressEvent.created_at)
-              : (filePayment?.in_progress_at || existing?.in_progress_at || null),
+              : (persistedQuote?.in_progress_at || filePayment?.in_progress_at || existing?.in_progress_at || null),
             estimated_days: latestInProgressEvent
               ? (typeof latestInProgressEvent.metadata?.new_total_days === 'number'
                   ? latestInProgressEvent.metadata.new_total_days
                   : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
                       ? latestInProgressEvent.metadata.estimated_days
-                      : filePayment?.estimated_days || existing?.estimated_days || 7))
-              : (filePayment?.estimated_days || existing?.estimated_days || null),
+                      : persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || 7))
+              : (persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || null),
             estimated_completion_date: latestInProgressEvent
-              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
-              : (filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
-            estimated_time_text: latestInProgressEvent?.metadata?.notes || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
-            payment_records: payDetails.payment_records || filePayment?.payment_records || existing?.payment_records || [],
+              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
+              : (persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
+            estimated_time_text: latestInProgressEvent?.metadata?.notes || persistedQuote?.estimated_time_text || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
+            payment_records: payDetails.payment_records || persistedQuote?.payment_records || filePayment?.payment_records || existing?.payment_records || [],
             expired_at: expiredAt,
             is_paid: isPaid,
             paid_at: payDetails.paid_at,
@@ -5282,6 +5312,8 @@ class QuoteFlowStore {
             updated_at: now,
           })
           .eq('id', id);
+
+        await this.persistQuotationToSupabase(quote);
       }
     } catch (err) {
       console.warn('Failed to sync quotation payment update to Supabase:', err);
@@ -5415,6 +5447,8 @@ class QuoteFlowStore {
             updated_at: now,
           })
           .eq('id', id);
+
+        await this.persistQuotationToSupabase(quote);
       }
     } catch (err) {
       console.warn('Failed to sync quotation completed status to Supabase:', err);
@@ -5494,6 +5528,8 @@ class QuoteFlowStore {
           .from('quotations')
           .update({ updated_at: now })
           .eq('id', id);
+
+        await this.persistQuotationToSupabase(quote);
       }
     } catch (err) {
       console.warn('Failed to sync quotation in_progress status to Supabase:', err);
@@ -5573,6 +5609,8 @@ class QuoteFlowStore {
           .from('quotations')
           .update({ updated_at: now })
           .eq('id', id);
+
+        await this.persistQuotationToSupabase(quote);
       }
     } catch {}
 

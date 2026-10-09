@@ -83,8 +83,21 @@ export function QuotationActionButtons({
   const [extendReasonInput, setExtendReasonInput] = useState<string>('');
 
   React.useEffect(() => {
-    setCurrentQuotation(quotation);
-    setCurrentStatus(status);
+    if (quotation) {
+      setCurrentQuotation(quotation);
+    }
+    if (status) {
+      setCurrentStatus((prev) => {
+        // Prevent temporary backward reversion during revalidations
+        if (prev === 'IN_PROGRESS' && status === 'APPROVED') {
+          return prev;
+        }
+        if (prev === 'COMPLETED' && (status === 'APPROVED' || status === 'IN_PROGRESS')) {
+          return prev;
+        }
+        return status;
+      });
+    }
   }, [quotation, status]);
 
   const handlePaymentUpdated = (updatedQuote: Quotation) => {
@@ -791,26 +804,26 @@ export function QuotationActionButtons({
         />
       )}
 
-      {/* Set In Progress Modal */}
+      {/* Set In Progress Modal (Compact XS Size) */}
       <Modal
         isOpen={isInProgressModalOpen}
         onClose={() => !isSettingInProgress && setIsInProgressModalOpen(false)}
         title="Mark as In Progress"
-        description={`Set completion timeline for ${quotationNumber}`}
-        maxWidth="sm"
+        description={`Set estimated days for ${quotationNumber}`}
+        maxWidth="xs"
       >
-        <div className="space-y-3.5 pt-1">
+        <div className="space-y-3 pt-1">
           <div>
-            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Estimated Duration</label>
-            <div className="grid grid-cols-4 gap-1.5 mb-2">
+            <label className="text-[11px] font-semibold text-slate-700 block mb-1">Estimated Days</label>
+            <div className="grid grid-cols-4 gap-1 mb-2">
               {[3, 7, 14, 30].map((days) => (
                 <button
                   key={days}
                   type="button"
                   onClick={() => setEstimatedDaysInput(days)}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1 px-1.5 rounded-md text-xs font-semibold border transition-all ${
                     estimatedDaysInput === days
-                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                      ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
@@ -825,42 +838,42 @@ export function QuotationActionButtons({
                 max={365}
                 value={estimatedDaysInput}
                 onChange={(e) => setEstimatedDaysInput(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-20 px-2.5 py-1 text-xs rounded-lg border border-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-16 px-2 py-1 text-xs rounded-md border border-slate-300 font-semibold focus:outline-none focus:ring-1 focus:ring-sky-500"
               />
-              <span className="text-xs text-slate-500 font-medium">calendar days</span>
+              <span className="text-[11px] text-slate-500 font-medium">calendar days</span>
             </div>
           </div>
 
-          {/* Compact Target Date Box */}
-          <div className="p-2.5 rounded-lg bg-sky-50/80 border border-sky-200/80 flex items-center justify-between text-xs">
-            <span className="text-sky-800 font-medium flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5 text-sky-600" />
-              Target Date:
+          {/* Compact Target Date Pill */}
+          <div className="px-2.5 py-1.5 rounded-md bg-sky-50 border border-sky-200 flex items-center justify-between text-[11px]">
+            <span className="text-sky-800 font-medium flex items-center gap-1">
+              <Calendar className="h-3 w-3 text-sky-600" />
+              Target:
             </span>
             <span className="font-bold text-sky-950">
               {formatDate(new Date(Date.now() + (Number(estimatedDaysInput) || 7) * 86400000).toISOString())}
             </span>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-[11px] font-semibold text-slate-600">Scope / Notes (Optional)</label>
+          <div className="space-y-0.5">
+            <label className="text-[10px] font-semibold text-slate-600">Notes (Optional)</label>
             <input
               type="text"
-              placeholder="e.g. Design finalized, execution started"
+              placeholder="e.g. Design started"
               value={estimatedNotesInput}
               onChange={(e) => setEstimatedNotesInput(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="w-full px-2 py-1 text-xs rounded-md border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
             />
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-100">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsInProgressModalOpen(false)}
               disabled={isSettingInProgress}
-              className="text-xs h-8 px-3"
+              className="text-xs h-7 px-2.5"
             >
               Cancel
             </Button>
@@ -869,10 +882,10 @@ export function QuotationActionButtons({
               size="sm"
               onClick={handleSetInProgress}
               isLoading={isSettingInProgress}
-              className="text-xs h-8 px-3.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm"
+              className="text-xs h-7 px-3 bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-xs"
             >
-              <Play className="h-3.5 w-3.5 fill-current mr-1" />
-              <span>Confirm &amp; Start</span>
+              <Play className="h-3 w-3 fill-current mr-1" />
+              <span>Confirm</span>
             </Button>
           </div>
         </div>
