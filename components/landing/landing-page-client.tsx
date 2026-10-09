@@ -3,35 +3,39 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
-  ShieldCheck,
-  Eye,
-  FileText,
-  ArrowRight,
-  LayoutDashboard,
-  User,
-  CheckCircle2,
-  Copy,
-  Check,
-  Share2,
-  Lock,
-  Download,
-  Receipt,
-  FileCheck2,
   Sparkles,
-  Layers,
-  History,
+  FileText,
+  CheckCircle2,
+  Share2,
+  Send,
+  Receipt,
+  CreditCard,
+  DollarSign,
+  Lock,
+  Eye,
+  PenTool,
+  ArrowRight,
+  ChevronDown,
   Play,
   X,
-  ExternalLink,
-  ChevronRight,
-  Clock,
+  Building2,
+  Wrench,
   Laptop,
-  Smartphone,
-  PenTool,
-  QrCode,
-  DollarSign,
-  AlertCircle,
+  Palette,
+  Briefcase,
+  Factory,
+  Truck,
+  Layers,
+  ShieldCheck,
+  Check,
   Menu,
+  Clock,
+  Smartphone,
+  HelpCircle,
+  TrendingUp,
+  Bot,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -41,105 +45,151 @@ interface LandingPageProps {
 }
 
 export function LandingPageClient({ isAuthenticated, userEmail }: LandingPageProps) {
-  const [activeFeatureTab, setActiveFeatureTab] = useState(0);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [demoUrl, setDemoUrl] = useState('https://blendandbold.com/q/sec_8f92m1k4092b');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
   const [demoStep, setDemoStep] = useState(0);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [signatureType, setSignatureType] = useState<'draw' | 'type' | 'upload'>('draw');
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [activeAiQuery, setActiveAiQuery] = useState<'pending' | 'reminders' | 'monthly' | 'create'>('pending');
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setDemoUrl(`${window.location.origin}/q/sec_8f92m1k4092b`);
-    }
-  }, []);
+  // Customer Mobile View interactive state
+  const [customerApproved, setCustomerApproved] = useState(false);
+  const [signatureDrawn, setSignatureDrawn] = useState(false);
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(demoUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2200);
-  };
-
-  const featureTabs = [
-    { id: 0, label: 'Professional Quotations', icon: FileText },
-    { id: 1, label: 'Secure Approval Links', icon: Lock },
-    { id: 2, label: 'Real-Time View Tracking', icon: Eye },
-    { id: 3, label: 'Digital Signatures', icon: PenTool },
-    { id: 4, label: 'Instant PDF Generation', icon: Download },
-    { id: 5, label: 'Quotations & Invoices', icon: Receipt },
-    { id: 6, label: 'Audit Logs', icon: History },
+  // FAQ Items
+  const faqItems = [
+    {
+      q: 'How does the 30-day free trial work?',
+      a: 'You get full, unrestricted access to all QuoteFlow features for 30 days without entering any credit card. Create unlimited quotations, send them to clients, convert to invoices, and test AI Copilot. After 30 days, keep all features for just ₹99 per month.',
+    },
+    {
+      q: 'Can I create and send quotes from mobile?',
+      a: 'Yes! QuoteFlow is built mobile-first. You can chat with QuoteFlow AI directly on your smartphone, review calculated totals, and share secure links directly to WhatsApp or email in seconds.',
+    },
+    {
+      q: 'Do my customers need to sign up or download an app?',
+      a: 'Never! Customers simply tap your secure link to open a clean, branded portal on any device. If you enable optional PIN protection, they enter a 4-digit code to view, review, and digitally sign.',
+    },
+    {
+      q: 'Can I customize my company logo and colors?',
+      a: 'Yes. Upload your official company logo, customize invoice notes, tax rates (GST/VAT), currency, payment QR codes, and default terms. You can also pick from multiple themes and corner radiuses.',
+    },
+    {
+      q: 'What payment methods can I display to clients?',
+      a: 'You can showcase UPI QR codes (Google Pay, PhonePe, Paytm, BHIM), direct bank account NEFT/RTGS details, and cryptocurrency wallet addresses directly on your invoices and client view.',
+    },
+    {
+      q: 'How does the QuoteFlow AI Copilot work?',
+      a: 'Simply tell the Copilot in plain English what your client needs (e.g., "Create a quote for 10 Glass Panels at ₹500 each and 5 Batteries at ₹600 for ABC Corp"). It formats the entire quotation, calculates taxes, and lets you confirm and send in one tap.',
+    },
   ];
 
+  // Industry List
+  const industries = [
+    { name: 'Construction & Contractors', icon: Building2 },
+    { name: 'IT Services & Agencies', icon: Laptop },
+    { name: 'Freelancers & Solopreneurs', icon: Briefcase },
+    { name: 'Marketing & Design Studios', icon: Palette },
+    { name: 'Repair & Technical Services', icon: Wrench },
+    { name: 'Wholesale & Trading', icon: Truck },
+    { name: 'Interior Design & Architecture', icon: Layers },
+    { name: 'Business Consultants', icon: TrendingUp },
+    { name: 'Manufacturing & Fabrication', icon: Factory },
+    { name: 'And 50+ Other Industries', icon: Sparkles },
+  ];
+
+  // Demo Walkthrough Steps
   const demoSteps = [
     {
-      title: '1. Create Branded Quotations',
-      desc: 'Quickly select customers, add itemized goods or services, configure discounts and GST/tax in seconds.',
-      badge: 'Creation',
+      title: '1. Tell QuoteFlow AI What You Need',
+      desc: 'Type or speak naturally: "Create a quote for 10 Glass Panels and 5 Batteries for ABC Corp". AI identifies line items, quantities, and pricing instantly.',
+      icon: Bot,
+      badge: 'Natural AI Input',
+    },
+    {
+      title: '2. Review & Confirm Draft In-Chat',
+      desc: 'The draft quotation card appears inside the chat. Subtotals, GST, and totals are computed according to your business defaults.',
       icon: FileText,
+      badge: 'Instant Drafting',
     },
     {
-      title: '2. Share Unguessable Secure Links',
-      desc: 'Send unique unguessable links via WhatsApp or email with optional PIN protection and OTP verification.',
-      badge: 'Distribution',
+      title: '3. Share Secure Link with Optional PIN',
+      desc: 'Send an unguessable private link to the client via WhatsApp or email. Set an optional 4-digit PIN for sensitive quotes.',
       icon: Share2,
+      badge: 'Protected Distribution',
     },
     {
-      title: '3. Real-Time View Alerts & Digital Sign',
-      desc: 'Receive alerts when the client opens the link. Clients review and sign using touch or mouse on any device.',
-      badge: 'Approval',
-      icon: ShieldCheck,
+      title: '4. Client Reviews & Signs Digitally',
+      desc: 'The client opens the mobile-optimized portal, reviews items, signs with finger or mouse, and hits Approve. You get an instant notification.',
+      icon: CheckCircle2,
+      badge: 'Digital Approval',
     },
     {
-      title: '4. Instant 1-Click Invoice & PDF',
-      desc: 'Upon approval, generate an official commercial invoice and cryptographic PDF certificate with one tap.',
-      badge: 'Settlement',
+      title: '5. 1-Click Convert to Invoice & Collect Payment',
+      desc: 'Convert the approved quotation into a sequential commercial invoice with one click. Display your UPI QR code to get paid quickly.',
       icon: Receipt,
+      badge: 'Get Paid Fast',
     },
   ];
 
+  const handleCopyDemoLink = () => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard?.writeText(`${window.location.origin}/q/sec_demo_sample`);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2200);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col justify-between selection:bg-purple-600 selection:text-white relative overflow-hidden font-sans">
-      {/* Background Lighting & Glow Accents */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[620px] pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-[180px] left-1/2 -translate-x-1/2 w-[720px] sm:w-[980px] h-[480px] bg-gradient-to-b from-indigo-600/25 via-purple-600/20 to-transparent blur-[120px] rounded-full" />
-        <div className="absolute top-[80px] left-[20%] w-[340px] h-[340px] bg-blue-600/15 blur-[100px] rounded-full" />
-        <div className="absolute top-[120px] right-[15%] w-[380px] h-[380px] bg-purple-600/15 blur-[110px] rounded-full" />
+    <div className="min-h-screen bg-[#fcfdff] text-slate-900 flex flex-col justify-between selection:bg-indigo-600 selection:text-white font-sans relative overflow-x-hidden">
+      {/* Background Subtle Gradient Lighting */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[650px] pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-[160px] left-1/2 -translate-x-1/2 w-[720px] sm:w-[980px] h-[480px] bg-gradient-to-b from-indigo-200/40 via-violet-100/30 to-transparent blur-[120px] rounded-full" />
+        <div className="absolute top-[60px] left-[15%] w-[320px] h-[320px] bg-blue-100/35 blur-[100px] rounded-full" />
+        <div className="absolute top-[100px] right-[10%] w-[360px] h-[360px] bg-purple-100/35 blur-[110px] rounded-full" />
       </div>
 
       {/* Grid Pattern Overlay */}
-      <div
-        className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none z-0"
-      />
+      <div className="absolute inset-0 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none z-0 opacity-60" />
 
-      {/* Navigation Bar */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#070b14]/80 border-b border-white/[0.08] transition-all">
+      {/* =========================================================================
+          1. NAVIGATION BAR
+      ========================================================================= */}
+      <header className="sticky top-0 z-40 backdrop-blur-md bg-white/85 border-b border-slate-200/80 transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between">
-          {/* Brand Logo */}
+          {/* Brand Logo with Q */}
           <Link href="/" className="flex items-center gap-3 group focus:outline-none">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 flex items-center justify-center font-black text-xl text-white shadow-lg shadow-indigo-600/30 border border-white/20 group-hover:scale-105 transition-transform duration-200">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center font-black text-xl text-white shadow-md shadow-indigo-500/25 border border-white/40 group-hover:scale-105 transition-transform duration-200">
               Q
             </div>
             <div className="flex flex-col">
-              <span className="font-extrabold text-xl tracking-tight text-white flex items-center gap-1.5">
+              <span className="font-extrabold text-xl tracking-tight text-slate-900 leading-tight">
                 QuoteFlow
-                <span className="h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse" />
+              </span>
+              <span className="text-[10px] font-bold text-slate-600 tracking-wide">
+                Powered by BlendAndBold
               </span>
             </div>
           </Link>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
-            <a href="#features" className="hover:text-white transition-colors">
+          <nav className="hidden lg:flex items-center gap-7 text-xs font-semibold text-slate-600">
+            <a href="#features" className="hover:text-indigo-600 transition-colors">
               Features
             </a>
-            <a href="#workflow" className="hover:text-white transition-colors">
-              Workflow
+            <a href="#ai-copilot" className="hover:text-indigo-600 transition-colors">
+              AI Copilot
             </a>
-            <a href="#security" className="hover:text-white transition-colors">
-              Security
+            <a href="#flow" className="hover:text-indigo-600 transition-colors">
+              How It Works
             </a>
-            <a href="#faq" className="hover:text-white transition-colors">
+            <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+              Pricing
+            </a>
+            <a href="#industries" className="hover:text-indigo-600 transition-colors">
+              Industries
+            </a>
+            <a href="#faq" className="hover:text-indigo-600 transition-colors">
               FAQ
             </a>
           </nav>
@@ -148,13 +198,13 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
           <div className="hidden sm:flex items-center gap-3">
             {isAuthenticated ? (
               <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 hidden lg:inline">
-                  Signed in as <span className="font-semibold text-slate-200">{userEmail}</span>
+                <span className="text-xs text-slate-500 hidden xl:inline">
+                  Signed in as <span className="font-semibold text-slate-800">{userEmail}</span>
                 </span>
                 <Link href="/dashboard">
-                  <Button className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-lg shadow-indigo-600/30 gap-2 rounded-xl px-5 h-10 border border-white/10">
-                    <LayoutDashboard className="h-4 w-4" />
-                    <span>Open Dashboard</span>
+                  <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold shadow-md shadow-indigo-600/20 gap-2 rounded-xl px-5 h-10 border border-indigo-500/30">
+                    <span>Go to Dashboard</span>
+                    <ArrowRight className="h-4 w-4" />
                   </Button>
                 </Link>
               </div>
@@ -163,14 +213,15 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                 <Link href="/login">
                   <Button
                     variant="ghost"
-                    className="text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-xl font-medium px-4 h-10"
+                    className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl font-bold px-4 h-10 text-xs"
                   >
                     Log In
                   </Button>
                 </Link>
                 <Link href="/register">
-                  <Button className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-lg shadow-indigo-600/25 rounded-xl px-5 h-10 border border-white/10">
-                    Sign Up Free
+                  <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold shadow-md shadow-indigo-600/20 rounded-xl px-5 h-10 text-xs gap-1.5 border border-indigo-500/20">
+                    <span>Start Free</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </Button>
                 </Link>
               </>
@@ -178,11 +229,12 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
           </div>
 
           {/* Mobile Hamburger Button */}
-          <div className="sm:hidden flex items-center">
+          <div className="lg:hidden flex items-center">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-lg focus:outline-none"
+              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg focus:outline-none"
+              aria-label="Toggle Menu"
             >
               {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
@@ -191,58 +243,69 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
 
         {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
-          <div className="sm:hidden border-b border-white/[0.08] bg-[#080d1a]/95 backdrop-blur-xl px-5 py-4 space-y-3">
-            <div className="flex flex-col space-y-2 text-sm font-medium text-slate-300">
+          <div className="lg:hidden border-b border-slate-200 bg-white/98 backdrop-blur-xl px-5 py-4 space-y-3 shadow-lg">
+            <div className="flex flex-col space-y-2 text-sm font-semibold text-slate-700">
               <a
                 href="#features"
                 onClick={() => setMobileMenuOpen(false)}
-                className="py-1.5 hover:text-white transition-colors"
+                className="py-1.5 hover:text-indigo-600 transition-colors"
               >
                 Features
               </a>
               <a
-                href="#workflow"
+                href="#ai-copilot"
                 onClick={() => setMobileMenuOpen(false)}
-                className="py-1.5 hover:text-white transition-colors"
+                className="py-1.5 hover:text-indigo-600 transition-colors"
               >
-                Workflow
+                AI Copilot
               </a>
               <a
-                href="#security"
+                href="#flow"
                 onClick={() => setMobileMenuOpen(false)}
-                className="py-1.5 hover:text-white transition-colors"
+                className="py-1.5 hover:text-indigo-600 transition-colors"
               >
-                Security
+                How It Works
+              </a>
+              <a
+                href="#pricing"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-1.5 hover:text-indigo-600 transition-colors"
+              >
+                Pricing
+              </a>
+              <a
+                href="#industries"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-1.5 hover:text-indigo-600 transition-colors"
+              >
+                Industries
               </a>
               <a
                 href="#faq"
                 onClick={() => setMobileMenuOpen(false)}
-                className="py-1.5 hover:text-white transition-colors"
+                className="py-1.5 hover:text-indigo-600 transition-colors"
               >
                 FAQ
               </a>
             </div>
-            <div className="pt-3 border-t border-white/[0.08] flex flex-col gap-2">
+
+            <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
               {isAuthenticated ? (
                 <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)}>
-                  <Button className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl">
-                    <LayoutDashboard className="h-4 w-4 mr-2" />
-                    Open Dashboard
+                  <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl h-10">
+                    Go to Dashboard
                   </Button>
                 </Link>
               ) : (
                 <>
                   <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
-                    <Button
-                      variant="ghost"
-                      className="w-full text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-xl"
-                    >
+                    <Button variant="outline" className="w-full rounded-xl font-bold h-10">
                       Log In
                     </Button>
                   </Link>
                   <Link href="/register" onClick={() => setMobileMenuOpen(false)}>
-                    <Button className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl">
-                      Sign Up Free
+                    <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl h-10">
+                      Start Free Trial
                     </Button>
                   </Link>
                 </>
@@ -252,1154 +315,956 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
         )}
       </header>
 
-      {/* Main Content Area */}
-      <main className="relative z-10 flex-1">
-        {/* HERO SECTION */}
-        <section className="pt-16 pb-12 sm:pt-24 sm:pb-20 px-4 sm:px-6 max-w-7xl mx-auto text-center">
+      {/* =========================================================================
+          2. HERO SECTION
+      ========================================================================= */}
+      <section className="relative z-10 pt-12 pb-16 sm:pt-20 sm:pb-24 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+        <div className="flex flex-col items-center text-center space-y-6 max-w-4xl mx-auto">
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/[0.08] px-4 py-1.5 text-xs sm:text-sm font-semibold text-indigo-300 shadow-inner backdrop-blur-md mb-8 animate-fade-in">
-            <span className="h-2 w-2 rounded-full bg-indigo-400 animate-ping" />
-            <span>Cloud-Based Quotation & Digital Approval SaaS</span>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-200/80 shadow-xs">
+            <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+            <span className="text-xs font-bold text-indigo-900 tracking-wide">
+              ✦ AI Powered Quotation &amp; Payment Platform
+            </span>
           </div>
 
-          {/* High-Impact Headline */}
-          <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight text-white leading-[1.12] max-w-5xl mx-auto mb-6">
-            <span className="block sm:inline text-white">Create Estimates. </span>
-            <span className="block sm:inline text-slate-100">Send Quotes.</span>
-            <span className="block sm:mt-1">
-              <span className="block sm:inline bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-                Invoice Smarter.{' '}
-              </span>
-              <span className="block sm:inline text-white">Win More Business.</span>
+          {/* Heading */}
+          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black tracking-tight text-slate-900 leading-[1.08]">
+            Create Quotes With AI.{' '}
+            <span className="block mt-1 bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 bg-clip-text text-transparent">
+              Get Approved. Get Paid.
             </span>
           </h1>
 
-          {/* Description */}
-          <p className="text-base sm:text-lg md:text-xl text-slate-300/90 max-w-2xl mx-auto leading-relaxed mb-10">
-            QuoteFlow helps businesses create professional quotations, share secure approval links,
-            track client engagement in real-time, collect digital signatures and generate invoices —
-            all in one powerful cloud-based platform.
+          {/* Subtitle */}
+          <p className="text-base sm:text-xl text-slate-600 max-w-2xl font-normal leading-relaxed">
+            Tell QuoteFlow AI what you need. It creates professional quotations, lets you edit them conversationally, sends them for approval, converts to invoices, and tracks your payments.
           </p>
 
-          {/* Hero CTAs */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
-            {isAuthenticated ? (
-              <Link href="/dashboard" className="w-full sm:w-auto">
-                <Button className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-xl shadow-indigo-600/30 px-8 py-3.5 h-12 rounded-full flex items-center justify-center gap-2 text-base border border-white/15 transition-all">
-                  <LayoutDashboard className="h-5 w-5" />
-                  <span>Enter Business Dashboard</span>
-                  <ArrowRight className="h-5 w-5 ml-1" />
-                </Button>
-              </Link>
-            ) : (
-              <Link href="/register" className="w-full sm:w-auto">
-                <Button className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-xl shadow-indigo-600/30 px-8 py-3.5 h-12 rounded-full flex items-center justify-center gap-2 text-base border border-white/15 transition-all group">
-                  <span>Sign Up Free</span>
-                  <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </Link>
-            )}
+          {/* CTAs */}
+          <div className="flex flex-col sm:flex-row items-center gap-3.5 pt-2 w-full sm:w-auto">
+            <Link href="/register" className="w-full sm:w-auto">
+              <Button className="w-full sm:w-auto h-12 px-8 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-extrabold text-sm shadow-lg shadow-indigo-600/25 border border-indigo-500/20 gap-2">
+                <span>Start Free</span>
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
 
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => setIsDemoModalOpen(true)}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 h-12 rounded-full border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 hover:text-white font-semibold text-base backdrop-blur-md transition-all cursor-pointer"
+              className="w-full sm:w-auto h-12 px-6 rounded-xl border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm shadow-xs gap-2"
             >
-              <div className="h-6 w-6 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                <Play className="h-3 w-3 fill-current ml-0.5" />
-              </div>
-              <span>Watch Demo</span>
-            </button>
+              <Play className="h-4 w-4 text-indigo-600 fill-indigo-600" />
+              <span>Watch 60-sec Demo</span>
+            </Button>
           </div>
 
-          {/* Trust Highlights */}
-          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8 text-xs text-slate-400 pt-2 mb-16">
+          {/* Trust Value Props */}
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-2 text-xs font-semibold text-slate-500">
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              Instant cloud deployment
+              <Check className="h-4 w-4 text-emerald-600 stroke-[2.5]" />
+              No credit card required
             </span>
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              Bank-grade SHA-256 signatures
+              <Check className="h-4 w-4 text-emerald-600 stroke-[2.5]" />
+              Optional PIN protection
             </span>
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              Real-time audit certificates
+              <Check className="h-4 w-4 text-emerald-600 stroke-[2.5]" />
+              Digital approvals
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Check className="h-4 w-4 text-emerald-600 stroke-[2.5]" />
+              Payment tracking
+            </span>
+          </div>
+        </div>
+
+        {/* =========================================================================
+            HERO MOCKUP: QuoteFlow AI Conversational Quote Generation Card
+        ========================================================================= */}
+        <div className="mt-12 sm:mt-16 max-w-4xl mx-auto relative">
+          {/* Annotated Speech Callout Left */}
+          <div className="hidden md:flex absolute -left-8 -top-8 z-20 flex-col items-start max-w-xs animate-bounce-subtle pointer-events-none">
+            <span className="bg-indigo-600 text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md mb-1.5 flex items-center gap-1">
+              <Sparkles className="h-3 w-3" />
+              Just tell what you need
+            </span>
+            <div className="bg-white border border-indigo-200 rounded-2xl p-3 shadow-lg text-xs font-semibold text-slate-800">
+              💬 &ldquo;Create a quote for Glass 500 and Battery 600 for ABC Customer&rdquo;
+            </div>
+          </div>
+
+          {/* Annotated Callout Right */}
+          <div className="hidden md:flex absolute -right-6 top-12 z-20 flex-col items-end max-w-xs pointer-events-none">
+            <span className="bg-emerald-600 text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md mb-1.5 flex items-center gap-1">
+              <Check className="h-3 w-3" />
+              AI creates your quote instantly
             </span>
           </div>
 
-          {/* PRODUCT UI MOCKUP SHOWCASE (show_product_mockup: true) */}
-          <div id="mockup" className="relative max-w-5xl mx-auto pt-2">
-            {/* Ambient Backlight Glow */}
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 via-indigo-600/25 to-purple-600/20 blur-3xl -z-10 rounded-3xl opacity-80" />
-
-            {/* Floating Live Engagement Indicators */}
-            <div className="hidden lg:flex items-center gap-2.5 absolute -top-5 -left-6 z-20 bg-slate-900/90 border border-indigo-500/30 backdrop-blur-xl px-4 py-2.5 rounded-2xl shadow-2xl animate-bounce-slow">
-              <div className="h-8 w-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
-                <Eye className="h-4 w-4" />
+          {/* The Hero Card */}
+          <div className="rounded-3xl border border-slate-200 bg-white/95 backdrop-blur-xl shadow-2xl p-4 sm:p-7 transition-all ring-1 ring-slate-900/5">
+            {/* Card Window Top Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="h-3 w-3 rounded-full bg-rose-400" />
+                <div className="h-3 w-3 rounded-full bg-amber-400" />
+                <div className="h-3 w-3 rounded-full bg-emerald-400" />
+                <span className="ml-2 text-xs font-mono font-semibold text-slate-400">
+                  QuoteFlow AI • Live Interactive Preview
+                </span>
               </div>
-              <div className="text-left">
-                <p className="text-xs font-bold text-white flex items-center gap-1.5">
-                  Client Viewed Quotation
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                </p>
-                <p className="text-[11px] text-slate-400">Just now · Chrome on macOS</p>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Draft • Ready to send
+                </span>
               </div>
             </div>
 
-            <div className="hidden lg:flex items-center gap-2.5 absolute -bottom-5 -right-6 z-20 bg-slate-900/90 border border-emerald-500/30 backdrop-blur-xl px-4 py-2.5 rounded-2xl shadow-2xl">
-              <div className="h-8 w-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                <ShieldCheck className="h-4 w-4" />
-              </div>
-              <div className="text-left">
-                <p className="text-xs font-bold text-white">Digitally Signed & Approved</p>
-                <p className="text-[11px] text-slate-400">Hash verified · SHA-256 certificate</p>
-              </div>
-            </div>
-
-            {/* Sleek Browser Container */}
-            <div className="rounded-2xl sm:rounded-3xl border border-white/[0.12] bg-[#0c1222]/95 shadow-2xl overflow-hidden backdrop-blur-xl text-left">
-              {/* macOS Window Titlebar */}
-              <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/[0.08] bg-slate-950/60">
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded-full bg-rose-500/80" />
-                  <div className="h-3 w-3 rounded-full bg-amber-500/80" />
-                  <div className="h-3 w-3 rounded-full bg-emerald-500/80" />
-                </div>
-
-                <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06] text-xs text-slate-400 max-w-[280px] sm:max-w-md w-full justify-center">
-                  <Lock className="h-3 w-3 text-emerald-400" />
-                  <span className="truncate">https://blendandbold.com/quotations/Q-000042</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                  <span className="hidden sm:inline-block px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-medium">
-                    Live Mode
-                  </span>
+            {/* Simulated AI Conversation Flow */}
+            <div className="space-y-4">
+              {/* User Prompt */}
+              <div className="flex justify-end">
+                <div className="bg-indigo-600 text-white rounded-2xl rounded-tr-xs px-4 py-2.5 text-xs sm:text-sm font-medium shadow-xs max-w-md">
+                  Create a quote for Glass 500 and Battery 600 for ABC Customer.
                 </div>
               </div>
 
-              {/* Mockup Inside: Realistic QuoteFlow UI */}
-              <div className="p-4 sm:p-7 space-y-6">
-                {/* Header Action Bar */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
-                  <div className="flex items-center gap-3">
+              {/* AI Response Card */}
+              <div className="flex items-start gap-3">
+                <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-xs">
+                  Q
+                </div>
+
+                <div className="flex-1 bg-slate-50 border border-slate-200/80 rounded-2xl rounded-tl-xs p-4 sm:p-6 space-y-4 text-left">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-3">
                     <div>
-                      <div className="flex items-center gap-2.5">
-                        <h2 className="text-xl sm:text-2xl font-black text-white">Q-000042</h2>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          <Check className="h-3 w-3" /> Approved
-                        </span>
+                      <h4 className="font-bold text-sm text-slate-900">Quotation Draft</h4>
+                      <p className="text-xs text-slate-500">Customer: <strong className="text-slate-800">ABC Customer</strong></p>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg w-fit">
+                      QT-2026-0048
+                    </span>
+                  </div>
+
+                  {/* Items Table */}
+                  <div className="divide-y divide-slate-200/60 text-xs">
+                    <div className="py-2.5 flex items-center justify-between font-medium text-slate-700">
+                      <div>
+                        <p className="font-bold text-slate-900">Glass Panel (12mm Toughened)</p>
+                        <p className="text-[11px] text-slate-400">Qty 10 × ₹500</p>
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Created on 01 Oct 2026 · Valid until 31 Oct 2026 · Client: Apex Global Tech
-                      </p>
+                      <span className="font-bold text-slate-900">₹5,000</span>
+                    </div>
+
+                    <div className="py-2.5 flex items-center justify-between font-medium text-slate-700">
+                      <div>
+                        <p className="font-bold text-slate-900">Heavy-Duty Battery (150Ah)</p>
+                        <p className="text-[11px] text-slate-400">Qty 5 × ₹600</p>
+                      </div>
+                      <span className="font-bold text-slate-900">₹3,000</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <div className="px-3 py-1.5 rounded-lg bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-1.5">
-                      <Receipt className="h-3.5 w-3.5" />
-                      <span>Create Invoice</span>
+                  {/* Totals Summary */}
+                  <div className="pt-2 border-t border-slate-200/80 space-y-1.5 text-xs text-slate-600">
+                    <div className="flex justify-between">
+                      <span>Subtotal</span>
+                      <span className="font-semibold text-slate-800">₹8,000</span>
                     </div>
-                    <a
-                      href="/api/public/pdf?sample=true"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-slate-200 border border-white/[0.08] font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="Preview restricted sample PDF specimen"
+                    <div className="flex justify-between">
+                      <span>GST (18%)</span>
+                      <span className="font-semibold text-slate-800">₹1,440</span>
+                    </div>
+                    <div className="flex justify-between text-sm sm:text-base font-extrabold text-slate-900 pt-1 border-t border-slate-200/60">
+                      <span>Total Amount</span>
+                      <span className="text-indigo-600">₹9,440</span>
+                    </div>
+                  </div>
+
+                  {/* Direct Action Buttons in AI Preview */}
+                  <div className="flex flex-wrap items-center gap-2.5 pt-2">
+                    <Link href="/register">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-xs rounded-xl shadow-xs gap-1.5 px-4 h-9"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        <span>Confirm &amp; Send</span>
+                      </Button>
+                    </Link>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsDemoModalOpen(true)}
+                      className="border-slate-300 text-slate-700 hover:bg-slate-100 font-bold text-xs rounded-xl h-9 px-4"
                     >
-                      <Download className="h-3.5 w-3.5" />
-                      <span>Sample PDF</span>
-                    </a>
-                    <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium flex items-center gap-1.5">
-                      <Share2 className="h-3.5 w-3.5" />
-                      <span>Client Link</span>
-                    </div>
+                      <span>Edit Quote</span>
+                    </Button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-                {/* Status Notice Card */}
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.08] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
-                    <div>
-                      <p className="text-xs font-bold text-emerald-200">
-                        Quotation Officially Approved & Digitally Signed
-                      </p>
-                      <p className="text-[11px] text-emerald-300/80">
-                        Signed by Alex Rivera (alex@apextech.io) · Verification Hash:{' '}
-                        <span className="font-mono text-emerald-200">9c4e8a1f...77b</span>
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[11px] font-semibold text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-md self-start sm:self-center">
-                    Ready for Invoicing
-                  </span>
-                </div>
+      {/* =========================================================================
+          3. SALES FLOW SECTION: "One conversation. The entire sales flow."
+      ========================================================================= */}
+      <section id="flow" className="py-16 sm:py-24 bg-slate-50/70 border-y border-slate-200/70 relative">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="text-center max-w-3xl mx-auto mb-14 space-y-3">
+            <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900">
+              One conversation. The entire sales flow.
+            </h2>
+            <p className="text-base text-slate-600">
+              From client request to final bank settlement in minutes, completely automated.
+            </p>
+          </div>
 
-                {/* Line Items Table Preview */}
-                <div className="rounded-xl border border-white/[0.08] bg-slate-950/40 overflow-hidden text-xs">
-                  <div className="grid grid-cols-12 px-4 py-2.5 bg-white/[0.03] border-b border-white/[0.06] font-semibold text-slate-400">
-                    <div className="col-span-6 sm:col-span-7">Item Description</div>
-                    <div className="col-span-2 text-right">Qty</div>
-                    <div className="col-span-2 text-right">Unit Price</div>
-                    <div className="col-span-2 sm:col-span-1 text-right">Total</div>
-                  </div>
-
-                  <div className="divide-y divide-white/[0.04]">
-                    <div className="grid grid-cols-12 px-4 py-3 items-center text-slate-200">
-                      <div className="col-span-6 sm:col-span-7 font-medium">
-                        Enterprise Cloud Hosting & Migration Architecture
-                        <span className="block text-[11px] text-slate-400 font-normal">
-                          Multi-region cluster with automated failover & backup
-                        </span>
+          {/* 6 Step Cards with Sequential Connected Arrows */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            {[
+              {
+                step: '1',
+                title: 'Tell AI what you need',
+                desc: 'Speak or type items, rates, and customer details naturally.',
+                icon: Bot,
+                color: 'text-indigo-600 bg-indigo-50 border-indigo-200',
+              },
+              {
+                step: '2',
+                title: 'Create Quotation',
+                desc: 'AI calculates taxes, discounts, and formats a polished document.',
+                icon: FileText,
+                color: 'text-violet-600 bg-violet-50 border-violet-200',
+              },
+              {
+                step: '3',
+                title: 'Send to Customer',
+                desc: 'Instant private link via WhatsApp or email with optional PIN protection.',
+                icon: Share2,
+                color: 'text-blue-600 bg-blue-50 border-blue-200',
+              },
+              {
+                step: '4',
+                title: 'Customer Approves',
+                desc: 'Client reviews, digitally signs with touch, or requests changes.',
+                icon: CheckCircle2,
+                color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+              },
+              {
+                step: '5',
+                title: 'Create Invoice',
+                desc: '1-click conversion to an official sequential commercial invoice.',
+                icon: Receipt,
+                color: 'text-amber-600 bg-amber-50 border-amber-200',
+              },
+              {
+                step: '6',
+                title: 'Track Payment',
+                desc: 'Live payment status, UPI QR codes, and automatic reminders.',
+                icon: DollarSign,
+                color: 'text-rose-600 bg-rose-50 border-rose-200',
+              },
+            ].map((s, idx) => {
+              const Icon = s.icon;
+              return (
+                <div
+                  key={s.step}
+                  className="relative rounded-2xl bg-white border border-slate-200/80 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between group"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className={`h-10 w-10 rounded-xl border flex items-center justify-center ${s.color}`}>
+                        <Icon className="h-5 w-5" />
                       </div>
-                      <div className="col-span-2 text-right text-slate-400">1 unit</div>
-                      <div className="col-span-2 text-right text-slate-300">$4,500.00</div>
-                      <div className="col-span-2 sm:col-span-1 text-right font-semibold text-white">
-                        $4,500.00
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-12 px-4 py-3 items-center text-slate-200">
-                      <div className="col-span-6 sm:col-span-7 font-medium">
-                        Annual 24/7 Priority SLA & DevOps Support
-                        <span className="block text-[11px] text-slate-400 font-normal">
-                          Dedicated Slack bridge & sub-15min response guarantee
-                        </span>
-                      </div>
-                      <div className="col-span-2 text-right text-slate-400">12 mos</div>
-                      <div className="col-span-2 text-right text-slate-300">$350.00</div>
-                      <div className="col-span-2 sm:col-span-1 text-right font-semibold text-white">
-                        $4,200.00
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Subtotals & Grand Total Row */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 pt-2">
-                  <div className="text-xs text-slate-400 space-y-1">
-                    <p className="font-semibold text-slate-300">Payment Terms</p>
-                    <p>50% advance upon digital agreement, balance within 30 days of delivery.</p>
-                  </div>
-
-                  <div className="w-full sm:w-64 space-y-1.5 text-xs text-right border-t sm:border-t-0 border-white/[0.06] pt-3 sm:pt-0">
-                    <div className="flex justify-between text-slate-400">
-                      <span>Subtotal:</span>
-                      <span className="font-medium text-slate-200">$8,700.00</span>
-                    </div>
-                    <div className="flex justify-between text-slate-400">
-                      <span>Commercial Discount:</span>
-                      <span className="font-medium text-emerald-400">-$500.00</span>
-                    </div>
-                    <div className="flex justify-between text-slate-400">
-                      <span>Tax / GST (18%):</span>
-                      <span className="font-medium text-slate-200">$1,476.00</span>
-                    </div>
-                    <div className="flex justify-between pt-2 border-t border-white/[0.08] text-sm font-black text-white">
-                      <span>Grand Total:</span>
-                      <span className="text-lg bg-gradient-to-r from-blue-300 via-indigo-200 to-purple-300 bg-clip-text text-transparent">
-                        $9,676.00
+                      <span className="font-mono text-xs font-black text-slate-600 group-hover:text-indigo-600 transition-colors">
+                        0{s.step}
                       </span>
                     </div>
+
+                    <h3 className="font-bold text-sm text-slate-900 group-hover:text-indigo-600 transition-colors">
+                      {s.title}
+                    </h3>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      {s.desc}
+                    </p>
                   </div>
+
+                  {idx < 5 && (
+                    <div className="hidden xl:block absolute -right-3 top-1/2 -translate-y-1/2 z-10 text-slate-300">
+                      <ArrowRight className="h-4 w-4" />
+                    </div>
+                  )}
                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* FEATURES SHOWCASE (7 CORE FEATURES WITH REAL UI VISUALS) */}
-        <section id="features" className="py-20 px-4 sm:px-6 max-w-7xl mx-auto">
-          <div className="text-center max-w-3xl mx-auto mb-14">
-            <h2 className="text-xs sm:text-sm font-bold tracking-widest text-indigo-400 uppercase mb-3">
-              Complete Feature Suite
-            </h2>
-            <p className="text-3xl sm:text-5xl font-black text-white tracking-tight">
-              Built for Modern Sales Workflows
-            </p>
-            <p className="text-slate-300 text-sm sm:text-base mt-3">
-              Explore how QuoteFlow replaces disjointed Word files, email chains, and manual invoices
-              with one cohesive SaaS experience.
-            </p>
-          </div>
-
-          {/* Interactive Feature Category Tabs */}
-          <div className="flex items-center justify-start sm:justify-center gap-2 overflow-x-auto pb-4 mb-10 no-scrollbar">
-            {featureTabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeFeatureTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveFeatureTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
-                    isActive
-                      ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white border-white/20 shadow-lg shadow-indigo-600/30 scale-105'
-                      : 'bg-slate-900/60 text-slate-400 border-white/[0.08] hover:text-white hover:bg-slate-800/80'
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  <span>{tab.label}</span>
-                </button>
               );
             })}
           </div>
+        </div>
+      </section>
 
-          {/* Feature Details Container */}
-          <div className="rounded-3xl border border-white/[0.1] bg-[#0c1224]/80 backdrop-blur-xl p-6 sm:p-10 shadow-2xl transition-all">
-            {/* Feature 1: Professional Quotations */}
-            {activeFeatureTab === 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-semibold border border-indigo-500/30">
-                    <FileText className="h-3.5 w-3.5" /> Feature 01
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Professional Quotations
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Create and send beautiful, branded quotations in minutes. Pick customers from your
-                    address book, apply custom line-item discounts, compute taxes automatically, and
-                    present your brand with pride.
-                  </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Multi-currency support with real-time tax calculation
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Itemized goods and services with custom units and rates
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Dynamic company logo, payment instructions, and terms
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-5 shadow-inner">
-                  {/* Realistic Quote Document Mockup */}
-                  <div className="border border-white/[0.06] rounded-xl p-5 bg-[#090e1c] space-y-4 text-xs">
-                    <div className="flex justify-between items-start border-b border-white/[0.06] pb-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white text-sm">
-                          Q
-                        </div>
-                        <div>
-                          <p className="font-bold text-white text-sm">Pozone Technologies</p>
-                          <p className="text-slate-400 text-[11px]">invoicing@pozone.com</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-slate-200">QUOTATION</p>
-                        <p className="text-indigo-400 font-mono">Q-000108</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-[11px]">
-                      <div>
-                        <p className="text-slate-500 font-semibold uppercase">Quoted To</p>
-                        <p className="text-white font-medium">CyberShield Networks Inc.</p>
-                        <p className="text-slate-400">Seattle, WA · VAT #US882910</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-slate-500 font-semibold uppercase">Dates</p>
-                        <p className="text-slate-300">Issued: 01 Oct 2026</p>
-                        <p className="text-amber-400 font-medium">Valid until: 31 Oct 2026</p>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border border-white/[0.06] bg-slate-900/60 p-3 space-y-2">
-                      <div className="flex justify-between font-medium text-slate-200">
-                        <span>Managed Security & Threat Intelligence (Q4)</span>
-                        <span className="font-bold text-white">$6,400.00</span>
-                      </div>
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>Zero-Trust Endpoint Configuration (50 Seats)</span>
-                        <span>$2,500.00</span>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-2 font-bold text-sm text-white border-t border-white/[0.06]">
-                      <span className="text-slate-400 text-xs">Total Quoted Value</span>
-                      <span className="text-indigo-300 font-mono text-base">$8,900.00 USD</span>
-                    </div>
-                  </div>
-                </div>
+      {/* =========================================================================
+          4. TWO-COLUMN INTERACTIVE SHOWCASE
+          Left: AI Copilot for Your Business
+          Right: What Your Customer Sees (Mobile Phone Frame)
+      ========================================================================= */}
+      <section id="ai-copilot" className="py-16 sm:py-24 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-stretch">
+          {/* COLUMN 1: AI Copilot for Your Business */}
+          <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-sm flex flex-col justify-between space-y-6">
+            <div className="space-y-3">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">
+                <Bot className="h-3.5 w-3.5" />
+                <span>Executive AI Assistant</span>
               </div>
-            )}
+              <h3 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+                AI Copilot for Your Business
+              </h3>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Ask questions, generate instant business reports, and manage quotations naturally without opening multiple tabs.
+              </p>
 
-            {/* Feature 2: Secure Approval Links */}
-            {activeFeatureTab === 1 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold border border-blue-500/30">
-                    <Lock className="h-3.5 w-3.5" /> Feature 02
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Secure Approval Links
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Share secure and unique quotation approval links with customers. Each link uses an
-                    unguessable cryptographic token, preventing search crawler indexing or unauthorized access.
-                  </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Unguessable 256-bit tokenized customer URLs
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Optional PIN-code authentication or SMS/Email OTP
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      1-click instant sharing via WhatsApp, Slack, or Email
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                        Customer Public Approval Link
-                      </label>
-                      <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                        <Lock className="h-3 w-3" /> Demo PIN: <strong>123456</strong>
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 rounded-xl bg-slate-900 border border-white/[0.1] p-1.5 sm:pr-2">
-                      <div className="flex-1 px-3 py-2 text-xs font-mono text-indigo-300 truncate">
-                        {demoUrl}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={handleCopyLink}
-                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-white/[0.08]"
-                        >
-                          {copiedLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                          <span>{copiedLink ? 'Copied!' : 'Copy'}</span>
-                        </button>
-                        <Link
-                          href="/q/sec_8f92m1k4092b"
-                          target="_blank"
-                          className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-500/20 whitespace-nowrap"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          <span>Open Demo Portal</span>
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-300">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-indigo-400 shrink-0" />
-                      <span>
-                        <strong>Interactive Demo Portal:</strong> Try unlocking with Demo PIN <code className="bg-slate-900 px-1.5 py-0.5 rounded text-white font-mono font-bold">123456</code>
-                      </span>
-                    </div>
-                    <Link
-                      href="/q/sec_8f92m1k4092b"
-                      target="_blank"
-                      className="font-semibold text-white hover:text-indigo-200 flex items-center gap-1 text-[11px] underline underline-offset-2"
-                    >
-                      <span>Launch Portal</span>
-                      <ArrowRight className="h-3 w-3" />
-                    </Link>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] text-xs">
-                      <p className="font-bold text-emerald-300 flex items-center gap-1.5">
-                        <ShieldCheck className="h-4 w-4" /> PIN Gate Security
-                      </p>
-                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
-                        Protected with Demo PIN <strong className="text-slate-200 font-mono">123456</strong>. Enter or auto-fill PIN to unlock financial breakdown & digital sign-off.
-                      </p>
-                    </div>
-                    <div className="p-3.5 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.05] text-xs">
-                      <p className="font-bold text-indigo-300 flex items-center gap-1.5">
-                        <Share2 className="h-4 w-4" /> Instant Delivery
-                      </p>
-                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
-                        Send formatted messages directly to client WhatsApp without saving contacts.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Feature 3: Real-Time View Tracking */}
-            {activeFeatureTab === 2 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 text-xs font-semibold border border-purple-500/30">
-                    <Eye className="h-3.5 w-3.5" /> Feature 03
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Real-Time View Tracking
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Know when customers open, view, sign and approve quotations. Stop wondering if your
-                    estimate was received — get instant telemetry with browser, device, and timestamp logs.
-                  </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      First view and repeat engagement counters
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Client device & IP location telemetry
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Time-to-approval analytics for your sales pipeline
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner">
-                  {/* Timeline with Sent, Viewed, Signed, and Approved Events */}
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3.5 relative">
-                      <div className="h-8 w-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/30 z-10">
-                        <Share2 className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="flex-1 pb-4 border-b border-white/[0.06]">
-                        <div className="flex justify-between items-center text-xs">
-                          <p className="font-bold text-white">Quotation Dispatched</p>
-                          <span className="text-slate-400 text-[11px]">Today, 10:14 AM</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Sent via secure public link by Subesh (Sales Director)
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3.5 relative">
-                      <div className="h-8 w-8 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 border border-purple-500/30 z-10">
-                        <Eye className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="flex-1 pb-4 border-b border-white/[0.06]">
-                        <div className="flex justify-between items-center text-xs">
-                          <p className="font-bold text-white flex items-center gap-1.5">
-                            Customer Viewed Document
-                            <span className="px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 text-[10px]">
-                              View #1
-                            </span>
-                          </p>
-                          <span className="text-slate-400 text-[11px]">Today, 10:22 AM</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Opened on Chrome 129 · Apple iPad OS · IP: 49.37.194.88
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3.5 relative">
-                      <div className="h-8 w-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30 z-10">
-                        <PenTool className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="flex-1 pb-4 border-b border-white/[0.06]">
-                        <div className="flex justify-between items-center text-xs">
-                          <p className="font-bold text-white">Digital Signature Captured</p>
-                          <span className="text-slate-400 text-[11px]">Today, 10:35 AM</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Drawn signature submitted by David Kim (VP Technology)
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3.5 relative">
-                      <div className="h-8 w-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30 z-10">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center text-xs">
-                          <p className="font-bold text-emerald-300">Officially Approved & Locked</p>
-                          <span className="text-slate-400 text-[11px]">Today, 10:36 AM</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 font-mono text-[10px]">
-                          Cryptographic hash generated: 4e89bb219f8ca730a911762c...
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Feature 4: Digital Signatures */}
-            {activeFeatureTab === 3 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-semibold border border-emerald-500/30">
-                    <PenTool className="h-3.5 w-3.5" /> Feature 04
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Digital Signatures
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Allow clients to sign quotations using touch, mouse or pen. Zero friction — clients do
-                    not need to create accounts, install third-party plugins, or print documents.
-                  </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Touch-friendly signature pad with pen velocity smoothing
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Type-to-sign fonts and company seal uploads
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Legally binding audit stamp with IP & timestamp watermark
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner space-y-4">
-                  {/* Signature UI Option Tabs */}
-                  <div className="flex items-center justify-between border-b border-white/[0.06] pb-3 text-xs">
-                    <p className="font-bold text-white">Digital Signature Pad</p>
-                    <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-white/[0.06]">
-                      <button
-                        type="button"
-                        onClick={() => setSignatureType('draw')}
-                        className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                          signatureType === 'draw'
-                            ? 'bg-indigo-600 text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Draw
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSignatureType('type')}
-                        className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                          signatureType === 'type'
-                            ? 'bg-indigo-600 text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Type
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSignatureType('upload')}
-                        className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                          signatureType === 'upload'
-                            ? 'bg-indigo-600 text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Upload
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Canvas Visual */}
-                  <div className="h-32 rounded-xl border border-dashed border-white/[0.15] bg-slate-900/60 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-                    <span className="font-serif italic text-3xl text-indigo-300 select-none rotate-[-4deg]">
-                      Sarah Jenkins
-                    </span>
-                    <div className="absolute bottom-2 right-3 text-[10px] text-slate-500 font-mono">
-                      Timestamp: 2026-10-01 10:35:42 UTC
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs text-slate-300">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                    <span>I confirm I am authorized to digitally approve and execute this order.</span>
-                  </div>
-
-                  <div className="p-2.5 rounded-lg bg-emerald-500/[0.08] border border-emerald-500/20 flex items-center justify-between text-[11px]">
-                    <span className="text-emerald-300 font-semibold">Verification Certificate Active</span>
-                    <span className="font-mono text-emerald-400">SHA-256 Validated</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Feature 5: Instant PDF Generation */}
-            {activeFeatureTab === 4 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-semibold border border-indigo-500/30">
-                    <Download className="h-3.5 w-3.5" /> Feature 05
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Instant PDF Generation
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Generate professional server-side quotation and invoice PDFs. High-resolution vector
-                    layouts, complete with verification watermarks, company branding, and mobile-scannable QR codes.
-                  </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      100% server-side deterministic PDF rendering
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Tamper-evident QR code for instant phone authenticity verification
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Dual quotation and tax invoice PDF export formats
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Quotation PDF Card */}
-                    <div className="rounded-xl border border-white/[0.08] bg-slate-900/70 p-4 space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <FileText className="h-4 w-4 text-indigo-400" />
-                          Quotation PDF
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono">Q-000042.pdf</span>
-                      </div>
-                      <div className="h-28 rounded-lg bg-slate-950 border border-white/[0.05] p-3 flex flex-col justify-between text-[10px] text-slate-400">
-                        <div className="flex justify-between">
-                          <span className="text-slate-300 font-semibold">QuoteFlow PDF</span>
-                          <span className="text-emerald-400 font-bold">APPROVED</span>
-                        </div>
-                        <div className="space-y-1">
-                          <div className="h-1.5 w-3/4 bg-white/10 rounded" />
-                          <div className="h-1.5 w-1/2 bg-white/10 rounded" />
-                        </div>
-                        <div className="flex items-center gap-2 text-indigo-300 font-mono">
-                          <QrCode className="h-4 w-4" />
-                          <span>QR Certified</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-indigo-400 font-semibold pt-1">
-                        <span>Vector Quality</span>
-                        <a
-                          href="/api/public/pdf?sample=true"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-[11px] transition-colors"
-                        >
-                          <Download className="h-3 w-3" />
-                          <span>Sample PDF</span>
-                        </a>
-                      </div>
-                    </div>
-
-                    {/* Invoice PDF Card */}
-                    <div className="rounded-xl border border-white/[0.08] bg-slate-900/70 p-4 space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <Receipt className="h-4 w-4 text-purple-400" />
-                          Invoice PDF
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono">INV-000018.pdf</span>
-                      </div>
-                      <div className="h-28 rounded-lg bg-slate-950 border border-white/[0.05] p-3 flex flex-col justify-between text-[10px] text-slate-400">
-                        <div className="flex justify-between">
-                          <span className="text-slate-300 font-semibold">Commercial Tax Invoice</span>
-                          <span className="text-purple-300 font-bold">ISSUED</span>
-                        </div>
-                        <div className="space-y-1">
-                          <div className="h-1.5 w-3/4 bg-white/10 rounded" />
-                          <div className="h-1.5 w-1/2 bg-white/10 rounded" />
-                        </div>
-                        <div className="flex items-center gap-2 text-purple-300 font-mono">
-                          <QrCode className="h-4 w-4" />
-                          <span>GST Compliant</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-purple-400 font-semibold pt-1">
-                        <span>Tax Certified</span>
-                        <a
-                          href="/api/public/pdf?sample=invoice"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 text-[11px] transition-colors"
-                        >
-                          <Download className="h-3 w-3" />
-                          <span>Sample Invoice PDF</span>
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Feature 6: Quotations & Invoices */}
-            {activeFeatureTab === 5 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 text-xs font-semibold border border-purple-500/30">
-                    <Receipt className="h-3.5 w-3.5" /> Feature 06
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Quotations & Invoices
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Manage quotations and invoices from dedicated dashboard sections. Convert signed
-                    proposals into legally binding tax invoices with a single click, eliminating duplicate data entry.
-                  </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      1-click quotation to invoice conversion
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Payment settlement tracking and partial balance records
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Automated invoice numbering sequence (`INV-000001`)
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner space-y-4">
-                  {/* Dashboard Tab Selector */}
-                  <div className="flex items-center gap-2 border-b border-white/[0.06] pb-3 text-xs">
-                    <div className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5" />
-                      <span>Quotations (24)</span>
-                    </div>
-                    <div className="px-3 py-1.5 rounded-lg bg-white/[0.05] text-slate-300 font-semibold flex items-center gap-1.5">
-                      <Receipt className="h-3.5 w-3.5" />
-                      <span>Invoices (18)</span>
-                    </div>
-                  </div>
-
-                  {/* 1-Click Conversion Card */}
-                  <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/[0.06] space-y-2.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-white">Convert Approved Quote to Invoice</span>
-                      <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/20 px-2 py-0.5 rounded">
-                        1-Click Ready
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400">
-                      Quotation Q-000042 was approved by Apex Global Tech ($9,676.00). Generate commercial tax invoice instantly.
-                    </p>
+              {/* Clickable Suggestion Query Pills */}
+              <div className="pt-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                  Try asking QuoteFlow AI:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'pending', label: 'Show pending payments' },
+                    { id: 'reminders', label: 'Send overdue reminders' },
+                    { id: 'monthly', label: 'Monthly sales report' },
+                    { id: 'create', label: 'Create quote for ABC Corp' },
+                  ].map((q) => (
                     <button
+                      key={q.id}
                       type="button"
-                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-600/30"
+                      onClick={() => setActiveAiQuery(q.id as any)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                        activeAiQuery === q.id
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
                     >
-                      <Receipt className="h-3.5 w-3.5" />
-                      <span>Generate Invoice INV-000042</span>
+                      ✦ {q.label}
                     </button>
-                  </div>
+                  ))}
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Feature 7: Audit Logs */}
-            {activeFeatureTab === 6 && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-5 space-y-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold border border-blue-500/30">
-                    <History className="h-3.5 w-3.5" /> Feature 07
+            {/* Live Business Data Card */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <TrendingUp className="h-4 w-4 text-indigo-600" />
+                  {activeAiQuery === 'pending'
+                    ? 'Payment Summary Report'
+                    : activeAiQuery === 'reminders'
+                    ? 'Automated Overdue Reminder'
+                    : activeAiQuery === 'monthly'
+                    ? 'October Sales Performance'
+                    : 'Quotation Generation Draft'}
+                </span>
+                <span className="text-[11px] font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                  Live Data
+                </span>
+              </div>
+
+              {activeAiQuery === 'pending' || activeAiQuery === 'monthly' ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-[11px] text-slate-500 font-medium">Received Payments</span>
+                      <p className="text-lg font-black text-emerald-600 mt-0.5">₹84,500</p>
+                    </div>
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-[11px] text-slate-500 font-medium">Pending Payments</span>
+                      <p className="text-lg font-black text-amber-600 mt-0.5">₹38,200</p>
+                    </div>
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-[11px] text-slate-500 font-medium">Overdue Invoices</span>
+                      <p className="text-lg font-black text-rose-600 mt-0.5">₹9,440</p>
+                    </div>
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-[11px] text-slate-500 font-medium">Total Invoiced</span>
+                      <p className="text-lg font-black text-slate-900 mt-0.5">₹1,32,140</p>
+                    </div>
                   </div>
-                  <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                    Audit Logs
-                  </h3>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Maintain a complete record of quotation activity, approvals and signatures. Every event
-                    is stored with actor metadata, IP addresses, client browser agents, and immutable timestamps.
+
+                  {/* Collection Rate Bar */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between text-xs font-semibold text-slate-600">
+                      <span>Collection Rate</span>
+                      <span className="text-indigo-600">64% collected</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-indigo-600 to-emerald-500 rounded-full w-[64%]" />
+                    </div>
+                  </div>
+                </div>
+              ) : activeAiQuery === 'reminders' ? (
+                <div className="p-4 bg-white rounded-xl border border-slate-200/80 space-y-2 text-xs">
+                  <p className="font-semibold text-slate-900 flex items-center gap-1.5 text-amber-600">
+                    <Clock className="h-4 w-4" /> Overdue reminder ready for dispatch
                   </p>
-                  <ul className="space-y-2 text-xs text-slate-300 pt-2">
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Tamper-evident activity trail for compliance and disputes
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      Staff versus customer actor attribution
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-400" />
-                      SHA-256 cryptographic document hashes
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="lg:col-span-7 rounded-2xl border border-white/[0.08] bg-slate-950/80 p-6 shadow-inner space-y-3 font-mono text-xs">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] pb-2 border-b border-white/[0.06]">
-                    <span>Event Activity Stream</span>
-                    <span className="text-emerald-400">● LIVE LEDGER</span>
-                  </div>
-
-                  <div className="space-y-2.5">
-                    <div className="p-2.5 rounded-lg bg-slate-900/80 border border-white/[0.05] flex justify-between items-center">
-                      <div>
-                        <span className="text-emerald-300 font-bold">DOCUMENT_APPROVED</span>
-                        <p className="text-[10px] text-slate-400">Actor: Client (alex@apextech.io) · IP: 172.56.21.9</p>
-                      </div>
-                      <span className="text-[10px] text-slate-500">10:36:12</span>
-                    </div>
-
-                    <div className="p-2.5 rounded-lg bg-slate-900/80 border border-white/[0.05] flex justify-between items-center">
-                      <div>
-                        <span className="text-amber-300 font-bold">SIGNATURE_ATTACHED</span>
-                        <p className="text-[10px] text-slate-400">Type: TOUCH_DRAWN · Hash: 9c4e8a1f...77b</p>
-                      </div>
-                      <span className="text-[10px] text-slate-500">10:35:42</span>
-                    </div>
-
-                    <div className="p-2.5 rounded-lg bg-slate-900/80 border border-white/[0.05] flex justify-between items-center">
-                      <div>
-                        <span className="text-indigo-300 font-bold">PORTAL_VIEWED</span>
-                        <p className="text-[10px] text-slate-400">Agent: Chrome 129 / macOS · Public Token Validated</p>
-                      </div>
-                      <span className="text-[10px] text-slate-500">10:22:04</span>
-                    </div>
+                  <p className="text-slate-600">
+                    Client <strong>ABC Customer</strong> has 1 invoice (INV-001042) overdue by 5 days (₹9,440).
+                  </p>
+                  <div className="pt-2 flex gap-2">
+                    <span className="px-3 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg border border-indigo-200">
+                      WhatsApp Reminder
+                    </span>
+                    <span className="px-3 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg">
+                      Email Reminder
+                    </span>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* WORKFLOW SECTION */}
-        <section id="workflow" className="py-20 px-4 sm:px-6 max-w-7xl mx-auto border-t border-white/[0.06]">
-          <div className="text-center max-w-2xl mx-auto mb-16">
-            <h2 className="text-xs sm:text-sm font-bold tracking-widest text-purple-400 uppercase mb-3">
-              How QuoteFlow Works
-            </h2>
-            <p className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              From Draft to Signed in Minutes
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="rounded-2xl border border-white/[0.08] bg-slate-900/40 p-6 space-y-3 relative hover:border-indigo-500/40 transition-colors">
-              <div className="h-10 w-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm">
-                01
-              </div>
-              <h3 className="font-bold text-base text-white">Create Branded Quote</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Add custom line items, choose your pricing model, configure discounts, and apply company logo and terms.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/[0.08] bg-slate-900/40 p-6 space-y-3 relative hover:border-blue-500/40 transition-colors">
-              <div className="h-10 w-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm">
-                02
-              </div>
-              <h3 className="font-bold text-base text-white">Send Secure Link</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Share an unguessable public link via WhatsApp, Slack or Email with optional PIN and OTP gatekeeper protection.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/[0.08] bg-slate-900/40 p-6 space-y-3 relative hover:border-purple-500/40 transition-colors">
-              <div className="h-10 w-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-sm">
-                03
-              </div>
-              <h3 className="font-bold text-base text-white">Collect Digital Sign</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Clients review details on mobile or desktop and execute a legally binding signature with tamper-evident seals.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/[0.08] bg-slate-900/40 p-6 space-y-3 relative hover:border-emerald-500/40 transition-colors">
-              <div className="h-10 w-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">
-                04
-              </div>
-              <h3 className="font-bold text-base text-white">1-Click Invoice & PDF</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Automatically generate server-side PDFs and convert the approved quotation into an official commercial tax invoice.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* BOTTOM CTA SECTION */}
-        <section className="py-20 px-4 sm:px-6 max-w-5xl mx-auto text-center">
-          <div className="rounded-3xl border border-indigo-500/30 bg-gradient-to-b from-indigo-950/40 via-slate-900/80 to-[#070b14] p-8 sm:p-14 relative overflow-hidden shadow-2xl backdrop-blur-xl">
-            <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-purple-600/20 blur-3xl rounded-full pointer-events-none" />
-            <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-blue-600/20 blur-3xl rounded-full pointer-events-none" />
-
-            <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight mb-4">
-              Ready to Close Deals Faster?
-            </h2>
-            <p className="text-slate-300 text-sm sm:text-base max-w-xl mx-auto mb-8">
-              Join thousands of businesses that send professional, digital-first quotations and receive
-              signed approvals in record time.
-            </p>
-
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              {isAuthenticated ? (
-                <Link href="/dashboard" className="w-full sm:w-auto">
-                  <Button className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-xl shadow-indigo-600/40 px-8 py-3.5 h-12 rounded-full text-base border border-white/20">
-                    <LayoutDashboard className="h-5 w-5 mr-2" />
-                    Go to Your Dashboard
-                  </Button>
-                </Link>
               ) : (
-                <>
-                  <Link href="/register" className="w-full sm:w-auto">
-                    <Button className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-xl shadow-indigo-600/40 px-8 py-3.5 h-12 rounded-full text-base border border-white/20">
-                      Sign Up Free
-                    </Button>
-                  </Link>
-                  <Link href="/login" className="w-full sm:w-auto">
-                    <Button
-                      variant="ghost"
-                      className="w-full sm:w-auto text-slate-300 hover:text-white hover:bg-white/[0.08] px-6 py-3.5 h-12 rounded-full text-base border border-white/10"
-                    >
-                      Log In to Existing Account
-                    </Button>
-                  </Link>
-                </>
+                <div className="p-4 bg-white rounded-xl border border-slate-200/80 space-y-2 text-xs">
+                  <p className="font-semibold text-slate-900 flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4" /> Quotation QT-2026-0049 created
+                  </p>
+                  <p className="text-slate-600">
+                    Draft saved with 2 line items for ABC Corp totaling ₹9,440 including GST.
+                  </p>
+                  <span className="inline-block mt-1 text-[11px] font-mono text-indigo-600">
+                    Ready to send to client portal
+                  </span>
+                </div>
               )}
             </div>
           </div>
-        </section>
-      </main>
 
-      {/* FOOTER (MATCHING EXACT JSON REQUIREMENTS) */}
-      <footer className="border-t border-white/[0.08] bg-[#050811] py-8 px-4 sm:px-6 text-slate-400 relative z-10">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
-          {/* Logo & Platform Attribution */}
-          <div className="flex items-center gap-2.5">
-            <div className="h-6 w-6 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-xs text-white shadow-sm">
-              Q
+          {/* COLUMN 2: What Your Customer Sees (Mobile Phone Frame) */}
+          <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-sm flex flex-col justify-between space-y-6">
+            <div className="space-y-3">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
+                <Smartphone className="h-3.5 w-3.5" />
+                <span>Zero-Friction Portal</span>
+              </div>
+              <h3 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+                What Your Customer Sees
+              </h3>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                A frictionless, mobile-first client portal with zero login friction, optional PIN security, and instant digital signature.
+              </p>
             </div>
-            {/* Branding Text: QuoteFlow · Powered by BlendAndBold */}
-            <div className="flex items-center gap-1.5 text-center md:text-left">
-              <span className="font-semibold text-slate-200 tracking-tight">QuoteFlow</span>
-              <span className="text-slate-600">·</span>
-              <span className="text-slate-400 text-xs">Powered by</span>
-              <a
-                href="https://blendandbold.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-slate-300 hover:text-purple-400 transition-colors font-medium flex items-center gap-0.5"
-              >
-                <span>BlendAndBold</span>
-                <ExternalLink className="h-3 w-3 opacity-70" />
-              </a>
+
+            {/* Mobile Phone Mockup */}
+            <div className="max-w-sm mx-auto w-full rounded-3xl border-4 border-slate-900 bg-white shadow-xl overflow-hidden">
+              {/* Phone Top Notch */}
+              <div className="bg-slate-900 text-white px-5 py-2 flex items-center justify-between text-[11px] font-semibold">
+                <span>9:41</span>
+                <div className="h-3 w-16 bg-slate-800 rounded-full" />
+                <span>5G 100%</span>
+              </div>
+
+              {/* Client Portal Content Inside Phone */}
+              <div className="p-4 space-y-3 text-left">
+                {/* Brand & Quote Number */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="h-7 w-7 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                      Q
+                    </div>
+                    <div>
+                      <p className="font-bold text-xs text-slate-900">QuoteFlow Demo</p>
+                      <p className="text-[10px] text-slate-400">Quotation QT-1048</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-extrabold text-indigo-600">₹9,440</span>
+                </div>
+
+                {/* PIN Protected Banner */}
+                <div className="p-2 rounded-xl bg-indigo-50/80 border border-indigo-200/70 flex items-center gap-2 text-[11px] font-semibold text-indigo-900">
+                  <Lock className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                  <span>Protected by 4-digit PIN verification</span>
+                </div>
+
+                {/* Summary Items */}
+                <div className="bg-slate-50 rounded-xl p-2.5 text-[11px] space-y-1.5 border border-slate-200/60">
+                  <div className="flex justify-between font-medium text-slate-700">
+                    <span>10 × Glass Panel (12mm)</span>
+                    <span className="font-bold text-slate-900">₹5,000</span>
+                  </div>
+                  <div className="flex justify-between font-medium text-slate-700">
+                    <span>5 × Heavy-Duty Battery</span>
+                    <span className="font-bold text-slate-900">₹3,000</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500 pt-1 border-t border-slate-200/60">
+                    <span>GST (18%)</span>
+                    <span>₹1,440</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-slate-900 pt-0.5">
+                    <span>Total Amount</span>
+                    <span className="text-indigo-600">₹9,440</span>
+                  </div>
+                </div>
+
+                {/* Digital Signature Pad */}
+                <div className="border border-dashed border-slate-300 rounded-xl p-2 bg-slate-50/50 text-center">
+                  {signatureDrawn || customerApproved ? (
+                    <div className="h-10 flex items-center justify-center font-serif italic text-indigo-700 text-sm font-bold animate-fadeIn">
+                      Alex Vance (Verified Signature)
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSignatureDrawn(true)}
+                      className="h-10 w-full flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-semibold hover:text-indigo-600"
+                    >
+                      <PenTool className="h-3 w-3" />
+                      <span>Tap to draw signature</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Customer Approval Actions */}
+                {customerApproved ? (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs font-bold text-emerald-800 flex items-center justify-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    <span>Quotation Approved &amp; Signed!</span>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSignatureDrawn(true);
+                        setCustomerApproved(true);
+                      }}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Approve Quotation</span>
+                    </button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => alert('Client requests edits via real-time portal comments!')}
+                        className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-semibold"
+                      >
+                        Request Changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => alert('Client can decline with reason logged.')}
+                        className="py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[11px] font-semibold"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-
-          {/* Quick Legal / Navigation Links */}
-          <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400">
-            <a href="#features" className="hover:text-slate-200 transition-colors">
-              Features
-            </a>
-            <a href="#workflow" className="hover:text-slate-200 transition-colors">
-              Workflow
-            </a>
-            <Link href="/login" className="hover:text-slate-200 transition-colors">
-              Sign In
-            </Link>
-            <Link href="/register" className="hover:text-slate-200 transition-colors">
-              Create Account
-            </Link>
-          </div>
-
-          {/* Copyright notice */}
-          <div className="text-slate-500 text-[11px] text-center md:text-right">
-            © {new Date().getFullYear()} QuoteFlow. All rights reserved.
           </div>
         </div>
-      </footer>
+      </section>
 
-      {/* INTERACTIVE DEMO MODAL */}
-      {isDemoModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="relative w-full max-w-2xl rounded-3xl border border-white/15 bg-[#0a0f20] p-6 sm:p-8 shadow-2xl text-left space-y-6">
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-              <div className="flex items-center gap-2.5">
-                <div className="h-8 w-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                  <Play className="h-4 w-4 fill-current ml-0.5" />
+      {/* =========================================================================
+          5. COMPLETE FEATURE SUITE (6 Cards Grid)
+      ========================================================================= */}
+      <section id="features" className="py-16 sm:py-24 bg-slate-50/70 border-y border-slate-200/70">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="text-center max-w-3xl mx-auto mb-14 space-y-3">
+            <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900">
+              Everything You Need to Run Client Sales
+            </h2>
+            <p className="text-base text-slate-600">
+              Built for speed, accuracy, and closing deals faster without manual bookkeeping.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[
+              {
+                title: 'AI Quote Creation',
+                desc: 'Describe goods, services, and rates in plain English. QuoteFlow AI computes discounts, tax slabs, and line item formulas instantly.',
+                icon: Sparkles,
+                badge: 'Conversational AI',
+              },
+              {
+                title: 'Secure Sharing',
+                desc: 'Share unguessable unique links via WhatsApp or email. Protect confidential proposals with an optional 4-digit client access PIN.',
+                icon: Lock,
+                badge: 'PIN Security',
+              },
+              {
+                title: 'Live Tracking',
+                desc: 'Get notified the instant a client opens, views, or re-reads your quotation. Know exactly when to follow up while interest is high.',
+                icon: Eye,
+                badge: 'Real-time Alerts',
+              },
+              {
+                title: 'Digital Approvals',
+                desc: 'Clients sign with finger or mouse on any smartphone or tablet. Generates immutable audit timestamps and PDF certificates.',
+                icon: PenTool,
+                badge: 'Touch Signatures',
+              },
+              {
+                title: 'Instant Invoices',
+                desc: 'Convert any approved quotation into an official commercial invoice with 1 click. Zero duplicate typing and strict sequential numbers.',
+                icon: Receipt,
+                badge: '1-Click Conversion',
+              },
+              {
+                title: 'Payment Tracking',
+                desc: 'Embed UPI QR codes (GPay, PhonePe, Paytm), bank account details, and crypto addresses with live payment status tracking.',
+                icon: DollarSign,
+                badge: 'UPI QR Codes',
+              },
+            ].map((f) => {
+              const Icon = f.icon;
+              return (
+                <div
+                  key={f.title}
+                  className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4 group"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="h-11 w-11 rounded-xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 group-hover:scale-105 transition-transform">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                        {f.badge}
+                      </span>
+                    </div>
+
+                    <h3 className="font-extrabold text-base text-slate-900 group-hover:text-indigo-600 transition-colors">
+                      {f.title}
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+                      {f.desc}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center text-xs font-bold text-indigo-600 group-hover:translate-x-1 transition-transform">
+                    <span>Learn more</span>
+                    <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-bold text-base text-white">QuoteFlow Interactive Walkthrough</h3>
-                  <p className="text-xs text-slate-400">Experience how easily quotations are closed</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsDemoModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.06] transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          6. BOTTOM MULTI-SECTION GRID (3 COLUMNS)
+          Col 1: Works for Your Business (Industries)
+          Col 2: Simple & Transparent Pricing (Free for 30 days, then ₹99/month)
+          Col 3: Frequently Asked Questions (FAQ Accordion)
+      ========================================================================= */}
+      <section id="bottom-grid" className="py-16 sm:py-24 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+          {/* COLUMN 1: Works for Your Business (Industries) */}
+          <div id="industries" className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-7 shadow-xs space-y-5">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5 mb-1">
+                <Building2 className="h-3.5 w-3.5" />
+                Industries
+              </span>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+                Works for Your Business
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Tailored workflows for fast-moving businesses:
+              </p>
             </div>
 
-            {/* Step Selector */}
-            <div className="grid grid-cols-4 gap-2">
-              {demoSteps.map((step, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setDemoStep(idx)}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    demoStep === idx
-                      ? 'bg-indigo-600/30 border-indigo-500/50 text-white'
-                      : 'bg-slate-900/50 border-white/[0.06] text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400">
-                    Step 0{idx + 1}
-                  </p>
-                  <p className="text-xs font-bold truncate mt-0.5">{step.badge}</p>
-                </button>
+            <div className="flex flex-col gap-2">
+              {industries.map((ind) => {
+                const Icon = ind.icon;
+                return (
+                  <div
+                    key={ind.name}
+                    className="flex items-center gap-3 p-2.5 rounded-xl border border-slate-100 bg-slate-50/60 hover:bg-indigo-50/50 hover:border-indigo-200/80 transition-all text-xs font-semibold text-slate-700"
+                  >
+                    <div className="h-7 w-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-indigo-600 shrink-0">
+                      <Icon className="h-3.5 w-3.5" />
+                    </div>
+                    <span>{ind.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* COLUMN 2: Simple & Transparent Pricing */}
+          <div id="pricing" className="rounded-3xl border-2 border-indigo-600 bg-white p-6 sm:p-7 shadow-xl space-y-6 relative overflow-hidden">
+            {/* Top Badge */}
+            <div className="absolute top-0 right-0 bg-gradient-to-l from-indigo-600 to-violet-600 text-white text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-bl-xl shadow-xs">
+              Special Offer
+            </div>
+
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5 mb-1">
+                <CreditCard className="h-3.5 w-3.5" />
+                Pricing
+              </span>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+                Simple &amp; Transparent
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                No hidden charges. Everything included.
+              </p>
+            </div>
+
+            {/* Big Pricing Highlight */}
+            <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200/80 space-y-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl sm:text-4xl font-black text-slate-900">₹0</span>
+                <span className="text-xs font-bold text-slate-500">for first 30 days</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-indigo-700">
+                <span>then only</span>
+                <span className="text-base text-indigo-900 font-black">₹99</span>
+                <span>/ month</span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-tight">
+                Includes full access to AI Copilot, unlimited quotes &amp; invoices.
+              </p>
+            </div>
+
+            {/* Feature List */}
+            <div className="space-y-2.5 text-xs text-slate-700">
+              {[
+                '30-Day Full Access Free Trial',
+                'No credit card required to start',
+                'Unlimited AI Quotations & Invoices',
+                'WhatsApp & Email Secure Sharing',
+                'Optional Client PIN Protection',
+                'Digital Signatures & Approvals',
+                'Real-Time View Tracking Alerts',
+                'UPI QR Codes & Payment Methods',
+              ].map((feat) => (
+                <div key={feat} className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-emerald-600 stroke-[3] shrink-0" />
+                  <span className="font-semibold">{feat}</span>
+                </div>
               ))}
             </div>
 
-            {/* Step Body */}
-            <div className="p-5 rounded-2xl border border-white/[0.08] bg-slate-950/70 space-y-3">
-              <h4 className="text-lg font-black text-white">{demoSteps[demoStep].title}</h4>
-              <p className="text-sm text-slate-300 leading-relaxed">{demoSteps[demoStep].desc}</p>
+            {/* CTA Button */}
+            <Link href="/register" className="block w-full">
+              <Button className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-black text-xs shadow-md shadow-indigo-600/25 border border-indigo-500/20 gap-1.5">
+                <span>Start Free 30-Day Trial</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+
+            <p className="text-[11px] text-center text-slate-400 font-medium">
+              Cancel anytime with 1 click. Zero lock-in.
+            </p>
+          </div>
+
+          {/* COLUMN 3: Frequently Asked Questions (FAQ Accordion) */}
+          <div id="faq" className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-7 shadow-xs space-y-5">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1.5 mb-1">
+                <HelpCircle className="h-3.5 w-3.5" />
+                Support &amp; Answers
+              </span>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+                Frequently Asked Questions
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Everything you need to know about QuoteFlow:
+              </p>
             </div>
 
-            {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="space-y-2.5">
+              {faqItems.map((item, idx) => {
+                const isOpen = openFaqIndex === idx;
+                return (
+                  <div
+                    key={item.q}
+                    className="border border-slate-200/80 rounded-2xl overflow-hidden transition-all"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
+                      className="w-full p-3.5 text-left flex items-center justify-between gap-2 bg-slate-50/50 hover:bg-slate-100/60 transition-colors"
+                    >
+                      <span className="text-xs font-bold text-slate-800 leading-snug">
+                        {item.q}
+                      </span>
+                      <ChevronDown
+                        className={`h-4 w-4 text-slate-500 shrink-0 transition-transform duration-200 ${
+                          isOpen ? 'rotate-180 text-indigo-600' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {isOpen && (
+                      <div className="p-3.5 bg-white text-xs text-slate-600 leading-relaxed border-t border-slate-100 animate-fadeIn">
+                        {item.a}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          7. FINAL CALL-TO-ACTION BANNER
+      ========================================================================= */}
+      <section className="py-16 sm:py-20 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+        <div className="rounded-3xl bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-950 text-white p-8 sm:p-14 text-center space-y-6 shadow-2xl relative overflow-hidden">
+          {/* Subtle Ambient Glow */}
+          <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 bg-indigo-500/20 blur-3xl rounded-full pointer-events-none" />
+
+          <div className="max-w-2xl mx-auto space-y-3 relative z-10">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
+              Your next quote is one conversation away.
+            </h2>
+            <p className="text-sm sm:text-base text-indigo-200 font-normal">
+              Join modern businesses closing deals 3x faster with QuoteFlow. Free for 30 days, then just ₹99/month.
+            </p>
+          </div>
+
+          <div className="pt-2 relative z-10">
+            <Link href="/register">
+              <Button className="h-12 px-8 rounded-xl bg-white hover:bg-slate-100 text-indigo-950 font-black text-sm shadow-xl gap-2">
+                <span>Start Free 30-Day Trial</span>
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          8. FOOTER
+      ========================================================================= */}
+      <footer className="border-t border-slate-200 bg-white py-12 px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+          {/* Logo & Brand Info */}
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center font-black text-lg text-white shadow-sm">
+              Q
+            </div>
+            <div className="flex flex-col">
+              <span className="font-extrabold text-base tracking-tight text-slate-900">
+                QuoteFlow
+              </span>
+              <span className="text-[10px] font-semibold text-slate-600">
+                by BlendAndBold
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Footer Links */}
+          <div className="flex flex-wrap items-center justify-center gap-6 text-xs font-semibold text-slate-600">
+            <a href="#features" className="hover:text-indigo-600 transition-colors">
+              Features
+            </a>
+            <a href="#ai-copilot" className="hover:text-indigo-600 transition-colors">
+              AI Copilot
+            </a>
+            <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+              Pricing
+            </a>
+            <a href="#faq" className="hover:text-indigo-600 transition-colors">
+              FAQ
+            </a>
+            <Link href="/login" className="hover:text-indigo-600 transition-colors">
+              Login
+            </Link>
+            <Link href="/register" className="hover:text-indigo-600 transition-colors">
+              Sign Up
+            </Link>
+          </div>
+
+          {/* Copyright */}
+          <p className="text-xs text-slate-600 font-medium text-center md:text-right">
+            © 2026 QuoteFlow by blendandbold. All rights reserved.
+          </p>
+        </div>
+      </footer>
+
+      {/* =========================================================================
+          9. 60-SECOND INTERACTIVE WALKTHROUGH MODAL
+      ========================================================================= */}
+      {isDemoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-xl w-full p-6 sm:p-8 space-y-6 relative overflow-hidden">
+            {/* Modal Close Button */}
+            <button
+              type="button"
+              onClick={() => setIsDemoModalOpen(false)}
+              className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            {/* Header */}
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                {demoSteps[demoStep].badge}
+              </span>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight pt-1">
+                {demoSteps[demoStep].title}
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                {demoSteps[demoStep].desc}
+              </p>
+            </div>
+
+            {/* Step Progress Dots */}
+            <div className="flex items-center gap-1.5">
+              {demoSteps.map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 rounded-full transition-all ${
+                    i === demoStep ? 'w-8 bg-indigo-600' : 'w-2 bg-slate-200'
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* Footer Navigation */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setDemoStep((prev) => (prev > 0 ? prev - 1 : 3))}
-                className="text-xs text-slate-400 hover:text-white transition-colors"
+                onClick={() => setDemoStep(Math.max(0, demoStep - 1))}
+                disabled={demoStep === 0}
+                className="text-xs font-bold text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:pointer-events-none"
               >
-                ← Previous Step
+                ← Previous
               </button>
 
-              <div className="flex items-center gap-3">
-                {demoStep < 3 ? (
-                  <Button
-                    onClick={() => setDemoStep((prev) => prev + 1)}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs px-4 h-9 rounded-xl"
-                  >
-                    Next Step →
+              {demoStep < demoSteps.length - 1 ? (
+                <Button
+                  type="button"
+                  onClick={() => setDemoStep(demoStep + 1)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl px-5 h-9"
+                >
+                  <span>Next Step</span>
+                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              ) : (
+                <Link href="/register" onClick={() => setIsDemoModalOpen(false)}>
+                  <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold text-xs rounded-xl px-5 h-9">
+                    <span>Start Free 30-Day Trial</span>
+                    <ArrowRight className="h-3.5 w-3.5 ml-1" />
                   </Button>
-                ) : (
-                  <Link href="/register">
-                    <Button className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold text-xs px-5 h-9 rounded-xl">
-                      Try QuoteFlow Free
-                    </Button>
-                  </Link>
-                )}
-              </div>
+                </Link>
+              )}
             </div>
           </div>
         </div>

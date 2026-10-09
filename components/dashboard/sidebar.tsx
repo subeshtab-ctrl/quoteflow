@@ -103,7 +103,6 @@ export function DashboardSidebar({
         { name: 'Quotes', href: '/quotations', icon: FileText },
         { name: 'Invoices', href: '/invoices', icon: Receipt },
         { name: 'Customers', href: '/customers', icon: Users },
-        { name: 'Payments', href: '/billing', icon: CreditCard },
       ],
     },
     {

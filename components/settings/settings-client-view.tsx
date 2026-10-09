@@ -927,15 +927,15 @@ export function SettingsClientView({
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Palette className="h-5 w-5 text-indigo-500" />
-                <span>Company Logo & Brand Theme Color</span>
+                <span>Company Logo</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                When you upload a logo, buttons and theme colors automatically match your brand identity!
+                Upload and frame your official company logo. Use the editor to crop, zoom, and center.
               </p>
             </div>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-4">
             <div className="flex flex-col md:flex-row items-start md:items-center gap-6 p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800">
               {/* Logo Preview Container */}
               <div className="space-y-1.5 shrink-0">
@@ -980,7 +980,7 @@ export function SettingsClientView({
               <div className="flex-1 space-y-3 w-full">
                 <div>
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    Live Sidebar Header Fit
+                    Live Header Fit
                   </span>
                   <div className="mt-1 flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs max-w-sm">
                     {org.logo_url ? (
@@ -1041,197 +1041,23 @@ export function SettingsClientView({
                   </Button>
 
                   {org.logo_url && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAutoExtractColor}
-                        disabled={isExtractingColor || isUploadingLogo}
-                        className="gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
-                        title="Automatically re-detect dominant color from this logo"
-                      >
-                        {isExtractingColor ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3.5 w-3.5" />
-                        )}
-                        <span>Auto-match Theme</span>
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRemoveLogo}
-                        disabled={isUploadingLogo}
-                        className="gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-800"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Remove</span>
-                      </Button>
-                    </>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRemoveLogo}
+                      disabled={isUploadingLogo}
+                      className="gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-800"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Remove</span>
+                    </Button>
                   )}
                 </div>
-              </div>
-            </div>
 
-            {/* Shape & Image Fit Controls */}
-            {org.logo_url && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                {/* Shape Selector */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    Logo Shape
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleShapeChange('circle')}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
-                        logoShape === 'circle'
-                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
-                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
-                      }`}
-                    >
-                      <Circle className="h-4 w-4 mb-1" />
-                      <span>Round (IG)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleShapeChange('rounded')}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
-                        logoShape === 'rounded'
-                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
-                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
-                      }`}
-                    >
-                      <div className="h-4 w-4 mb-1 rounded-sm border-2 border-current" />
-                      <span>Rounded</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleShapeChange('square')}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
-                        logoShape === 'square'
-                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
-                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
-                      }`}
-                    >
-                      <Square className="h-4 w-4 mb-1" />
-                      <span>Square</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Fit Mode Selector */}
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    Image Fit Option
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleFitChange('cover')}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
-                        logoFit === 'cover'
-                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
-                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
-                      }`}
-                      title="Fills the avatar completely like an Instagram profile picture"
-                    >
-                      <Maximize2 className="h-4 w-4 mb-1" />
-                      <span>Cover (Fill)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleFitChange('contain')}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-semibold transition-all ${
-                        logoFit === 'contain'
-                          ? 'bg-white dark:bg-slate-700 border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-300 shadow-xs ring-2 ring-indigo-500/10'
-                          : 'bg-transparent border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60'
-                      }`}
-                      title="Fits entire logo inside with no cropping"
-                    >
-                      <Minimize2 className="h-4 w-4 mb-1" />
-                      <span>Contain (Fit)</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Supports <strong className="font-semibold text-slate-700 dark:text-slate-300">PNG, JPG, WebP, SVG</strong> (Max 5MB).
-              Instagram-style round crop and cover fit make logos and avatars look clean and centered.
-            </p>
-          </div>
-
-          {/* Brand Theme Color Customizer */}
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Workspace Button & Theme Color
-                </label>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Controls the primary color for action buttons, badges, customer approval portal, and invoice headers.
+                  Supports <strong className="font-semibold text-slate-700 dark:text-slate-300">PNG, JPG, WebP, SVG</strong> (Max 5MB). Click Edit Logo to crop and resize.
                 </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-400">Live Preview:</span>
-                <button
-                  type="button"
-                  style={{ backgroundColor: org.brand_color || '#4f46e5' }}
-                  className="px-3 py-1 rounded-lg text-xs font-bold text-white shadow-xs"
-                >
-                  Primary Action
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Preset Swatches */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {colorPresets.map((p) => {
-                  const isSelected = org.brand_color?.toLowerCase() === p.hex.toLowerCase();
-                  return (
-                    <button
-                      key={p.hex}
-                      type="button"
-                      onClick={() => setOrg({ ...org, brand_color: p.hex })}
-                      style={{ backgroundColor: p.hex }}
-                      title={p.name}
-                      className={`h-7 w-7 rounded-full border-2 transition-transform shadow-xs ${
-                        isSelected
-                          ? 'border-white dark:border-slate-900 ring-2 ring-indigo-500 scale-110'
-                          : 'border-slate-200 dark:border-slate-700 hover:scale-105'
-                      }`}
-                    />
-                  );
-                })}
-              </div>
-
-              {/* Custom Picker & Hex Input */}
-              <div className="flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-slate-700">
-                <input
-                  type="color"
-                  value={org.brand_color || '#4f46e5'}
-                  onChange={(e) => setOrg({ ...org, brand_color: e.target.value })}
-                  className="h-8 w-10 cursor-pointer rounded-lg border border-slate-300 dark:border-slate-700 p-0.5 bg-white dark:bg-slate-800"
-                  title="Pick custom color"
-                />
-                <input
-                  type="text"
-                  value={org.brand_color || '#4f46e5'}
-                  onChange={(e) => setOrg({ ...org, brand_color: e.target.value })}
-                  placeholder="#4f46e5"
-                  className="h-8 w-24 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs font-mono font-bold uppercase text-slate-800 dark:text-slate-100"
-                />
               </div>
             </div>
           </div>
