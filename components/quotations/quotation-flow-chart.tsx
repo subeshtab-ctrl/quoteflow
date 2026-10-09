@@ -80,30 +80,30 @@ export function QuotationFlowChart({
   ];
 
   return (
-    <div className={`rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900/90 p-4 sm:p-5 shadow-xs ${className}`}>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100 dark:border-slate-800">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-indigo-600 animate-pulse" />
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+    <div className={`rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900/90 p-2.5 sm:p-3 shadow-2xs ${className}`}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
+          <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
             Lifecycle Workflow Chart
           </h4>
         </div>
-        <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
           {isInProgressCurrent && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 font-bold">
-              <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-ping" />
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 font-bold">
+              <span className="h-1 w-1 rounded-full bg-sky-500 animate-ping" />
               Active: Work In Progress ({quotation.estimated_days || 7} Days)
             </span>
           )}
           {status === 'APPROVED' && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold">
-              <Check className="h-3 w-3 text-emerald-600" />
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold">
+              <Check className="h-2.5 w-2.5 text-emerald-600" />
               Approved • Ready for In Progress
             </span>
           )}
           {isCompletedDone && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 font-bold">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 font-bold">
+              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
               Workflow Fully Completed
             </span>
           )}
@@ -111,27 +111,27 @@ export function QuotationFlowChart({
       </div>
 
       {/* Responsive Horizontal Stepper Flow */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 relative">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 relative">
         {steps.map((step, idx) => {
           let nodeBg = 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700';
           let textColor = 'text-slate-600 dark:text-slate-400';
           let badgeBorder = 'border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40';
 
           if (step.isCompleted) {
-            nodeBg = 'bg-emerald-600 text-white border-emerald-600 shadow-xs shadow-emerald-500/20';
+            nodeBg = 'bg-emerald-600 text-white border-emerald-600 shadow-2xs shadow-emerald-500/20';
             textColor = 'text-slate-900 dark:text-slate-100';
             badgeBorder = 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/30 dark:bg-emerald-950/20';
           } else if (step.isCurrent) {
             if (step.id === 'step-3') {
-              nodeBg = 'bg-sky-600 text-white border-sky-600 shadow-md shadow-sky-500/30 ring-4 ring-sky-500/10 animate-pulse';
+              nodeBg = 'bg-sky-600 text-white border-sky-600 shadow-xs shadow-sky-500/30 ring-2 ring-sky-500/10 animate-pulse';
               textColor = 'text-sky-950 dark:text-sky-100';
               badgeBorder = 'border-sky-300 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/40';
             } else if (step.id === 'step-2') {
-              nodeBg = 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-500/30 ring-4 ring-emerald-500/10';
+              nodeBg = 'bg-emerald-600 text-white border-emerald-600 shadow-xs shadow-emerald-500/30 ring-2 ring-emerald-500/10';
               textColor = 'text-emerald-950 dark:text-emerald-100';
               badgeBorder = 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40';
             } else {
-              nodeBg = 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-500/20';
+              nodeBg = 'bg-indigo-600 text-white border-indigo-600 shadow-2xs ring-1 ring-indigo-500/20';
               textColor = 'text-slate-900 dark:text-slate-100';
               badgeBorder = 'border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/30';
             }
@@ -140,14 +140,14 @@ export function QuotationFlowChart({
           return (
             <div
               key={step.id}
-              className={`p-3 rounded-xl border transition-all flex items-start gap-3 relative ${badgeBorder}`}
+              className={`p-2 rounded-lg border transition-all flex items-center gap-2 relative ${badgeBorder}`}
             >
               {/* Step Icon / Number Indicator */}
               <div
-                className={`h-7 w-7 rounded-lg border flex items-center justify-center font-bold text-xs shrink-0 transition-transform ${nodeBg}`}
+                className={`h-6 w-6 rounded-md border flex items-center justify-center font-bold text-[10px] shrink-0 transition-transform ${nodeBg}`}
               >
                 {step.isCompleted ? (
-                  <Check className="h-4 w-4 stroke-[3]" />
+                  <Check className="h-3.5 w-3.5 stroke-[2.5]" />
                 ) : (
                   <span>{step.number}</span>
                 )}
@@ -156,19 +156,19 @@ export function QuotationFlowChart({
               {/* Step Labels */}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1">
-                  <span className={`text-xs font-bold leading-tight truncate ${textColor}`}>
+                  <span className={`text-[11px] font-bold leading-tight truncate ${textColor}`}>
                     {step.title}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug truncate">
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug truncate">
                   {step.subtitle}
                 </p>
               </div>
 
               {/* Connecting arrow for larger screens */}
               {idx < steps.length - 1 && (
-                <div className="hidden md:block absolute -right-2 top-1/2 -translate-y-1/2 z-10 text-slate-300 dark:text-slate-700 pointer-events-none">
-                  <ChevronRight className="h-3.5 w-3.5" />
+                <div className="hidden md:block absolute -right-1.5 top-1/2 -translate-y-1/2 z-10 text-slate-300 dark:text-slate-700 pointer-events-none">
+                  <ChevronRight className="h-3 w-3" />
                 </div>
               )}
             </div>

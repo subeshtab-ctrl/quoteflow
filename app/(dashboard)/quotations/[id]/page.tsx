@@ -79,17 +79,17 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-3 sm:space-y-4">
         {/* Top Header & Breadcrumb */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+          <div className="space-y-0.5 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 whitespace-nowrap">
                 {quotation.quotation_number}
               </h1>
               {quotation.revision_number > 1 && (
-                <span className="rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700">
-                  Revision v{quotation.revision_number}
+                <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">
+                  v{quotation.revision_number}
                 </span>
               )}
               <StatusBadge
@@ -98,9 +98,10 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 completedUnpaid={quotation.completed_unpaid}
                 paymentStatus={quotation.payment_status}
                 paidAmount={quotation.paid_amount}
+                className="text-[11px] px-2 py-0.5"
               />
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-[11px] text-slate-500">
               Created on {formatDate(quotation.created_at)} • Valid until {formatDate(quotation.valid_until)}
             </p>
           </div>

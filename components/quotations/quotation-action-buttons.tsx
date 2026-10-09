@@ -378,23 +378,23 @@ export function QuotationActionButtons({
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1.5 flex-wrap">
         {/* COMPLETED Quotation View - Locked Lifecycle */}
         {currentStatus === 'COMPLETED' && currentQuotation && (
           <>
             {currentQuotation.is_paid ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold shadow-xs select-none">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-bold shadow-2xs select-none">
+                <CheckCircle2 className="h-3 w-3 text-emerald-600" />
                 <span>Completed • Locked</span>
               </div>
             ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-50 border border-cyan-300 text-cyan-800 text-xs font-bold shadow-xs select-none">
-                <AlertTriangle className="h-3.5 w-3.5 text-cyan-600" />
+              <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-cyan-50 border border-cyan-300 text-cyan-800 text-[11px] font-bold shadow-2xs select-none">
+                <AlertTriangle className="h-3 w-3 text-cyan-600" />
                 <span>Completed (Partially Paid) • Locked</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold shadow-xs select-none">
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+              <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-300 text-amber-800 text-[11px] font-bold shadow-2xs select-none">
+                <AlertTriangle className="h-3 w-3 text-amber-600" />
                 <span>Completed (Unpaid) • Locked</span>
               </div>
             )}
@@ -403,35 +403,35 @@ export function QuotationActionButtons({
               <>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="xs"
                   onClick={() => setIsInvoiceOpen(true)}
-                  className="gap-1.5 text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-semibold shadow-xs"
+                  className="gap-1 text-[11px] text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-semibold shadow-2xs"
                   title="View / Print Commercial Tax Invoice"
                 >
-                  <Receipt className="h-3.5 w-3.5 text-indigo-600" />
+                  <Receipt className="h-3 w-3 text-indigo-600" />
                   <span>View Invoice</span>
                 </Button>
 
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="xs"
                   onClick={() => setIsPaymentOpen(true)}
-                  className="gap-1.5 text-xs font-semibold shadow-sm bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                  className="gap-1 text-[11px] font-semibold shadow-2xs bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
                   title="Payment received - click to view details"
                 >
-                  <CreditCard className="h-3.5 w-3.5" />
+                  <CreditCard className="h-3 w-3" />
                   <span>Paid</span>
                 </Button>
               </>
             ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
                 title="Payment details - click to view or update"
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Partial ({currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%)</span>
               </Button>
             ) : null}
@@ -439,11 +439,11 @@ export function QuotationActionButtons({
             <Link href="/invoices">
               <Button
                 variant="outline"
-                size="sm"
-                className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-xs"
+                size="xs"
+                className="gap-1 text-[11px] text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-2xs"
                 title="Go to Invoices Dashboard"
               >
-                <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
+                <ExternalLink className="h-3 w-3 text-slate-500" />
                 <span>Invoices Tab</span>
               </Button>
             </Link>
@@ -455,35 +455,35 @@ export function QuotationActionButtons({
           <>
             <Button
               variant="primary"
-              size="sm"
+              size="xs"
               onClick={() => setIsInProgressModalOpen(true)}
-              className="gap-1.5 text-xs bg-sky-600 hover:bg-sky-700 text-white shadow-sm font-semibold"
+              className="gap-1 text-[11px] bg-sky-600 hover:bg-sky-700 text-white shadow-2xs font-semibold"
               title="Set this quotation to In Progress and specify estimated completion time"
             >
-              <Play className="h-3.5 w-3.5 fill-current" />
+              <Play className="h-3 w-3 fill-current" />
               <span>Mark as In Progress</span>
             </Button>
 
             {currentQuotation.is_paid ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsInvoiceOpen(true)}
-                className="gap-1.5 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-sm font-semibold"
+                className="gap-1 text-[11px] bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs font-semibold"
                 title="View / Edit Commercial Tax Invoice"
               >
-                <Receipt className="h-3.5 w-3.5" />
+                <Receipt className="h-3 w-3" />
                 <span>Invoice</span>
               </Button>
             ) : (
               <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="gap-1.5 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-sm font-semibold"
+                  size="xs"
+                  className="gap-1 text-[11px] bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs font-semibold"
                   title="Create an Invoice from this approved quotation"
                 >
-                  <Receipt className="h-3.5 w-3.5" />
+                  <Receipt className="h-3 w-3" />
                   <span>Create Invoice</span>
                 </Button>
               </Link>
@@ -491,47 +491,47 @@ export function QuotationActionButtons({
 
             <Button
               variant="outline"
-              size="sm"
+              size="xs"
               onClick={handleMarkCompletedClick}
               isLoading={isCompleting}
-              className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-xs"
+              className="gap-1 text-[11px] text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-2xs"
               title="Mark this quotation lifecycle as Completed"
             >
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
               <span>Mark as Completed</span>
             </Button>
 
             {currentQuotation.is_paid ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
                 title="Payment received - click to view/edit details"
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Paid</span>
               </Button>
             ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
                 title={`Partial payment recorded (${currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%) - click to update`}
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Partial ({currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%)</span>
               </Button>
             ) : (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900"
                 title="Record customer payment"
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Mark as Paid</span>
               </Button>
             )}
@@ -541,57 +541,57 @@ export function QuotationActionButtons({
         {/* IN_PROGRESS Quotation Actions */}
         {currentStatus === 'IN_PROGRESS' && currentQuotation && (
           <>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 border border-sky-300 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-xs font-bold shadow-xs select-none">
-              <span className="h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
+            <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-sky-50 dark:bg-sky-950/50 border border-sky-300 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-[11px] font-bold shadow-2xs select-none">
+              <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
               <span>In Progress ({currentQuotation.estimated_days || 7} Days)</span>
             </div>
 
             <Button
               variant="primary"
-              size="sm"
+              size="xs"
               onClick={handleMarkCompletedClick}
               isLoading={isCompleting}
-              className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+              className="gap-1 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs font-semibold"
               title="Mark this in-progress quotation as Completed"
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
+              <CheckCircle2 className="h-3 w-3" />
               <span>Mark as Completed</span>
             </Button>
 
             <Button
               variant="outline"
-              size="sm"
+              size="xs"
               onClick={() => {
                 setAdditionalDaysInput(7);
                 setIsExtendModalOpen(true);
               }}
-              className="gap-1.5 text-xs text-sky-700 border-sky-300 hover:bg-sky-50 font-semibold shadow-xs"
+              className="gap-1 text-[11px] text-sky-700 border-sky-300 hover:bg-sky-50 font-semibold shadow-2xs"
               title="Extend estimated completion time"
             >
-              <Clock className="h-3.5 w-3.5 text-sky-600" />
+              <Clock className="h-3 w-3 text-sky-600" />
               <span>Extend Time</span>
             </Button>
 
             {currentQuotation.is_paid ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsInvoiceOpen(true)}
-                className="gap-1.5 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-sm font-semibold"
+                className="gap-1 text-[11px] bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs font-semibold"
                 title="View / Edit Commercial Tax Invoice"
               >
-                <Receipt className="h-3.5 w-3.5" />
+                <Receipt className="h-3 w-3" />
                 <span>Invoice</span>
               </Button>
             ) : (
               <Link href={`/invoices/new?from_quote_id=${quotationId}`}>
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="gap-1.5 text-xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-sm font-semibold"
+                  size="xs"
+                  className="gap-1 text-[11px] bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs font-semibold"
                   title="Create an Invoice from this quotation"
                 >
-                  <Receipt className="h-3.5 w-3.5" />
+                  <Receipt className="h-3 w-3" />
                   <span>Create Invoice</span>
                 </Button>
               </Link>
@@ -600,34 +600,34 @@ export function QuotationActionButtons({
             {currentQuotation.is_paid ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
                 title="Payment received - click to view/edit details"
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Paid</span>
               </Button>
             ) : (currentQuotation.payment_status === 'PARTIALLY_PAID' || (currentQuotation.paid_amount && currentQuotation.paid_amount > 0)) ? (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 hover:text-cyan-900"
                 title={`Partial payment recorded (${currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%) - click to update`}
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Partial ({currentQuotation.advance_percentage || Math.round(((currentQuotation.paid_amount || 0) / currentQuotation.grand_total) * 100)}%)</span>
               </Button>
             ) : (
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => setIsPaymentOpen(true)}
-                className="gap-1.5 text-xs font-semibold shadow-sm bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900"
+                className="gap-1 text-[11px] font-semibold shadow-2xs bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900"
                 title="Record customer payment"
               >
-                <CreditCard className="h-3.5 w-3.5" />
+                <CreditCard className="h-3 w-3" />
                 <span>Mark as Paid</span>
               </Button>
             )}
@@ -639,13 +639,13 @@ export function QuotationActionButtons({
           <>
             <Button
               variant="outline"
-              size="sm"
+              size="xs"
               onClick={handleMarkCompletedClick}
               isLoading={isCompleting}
-              className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-xs"
+              className="gap-1 text-[11px] text-slate-700 border-slate-300 hover:bg-slate-50 font-semibold shadow-2xs"
               title="Mark this quotation lifecycle as Completed"
             >
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
               <span>Mark as Completed</span>
             </Button>
           </>
@@ -655,12 +655,12 @@ export function QuotationActionButtons({
         {['DRAFT', 'PENDING', 'SENT', 'VIEWED', 'PENDING_APPROVAL'].includes(currentStatus) && (
           <Button
             variant="outline"
-            size="sm"
+            size="xs"
             onClick={handleMarkApproved}
             isLoading={isApproving}
-            className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 shadow-sm font-semibold"
+            className="gap-1 text-[11px] text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 shadow-2xs font-semibold"
           >
-            <Check className="h-3.5 w-3.5 text-emerald-600" />
+            <Check className="h-3 w-3 text-emerald-600" />
             <span>Mark Approved</span>
           </Button>
         )}
@@ -669,13 +669,13 @@ export function QuotationActionButtons({
         {currentStatus === 'DRAFT' && (
           <Button
             variant="primary"
-            size="sm"
+            size="xs"
             onClick={handleFinalizeDraft}
             isLoading={isFinalizing}
-            className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm font-semibold"
+            className="gap-1 text-[11px] bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs font-semibold"
             title="Finalize draft and generate official customer approval link"
           >
-            <CheckCircle2 className="h-3.5 w-3.5" />
+            <CheckCircle2 className="h-3 w-3" />
             <span>Save & Generate Approval Link</span>
           </Button>
         )}
@@ -683,8 +683,8 @@ export function QuotationActionButtons({
         {/* Change Rates / Edit (Hidden for APPROVED, IN_PROGRESS, PAYMENT_COMPLETED, and COMPLETED locked quotes) */}
         {!['APPROVED', 'IN_PROGRESS', 'PAYMENT_COMPLETED', 'COMPLETED', 'EXPIRED', 'REJECTED'].includes(currentStatus) && (
           <Link href={`/quotations/${quotationId}/edit`}>
-            <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
-              <Edit className="h-3.5 w-3.5" />
+            <Button variant="secondary" size="xs" className="gap-1 text-[11px]">
+              <Edit className="h-3 w-3" />
               <span>Change Rates</span>
             </Button>
           </Link>
@@ -696,19 +696,19 @@ export function QuotationActionButtons({
             {/* Copy Public Link */}
             <Button
               variant="outline"
-              size="sm"
+              size="xs"
               onClick={handleCopyLink}
-              className="gap-1.5 text-xs shadow-sm"
+              className="gap-1 text-[11px] shadow-2xs"
               title="Copy customer approval link"
             >
               {copied ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  <Check className="h-3 w-3 text-emerald-600" />
                   <span className="text-emerald-700 font-semibold">Copied!</span>
                 </>
               ) : (
                 <>
-                  <Copy className="h-3.5 w-3.5 text-slate-500" />
+                  <Copy className="h-3 w-3 text-slate-500" />
                   <span>Copy Link</span>
                 </>
               )}
@@ -722,19 +722,19 @@ export function QuotationActionButtons({
             >
               <Button
                 variant="outline"
-                size="sm"
-                className="gap-1.5 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 shadow-sm"
+                size="xs"
+                className="gap-1 text-[11px] text-emerald-700 border-emerald-200 hover:bg-emerald-50 shadow-2xs"
                 title="Send customer approval link via WhatsApp"
               >
-                <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                <MessageSquare className="h-3 w-3 text-emerald-600" />
                 <span>WhatsApp</span>
               </Button>
             </a>
 
             {/* Open Public Portal View in New Tab */}
             <Link href={`/q/${publicToken}`} target="_blank">
-              <Button variant="primary" size="sm" className="gap-1.5 text-xs shadow-sm">
-                <ExternalLink className="h-3.5 w-3.5" />
+              <Button variant="primary" size="xs" className="gap-1 text-[11px] shadow-2xs">
+                <ExternalLink className="h-3 w-3" />
                 <span>Client View</span>
               </Button>
             </Link>
@@ -744,12 +744,12 @@ export function QuotationActionButtons({
         {/* Download PDF */}
         <Button
           variant="outline"
-          size="sm"
+          size="xs"
           onClick={handleDownloadPdf}
           isLoading={isDownloadingPdf}
-          className="gap-1.5 text-xs shadow-sm"
+          className="gap-1 text-[11px] shadow-2xs"
         >
-          <Download className="h-3.5 w-3.5 text-slate-500" />
+          <Download className="h-3 w-3 text-slate-500" />
           <span>PDF</span>
         </Button>
 
@@ -757,12 +757,12 @@ export function QuotationActionButtons({
         {currentStatus === 'APPROVED' && (
           <Button
             variant="secondary"
-            size="sm"
+            size="xs"
             onClick={handleCreateRevision}
             isLoading={isRevising}
-            className="gap-1.5 text-xs"
+            className="gap-1 text-[11px]"
           >
-            <RotateCcw className="h-3.5 w-3.5" />
+            <RotateCcw className="h-3 w-3" />
             <span>Create Revision</span>
           </Button>
         )}
@@ -771,13 +771,13 @@ export function QuotationActionButtons({
         {currentUserRole !== 'STAFF' && (
           <Button
             variant="outline"
-            size="sm"
+            size="xs"
             onClick={handleDeleteQuotation}
             isLoading={isDeleting}
-            className="gap-1.5 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 shadow-sm"
+            className="gap-1 text-[11px] text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 shadow-2xs"
             title="Permanently Delete Quotation"
           >
-            <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+            <Trash2 className="h-3 w-3 text-rose-500" />
             <span>Delete</span>
           </Button>
         )}
