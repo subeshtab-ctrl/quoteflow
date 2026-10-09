@@ -427,12 +427,16 @@ export function InvoiceModal({
     setDiscountValue(quotation.discount_value || 0);
   };
 
+  const isInvoiceIssued = Boolean(invoiceId || quotation.has_issued_invoice || quotation.issued_invoice_id);
+
   const handlePrint = () => {
+    if (!isInvoiceIssued) return;
     window.print();
   };
 
   const handleDownloadPdf = () => {
-    const targetId = invoiceId || quotation.id;
+    if (!isInvoiceIssued) return;
+    const targetId = invoiceId || quotation.issued_invoice_id || quotation.id;
     window.open(`/api/invoices/${targetId}/pdf`, '_blank');
   };
 
@@ -618,7 +622,14 @@ export function InvoiceModal({
                   </Link>
                 )}
 
-                <Button variant="outline" size="sm" onClick={handlePrint} className="gap-1.5 text-xs shadow-sm">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePrint}
+                  disabled={!isInvoiceIssued}
+                  className="gap-1.5 text-xs shadow-sm"
+                  title={!isInvoiceIssued ? 'Issue invoice first to enable printing' : 'Print Invoice'}
+                >
                   <Printer className="h-3.5 w-3.5" />
                   <span>Print Invoice</span>
                 </Button>
@@ -626,7 +637,9 @@ export function InvoiceModal({
                   variant="primary"
                   size="sm"
                   onClick={handleDownloadPdf}
+                  disabled={!isInvoiceIssued}
                   className="gap-1.5 text-xs shadow-sm"
+                  title={!isInvoiceIssued ? 'Issue invoice first to enable PDF download' : 'Download Invoice PDF'}
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span>PDF</span>

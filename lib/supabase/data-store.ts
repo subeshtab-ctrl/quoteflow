@@ -2890,12 +2890,13 @@ class QuoteFlowStore {
           const completedMap: Record<string, { completed_at: string; unpaid: boolean }> = {};
           const inProgressMap: Record<string, { in_progress_at: string; estimated_days?: number; estimated_completion_date?: string }> = {};
           const chatEventsByQuote: Record<string, { messages: Array<{ senderRole: string; createdAt: string }>; lastReadAt: string | null }> = {};
+          const pinConfigMap: Record<string, any> = {};
           try {
             const { data: orgEvents } = await supabase
               .from('quotation_events')
               .select('quotation_id, actor_type, event_type, metadata, created_at')
               .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG', 'IN_PROGRESS', 'EXTEND_TIME'])
+              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG', 'PIN_CONFIG', 'IN_PROGRESS', 'EXTEND_TIME'])
               .order('created_at', { ascending: true });
 
             if (orgEvents) {
@@ -2905,7 +2906,9 @@ class QuoteFlowStore {
                 }
                 eventsByQuote[pe.quotation_id].push(pe);
 
-                if (pe.event_type === 'COMPLETED') {
+                if (pe.event_type === 'PIN_CONFIG') {
+                  pinConfigMap[pe.quotation_id] = pe.metadata;
+                } else if (pe.event_type === 'COMPLETED') {
                   completedMap[pe.quotation_id] = {
                     completed_at: pe.metadata?.completed_at || pe.created_at,
                     unpaid: Boolean(pe.metadata?.unpaid),
@@ -3026,6 +3029,13 @@ class QuoteFlowStore {
               has_issued_invoice: Boolean(existingIssuedInvoice),
               issued_invoice_id: existingIssuedInvoice ? existingIssuedInvoice.id : (existing?.issued_invoice_id || null),
               invoice_number: existingIssuedInvoice ? existingIssuedInvoice.invoice_number : (existing?.invoice_number || null),
+              pin_protection_enabled: Boolean(
+                q.pin_protection_enabled !== undefined && q.pin_protection_enabled !== null
+                  ? q.pin_protection_enabled
+                  : (pinConfigMap[q.id]?.pin_protection_enabled ?? existing?.pin_protection_enabled ?? false)
+              ),
+              pin: q.pin || pinConfigMap[q.id]?.pin || existing?.pin || (q.id === DEMO_PORTAL_QUOTE_ID ? DEMO_PORTAL_PIN : null) || null,
+              pin_hash: q.pin_hash || pinConfigMap[q.id]?.pin_hash || existing?.pin_hash || null,
             };
             this.quotations.set(q.id, merged);
             if (q.customer) {
@@ -3247,6 +3257,9 @@ class QuoteFlowStore {
           const latestInProgressEvent = eventsData?.find(
             (e: any) => e.event_type === 'IN_PROGRESS' || e.event_type === 'EXTEND_TIME'
           );
+          const latestPinEvent = eventsData?.find(
+            (e: any) => e.event_type === 'PIN_CONFIG' || e.event_type === 'PORTAL_PIN_CONFIG'
+          );
 
           let isPaid = payDetails.is_paid;
 
@@ -3335,6 +3348,26 @@ class QuoteFlowStore {
             invoice_number: Array.from(this.invoices.values()).find(
               (inv) => inv.quotation_id === data.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
             )?.invoice_number || existing?.invoice_number || null,
+            pin_protection_enabled: Boolean(
+              data.pin_protection_enabled !== undefined && data.pin_protection_enabled !== null
+                ? data.pin_protection_enabled
+                : (latestPinEvent?.metadata?.pin_protection_enabled ?? persistedQuote?.pin_protection_enabled ?? existing?.pin_protection_enabled ?? false)
+            ),
+            pin: (
+              data.pin ||
+              latestPinEvent?.metadata?.pin ||
+              persistedQuote?.pin ||
+              existing?.pin ||
+              (data.id === DEMO_PORTAL_QUOTE_ID ? DEMO_PORTAL_PIN : null) ||
+              null
+            ),
+            pin_hash: (
+              data.pin_hash ||
+              latestPinEvent?.metadata?.pin_hash ||
+              persistedQuote?.pin_hash ||
+              existing?.pin_hash ||
+              null
+            ),
           };
           this.quotations.set(data.id, merged);
           if (data.customer) {
@@ -3956,6 +3989,21 @@ class QuoteFlowStore {
             advance_percentage: newQuotation.advance_percentage,
           },
         });
+
+        if (pinProtectionEnabled) {
+          await supabase.from('quotation_events').insert({
+            organization_id: orgId,
+            quotation_id: id,
+            actor_type: 'USER',
+            actor_name: 'Business User',
+            event_type: 'PIN_CONFIG',
+            metadata: {
+              pin_protection_enabled: true,
+              pin: pin,
+              pin_hash: pinHash,
+            },
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to sync quotation to Supabase:', err);
@@ -4237,6 +4285,23 @@ class QuoteFlowStore {
             advance_percentage: updated.advance_percentage,
           },
         });
+
+        await this.persistQuotationToSupabase(updated);
+
+        if (updated.pin_protection_enabled !== undefined) {
+          await supabase.from('quotation_events').insert({
+            organization_id: existing.organization_id,
+            quotation_id: id,
+            actor_type: 'USER',
+            actor_name: 'Business User',
+            event_type: 'PIN_CONFIG',
+            metadata: {
+              pin_protection_enabled: updated.pin_protection_enabled,
+              pin: updated.pin,
+              pin_hash: updated.pin_hash,
+            },
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to sync updated quotation to Supabase:', err);

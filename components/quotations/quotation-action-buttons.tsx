@@ -23,6 +23,10 @@ import {
   Play,
   Calendar,
   Sparkles,
+  KeyRound,
+  Eye,
+  EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 import { Quotation, Organization, Customer, QuotationStatus } from '@/types/database';
 import { InvoiceModal } from '@/components/quotations/invoice-modal';
@@ -76,6 +80,17 @@ export function QuotationActionButtons({
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
   const [isCompletionConfirmOpen, setIsCompletionConfirmOpen] = useState(false);
 
+  // Client PIN Modal State
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [currentPin, setCurrentPin] = useState<string>(quotation?.pin || (quotation as any)?.demo_pin || '');
+  const [showPin, setShowPin] = useState(false);
+  const [copiedPin, setCopiedPin] = useState(false);
+  const [copiedLinkAndPin, setCopiedLinkAndPin] = useState(false);
+  const [isEditingPin, setIsEditingPin] = useState(false);
+  const [newPinInput, setNewPinInput] = useState<string>('');
+  const [isUpdatingPin, setIsUpdatingPin] = useState(false);
+  const [pinUpdateSuccess, setPinUpdateSuccess] = useState(false);
+
   // Form states for In Progress & Extend Time
   const [estimatedDaysInput, setEstimatedDaysInput] = useState<number>(7);
   const [estimatedNotesInput, setEstimatedNotesInput] = useState<string>('');
@@ -85,6 +100,11 @@ export function QuotationActionButtons({
   React.useEffect(() => {
     if (quotation) {
       setCurrentQuotation(quotation);
+      if (quotation.pin) {
+        setCurrentPin(quotation.pin);
+      } else if ((quotation as any)?.demo_pin) {
+        setCurrentPin((quotation as any).demo_pin);
+      }
     }
     if (status) {
       setCurrentStatus((prev) => {
@@ -99,6 +119,82 @@ export function QuotationActionButtons({
       });
     }
   }, [quotation, status]);
+
+  // Fetch fresh quotation details if PIN modal opened and PIN is missing
+  React.useEffect(() => {
+    if (isPinModalOpen && !currentPin) {
+      fetch(`/api/quotations/${quotationId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.quotation?.pin) {
+            setCurrentPin(data.quotation.pin);
+            if (currentQuotation) {
+              setCurrentQuotation({ ...currentQuotation, pin: data.quotation.pin, pin_protection_enabled: true });
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isPinModalOpen, quotationId, currentPin, currentQuotation]);
+
+  const isPinProtectionActive = Boolean(
+    currentQuotation?.pin_protection_enabled ||
+    currentQuotation?.pin ||
+    (currentQuotation as any)?.demo_pin ||
+    currentPin
+  );
+
+  const handleCopyPinOnly = () => {
+    if (!currentPin) return;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(currentPin);
+      setCopiedPin(true);
+      setTimeout(() => setCopiedPin(false), 2500);
+    }
+  };
+
+  const handleCopyLinkAndPin = () => {
+    const text = `Quotation #${quotationNumber} (${grandTotalFormatted})\nLink: ${publicUrl}\nAccess PIN: ${currentPin || '1234'}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedLinkAndPin(true);
+      setTimeout(() => setCopiedLinkAndPin(false), 2500);
+    }
+  };
+
+  const handleSaveNewPin = async () => {
+    if (newPinInput.length !== 4) return;
+    try {
+      setIsUpdatingPin(true);
+      const res = await fetch(`/api/quotations/${quotationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin_protection_enabled: true,
+          pin: newPinInput,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update PIN');
+
+      setCurrentPin(newPinInput);
+      if (currentQuotation) {
+        setCurrentQuotation({
+          ...currentQuotation,
+          pin: newPinInput,
+          pin_protection_enabled: true,
+        });
+      }
+      setIsEditingPin(false);
+      setPinUpdateSuccess(true);
+      setTimeout(() => setPinUpdateSuccess(false), 3000);
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update PIN');
+    } finally {
+      setIsUpdatingPin(false);
+    }
+  };
 
   const handlePaymentUpdated = (updatedQuote: Quotation) => {
     setCurrentQuotation(updatedQuote);
@@ -372,8 +468,12 @@ export function QuotationActionButtons({
     }
   };
 
+  const pinMsgSuffix = (isPinProtectionActive && (currentPin || currentQuotation?.pin))
+    ? `\nAccess PIN: ${currentPin || currentQuotation?.pin}`
+    : '';
+
   const whatsappMsg = encodeURIComponent(
-    `Hello ${customerName}, please review quotation ${quotationNumber} (${grandTotalFormatted}). View and digitally sign online here: ${publicUrl}`
+    `Hello ${customerName}, please review quotation ${quotationNumber} (${grandTotalFormatted}). View and digitally sign online here: ${publicUrl}${pinMsgSuffix}`
   );
 
   return (
@@ -738,6 +838,21 @@ export function QuotationActionButtons({
                 <span>Client View</span>
               </Button>
             </Link>
+
+            {/* View Client PIN (Shown when PIN protection is enabled) */}
+            {isPinProtectionActive && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => setIsPinModalOpen(true)}
+                className="gap-1 text-[11px] text-amber-800 border-amber-300 bg-amber-50 hover:bg-amber-100 hover:text-amber-900 font-semibold shadow-2xs"
+                title="Click to view Client Portal Access PIN"
+              >
+                <KeyRound className="h-3 w-3 text-amber-600" />
+                <span>Client PIN</span>
+              </Button>
+            )}
           </>
         )}
 
@@ -1122,6 +1237,200 @@ export function QuotationActionButtons({
             >
               <AlertTriangle className="h-3.5 w-3.5 mr-1" />
               <span>Confirm Mark as Completed (Unpaid)</span>
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Client Access PIN Modal */}
+      <Modal
+        isOpen={isPinModalOpen}
+        onClose={() => {
+          setIsPinModalOpen(false);
+          setIsEditingPin(false);
+          setPinUpdateSuccess(false);
+        }}
+        title={`Client Portal Access PIN - ${quotationNumber}`}
+        maxWidth="md"
+      >
+        <div className="space-y-4 pt-1">
+          <div className="flex items-start gap-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+            <div className="p-2 rounded-lg bg-amber-100 text-amber-700 shrink-0">
+              <KeyRound className="h-5 w-5" />
+            </div>
+            <div className="text-xs space-y-1">
+              <p className="font-semibold text-amber-950">
+                This quotation is protected with a 4-digit security PIN.
+              </p>
+              <p className="text-amber-800 leading-relaxed">
+                When your client opens the <strong>Client View</strong> link, they must enter this PIN to view the quotation.
+              </p>
+            </div>
+          </div>
+
+          {/* Current PIN Display */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                4-Digit Client Access PIN
+              </span>
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                Protection Active
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <span className="font-mono text-2xl font-black tracking-widest text-indigo-700 select-all">
+                  {showPin ? (currentPin || '••••') : '••••'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 transition-colors"
+                  title={showPin ? 'Hide PIN' : 'Reveal PIN'}
+                >
+                  {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={handleCopyPinOnly}
+                  disabled={!currentPin}
+                  className="gap-1 text-xs font-semibold"
+                >
+                  {copiedPin ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  <span>{copiedPin ? 'Copied' : 'Copy PIN'}</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Quick Share Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={handleCopyLinkAndPin}
+                className="gap-1.5 text-xs text-slate-700 border-slate-300 hover:bg-slate-100 font-semibold w-full justify-center"
+                title="Copy client portal link and PIN together"
+              >
+                {copiedLinkAndPin ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                    <span className="text-emerald-700">Copied Link + PIN!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5 text-slate-500" />
+                    <span>Copy Link + PIN</span>
+                  </>
+                )}
+              </Button>
+
+              <a
+                href={`https://wa.me/?text=${whatsappMsg}`}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full"
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 font-semibold w-full justify-center"
+                >
+                  <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Share on WhatsApp</span>
+                </Button>
+              </a>
+            </div>
+          </div>
+
+          {/* Change PIN toggle / section */}
+          {isEditingPin ? (
+            <div className="p-4 rounded-xl bg-indigo-50/60 border border-indigo-200 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">
+                  Set New 4-Digit PIN
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingPin(false)}
+                  className="text-[11px] text-slate-500 hover:text-slate-800 underline"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  maxLength={4}
+                  value={newPinInput}
+                  onChange={(e) => setNewPinInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                  placeholder="e.g. 1234"
+                  className="h-9 w-28 text-center font-mono font-bold text-base tracking-widest rounded-lg border border-indigo-300 bg-white text-indigo-900 shadow-2xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setNewPinInput(Math.floor(1000 + Math.random() * 9000).toString())}
+                  className="h-9 text-xs"
+                >
+                  Randomize
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  onClick={handleSaveNewPin}
+                  isLoading={isUpdatingPin}
+                  disabled={newPinInput.length !== 4}
+                  className="h-9 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                >
+                  Save PIN
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setNewPinInput(currentPin || Math.floor(1000 + Math.random() * 9000).toString());
+                  setIsEditingPin(true);
+                }}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+              >
+                Change or reset this PIN &rarr;
+              </button>
+
+              {pinUpdateSuccess && (
+                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>PIN updated!</span>
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsPinModalOpen(false);
+                setIsEditingPin(false);
+              }}
+              className="text-xs"
+            >
+              Close
             </Button>
           </div>
         </div>

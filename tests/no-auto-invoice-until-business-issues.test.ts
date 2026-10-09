@@ -73,7 +73,7 @@ describe('No Auto-Invoice Generation Until Explicitly Issued by Business', () =>
       due_date: '2026-10-09',
       currency: 'INR',
       status: 'PAID',
-      items: quotation.items.map((it) => ({
+      items: (quotation.items || []).map((it) => ({
         description: it.description,
         quantity: it.quantity,
         unit: it.unit,
@@ -100,5 +100,64 @@ describe('No Auto-Invoice Generation Until Explicitly Issued by Business', () =>
     expect(pdfBytes.length).toBeGreaterThan(1000);
     const pdfHeader = Buffer.from(pdfBytes.slice(0, 4)).toString('ascii');
     expect(pdfHeader).toBe('%PDF');
+  });
+
+  it('preserves and allows viewing/updating client PIN on quotation', async () => {
+    const customer = await store.createCustomer({
+      organization_id: orgId,
+      name: 'PIN Customer',
+      email: 'pin.customer@example.com',
+    });
+
+    const quotation = await store.createQuotation({
+      organization_id: orgId,
+      customer_id: customer.id,
+      title: 'PIN Protected Security Project',
+      issue_date: '2026-10-09',
+      valid_until: '2026-11-09',
+      pin_protection_enabled: true,
+      pin: '8492',
+      items: [
+        {
+          description: 'Security Audit & Setup',
+          quantity: 1,
+          unit_price: 50000,
+          unit: 'service',
+          tax_rate: 18,
+        },
+      ],
+    });
+
+    expect(quotation.pin_protection_enabled).toBe(true);
+    expect(quotation.pin).toBe('8492');
+
+    // Retrieve quote via getQuotationById and verify PIN is retained
+    const retrieved = await store.getQuotationById(quotation.id, orgId);
+    expect(retrieved?.pin_protection_enabled).toBe(true);
+    expect(retrieved?.pin).toBe('8492');
+
+    // Verify PIN verification works
+    const isCorrect = await store.verifyQuotationPin(quotation.id, '8492');
+    expect(isCorrect).toBe(true);
+
+    const isIncorrect = await store.verifyQuotationPin(quotation.id, '0000');
+    expect(isIncorrect).toBe(false);
+
+    // Update PIN to a new value
+    const updated = await store.updateQuotation(
+      quotation.id,
+      {
+        pin_protection_enabled: true,
+        pin: '3156',
+      },
+      orgId
+    );
+
+    expect(updated.pin).toBe('3156');
+    const retrievedAfterUpdate = await store.getQuotationById(quotation.id, orgId);
+    expect(retrievedAfterUpdate?.pin).toBe('3156');
+
+    const isNewPinCorrect = await store.verifyQuotationPin(quotation.id, '3156');
+    expect(isNewPinCorrect).toBe(true);
   });
 });
