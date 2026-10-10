@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Invoice, Organization } from '@/types/database';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import { formatCurrency, calculateQuotationTotals, isValidDocumentText } from '@/lib/quotations/calculations';
 import { formatDate } from '@/lib/utils';
 import { InvoiceStatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -58,8 +58,46 @@ export function InvoiceDetailView({
 
   const org = invoice.organization;
   const customer = invoice.customer;
-  const currency = invoice.currency;
+  const currency = invoice.currency || 'INR';
   const countryProfile = getCountryProfile(org?.country || 'IN');
+  const taxMode = invoice.tax_mode || org?.default_tax_mode || 'exclusive';
+  const placeOfSupply =
+    invoice.place_of_supply ||
+    customer?.place_of_supply ||
+    customer?.billing_state ||
+    customer?.state ||
+    null;
+  const isIndiaGst = Boolean(
+    org?.country === 'India' ||
+      currency === 'INR' ||
+      org?.gst_registered ||
+      org?.gstin ||
+      org?.gst_vat_number
+  );
+  const calculated = calculateQuotationTotals(
+    (invoice.items || []).map((it) => ({
+      quantity: Number(it.quantity) || 0,
+      unit_price: Number(it.unit_price) || 0,
+      tax_rate: Number(it.tax_rate) || 0,
+    })),
+    invoice.discount_type || null,
+    Number(invoice.discount_value) || 0,
+    {
+      taxMode,
+      taxName: invoice.tax_name || org?.tax_label || 'GST',
+      isIndiaGst,
+      businessState: org?.business_state || org?.state || null,
+      placeOfSupply,
+    }
+  );
+  const displaySubtotal = calculated.subtotal;
+  const displayDiscount = calculated.discount_amount;
+  const displayTax = calculated.tax_amount;
+  const displayTotal = calculated.grand_total;
+  const displayTaxBreakdown =
+    invoice.tax_breakdown && invoice.tax_breakdown.length > 0
+      ? invoice.tax_breakdown
+      : calculated.tax_breakdown;
 
   const handlePrint = () => {
     window.print();
@@ -384,14 +422,14 @@ export function InvoiceDetailView({
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              {org?.address_line1}, {org?.city} {org?.state} {org?.postal_code}
+              {org?.address_line1}, {org?.city} {org?.business_state || org?.state} {org?.postal_code}
               <br />
               Email: {org?.email} | Tel: {org?.phone || 'N/A'}
-              {org?.gst_vat_number && (
+              {(org?.gstin || org?.gst_vat_number) && (
                 <>
                   <br />
                   <span className="font-semibold text-slate-700 dark:text-slate-300">
-                    {countryProfile.taxLabel.split(' ')[0]}: {org?.gst_vat_number}
+                    {countryProfile.taxLabel.split(' ')[0]}: {org?.gstin || org?.gst_vat_number}
                   </span>
                 </>
               )}
@@ -409,6 +447,11 @@ export function InvoiceDetailView({
                 <p>Due Date: {formatDate(invoice.due_date)}</p>
               )}
               {invoice.po_number && <p className="font-semibold">PO #: {invoice.po_number}</p>}
+              {displayTax > 0 && (
+                <p className="font-semibold text-indigo-600 dark:text-indigo-400">
+                  Tax Mode: {taxMode === 'inclusive' ? 'Tax Included' : 'Tax Excluded'}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -427,12 +470,17 @@ export function InvoiceDetailView({
             )}
             {customer?.billing_address && (
               <p className="text-slate-500 mt-0.5">
-                {customer.billing_address}, {customer.city} {customer.state} {customer.postal_code}
+                {customer.billing_address}, {customer.city} {customer.billing_state || customer.state} {customer.postal_code}
               </p>
             )}
-            {customer?.tax_number && (
+            {(invoice.customer_gstin || customer?.customer_gstin || customer?.tax_number) && (
               <p className="text-slate-700 dark:text-slate-300 font-semibold mt-1">
-                Tax ID / GST: {customer.tax_number}
+                GSTIN / Tax ID: {invoice.customer_gstin || customer?.customer_gstin || customer?.tax_number}
+              </p>
+            )}
+            {placeOfSupply && (
+              <p className="text-indigo-600 dark:text-indigo-400 font-semibold mt-0.5">
+                Place of Supply: {placeOfSupply}
               </p>
             )}
           </div>
@@ -472,35 +520,41 @@ export function InvoiceDetailView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-              {(invoice.items || []).map((item, idx) => (
-                <tr key={item.id || idx}>
-                  <td className="py-3 px-3 text-slate-400">{idx + 1}</td>
-                  <td className="py-3 px-3 font-semibold text-slate-900 dark:text-slate-100 max-w-sm">
-                    {item.description}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-slate-500">
-                    {item.classification_code ? (
-                      <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">
-                        {item.classification_type || (item.item_type === 'GOODS' ? 'HSN' : 'SAC')}: {item.classification_code}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">{item.item_type || 'Item'}</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 text-right font-medium">
-                    {item.quantity} {item.unit}
-                  </td>
-                  <td className="py-3 px-3 text-right font-medium">
-                    {formatCurrency(item.unit_price, currency)}
-                  </td>
-                  <td className="py-3 px-3 text-right font-medium text-slate-500">
-                    {item.tax_rate}%
-                  </td>
-                  <td className="py-3 px-3 text-right font-bold text-slate-900 dark:text-slate-100">
-                    {formatCurrency(item.line_total, currency)}
-                  </td>
-                </tr>
-              ))}
+              {(invoice.items || []).map((item, idx) => {
+                const calcItem = calculated.items[idx];
+                const lineTotal = calcItem ? calcItem.line_total : item.line_total;
+                return (
+                  <tr key={item.id || idx}>
+                    <td className="py-3 px-3 text-slate-400">{idx + 1}</td>
+                    <td className="py-3 px-3 font-semibold text-slate-900 dark:text-slate-100 max-w-sm">
+                      {item.description}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-slate-500">
+                      {item.classification_code ? (
+                        <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">
+                          {item.classification_type || (item.item_type === 'GOODS' ? 'HSN' : 'SAC')}: {item.classification_code}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">{item.item_type || 'Item'}</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-right font-medium">
+                      {item.quantity} {item.unit}
+                    </td>
+                    <td className="py-3 px-3 text-right font-medium">
+                      {formatCurrency(item.unit_price, currency)}
+                    </td>
+                    <td className="py-3 px-3 text-right font-medium text-slate-500">
+                      {item.tax_rate > 0
+                        ? `${item.tax_rate}%${taxMode === 'inclusive' ? ' (Incl.)' : ''}`
+                        : '-'}
+                    </td>
+                    <td className="py-3 px-3 text-right font-bold text-slate-900 dark:text-slate-100">
+                      {formatCurrency(lineTotal, currency)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -508,21 +562,21 @@ export function InvoiceDetailView({
         {/* Financial Summary */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="space-y-3 max-w-sm">
-            {Boolean(invoice.notes && invoice.notes.trim()) && (
+            {isValidDocumentText(invoice.notes) && (
               <div>
                 <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">
                   Notes
                 </span>
-                <p className="text-slate-500 mt-0.5 leading-relaxed whitespace-pre-line">{invoice.notes}</p>
+                <p className="text-slate-500 mt-0.5 leading-relaxed whitespace-pre-line">{invoice.notes!.trim()}</p>
               </div>
             )}
-            {Boolean(invoice.terms_conditions && invoice.terms_conditions.trim()) && (
+            {isValidDocumentText(invoice.terms_conditions) && (
               <div>
                 <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">
-                  Payment Terms
+                  Terms & Conditions
                 </span>
                 <p className="text-slate-500 mt-0.5 whitespace-pre-line leading-relaxed">
-                  {invoice.terms_conditions}
+                  {invoice.terms_conditions!.trim()}
                 </p>
               </div>
             )}
@@ -530,22 +584,22 @@ export function InvoiceDetailView({
 
           <div className="w-full sm:w-72 space-y-2">
             <div className="flex justify-between text-slate-500">
-              <span>Subtotal</span>
+              <span>{taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal'}</span>
               <span className="font-semibold text-slate-900 dark:text-slate-100">
-                {formatCurrency(invoice.subtotal, currency)}
+                {formatCurrency(displaySubtotal, currency)}
               </span>
             </div>
 
-            {Boolean(invoice.discount_amount && invoice.discount_amount > 0) && (
+            {displayDiscount > 0 && (
               <div className="flex justify-between text-emerald-600 font-semibold">
                 <span>Discount</span>
-                <span>-{formatCurrency(invoice.discount_amount || 0, currency)}</span>
+                <span>-{formatCurrency(displayDiscount, currency)}</span>
               </div>
             )}
 
             {/* Tax Breakdown */}
-            {(invoice.tax_breakdown && invoice.tax_breakdown.length > 0) ? (
-              invoice.tax_breakdown.map((tb, i) => (
+            {displayTaxBreakdown.length > 0 ? (
+              displayTaxBreakdown.map((tb, i) => (
                 <div key={i} className="flex justify-between text-slate-500">
                   <span>{tb.label}</span>
                   <span className="font-semibold text-slate-900 dark:text-slate-100">
@@ -553,19 +607,21 @@ export function InvoiceDetailView({
                   </span>
                 </div>
               ))
-            ) : (
+            ) : displayTax > 0 ? (
               <div className="flex justify-between text-slate-500">
-                <span>Tax Total</span>
+                <span>
+                  {invoice.tax_name || org?.tax_label || 'Tax'} {taxMode === 'inclusive' ? '(Included)' : ''}
+                </span>
                 <span className="font-semibold text-slate-900 dark:text-slate-100">
-                  {formatCurrency(invoice.tax_amount, currency)}
+                  {formatCurrency(displayTax, currency)}
                 </span>
               </div>
-            )}
+            ) : null}
 
             <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex justify-between items-baseline">
               <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Total Amount</span>
               <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">
-                {formatCurrency(invoice.grand_total, currency)}
+                {formatCurrency(displayTotal, currency)}
               </span>
             </div>
 

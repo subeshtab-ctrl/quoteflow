@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/service-role';
 import { store } from '@/lib/supabase/data-store';
@@ -12,7 +13,23 @@ export interface UserAuthContext {
   organization: Organization;
 }
 
-export async function getAuthenticatedUserContext(): Promise<UserAuthContext | null> {
+// 30-second in-memory cache for resolved user membership to eliminate redundant DB roundtrips
+// across rapid API/page requests and reduce Vercel Fluid Active CPU usage.
+const membershipCache = new Map<
+  string,
+  { orgId: string; role: UserRole; expiresAt: number }
+>();
+const MEMBERSHIP_CACHE_TTL_MS = 30_000;
+
+export function invalidateAuthContextCache(userId?: string) {
+  if (userId) {
+    membershipCache.delete(userId);
+  } else {
+    membershipCache.clear();
+  }
+}
+
+async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null> {
   const supabase = await createServerSupabaseClient();
   if (!supabase) return null;
 
@@ -29,6 +46,24 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
     return null;
   }
 
+  const now = Date.now();
+  const cachedMember = membershipCache.get(user.id);
+  if (cachedMember && cachedMember.expiresAt > now) {
+    const organization = await store.getOrganization(cachedMember.orgId);
+    if (organization) {
+      const fullName =
+        (user.user_metadata?.full_name as string) ||
+        (user.email ? user.email.split('@')[0] : 'User');
+      return {
+        userId: user.id,
+        email: user.email || '',
+        fullName,
+        orgId: cachedMember.orgId,
+        role: cachedMember.role,
+        organization,
+      };
+    }
+  }
 
   const admin = createAdminClient();
   let orgId = (user.user_metadata?.organization_id as string) || '';
@@ -170,6 +205,13 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
     orgId = DEFAULT_ORG_ID;
   }
 
+  // Cache resolved membership for 30s
+  membershipCache.set(user.id, {
+    orgId,
+    role,
+    expiresAt: Date.now() + MEMBERSHIP_CACHE_TTL_MS,
+  });
+
   let organization = await store.getOrganization(orgId);
 
   // If organization record doesn't exist in cache/db, initialize safe defaults
@@ -208,3 +250,6 @@ export async function getAuthenticatedUserContext(): Promise<UserAuthContext | n
     organization,
   };
 }
+
+export const getAuthenticatedUserContext = cache(resolveAuthenticatedUserContext);
+

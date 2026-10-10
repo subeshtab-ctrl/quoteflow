@@ -4,6 +4,7 @@ import {
   ReportResponseData,
   ReportRow,
   ReportMetricSummary,
+  CurrencyMetricBreakdown,
   AgingSummary,
   TaxBreakdownSummary,
   ChartDataPoint,
@@ -11,6 +12,7 @@ import {
 } from './report-types';
 import { Invoice, Quotation, Customer, Product, Organization, CurrencyCode } from '@/types/database';
 import { getCountryProfile } from '@/lib/tax/country-config';
+import { calculateQuotationTotals, roundCurrency } from '@/lib/quotations/calculations';
 import { format, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear, parseISO, differenceInDays } from 'date-fns';
 
 export function computeDatePresetRange(
@@ -310,24 +312,76 @@ export function calculateReportData({
   // Payment method tallies
   const paymentMethodTallies = new Map<string, { amount: number; count: number }>();
 
+  // Multi-currency breakdown map
+  const currencyMap = new Map<CurrencyCode, CurrencyMetricBreakdown>();
+  const getOrInitCurrencyMetric = (curr: CurrencyCode): CurrencyMetricBreakdown => {
+    let entry = currencyMap.get(curr);
+    if (!entry) {
+      entry = {
+        currency: curr,
+        totalSales: 0,
+        totalInvoiced: 0,
+        totalPaid: 0,
+        totalOutstanding: 0,
+        totalOverdue: 0,
+        totalTax: 0,
+        totalDiscount: 0,
+        invoiceCount: 0,
+        quoteCount: 0,
+      };
+      currencyMap.set(curr, entry);
+    }
+    return entry;
+  };
+
   // Process invoices for metrics & aging
   processedInvoices.forEach((inv) => {
     const isCancelled = inv.status === 'CANCELLED' || inv.status === 'VOIDED';
     if (isCancelled) return;
 
-    const grandTotal = Number(inv.grand_total) || 0;
-    const subtotal = Number(inv.subtotal) || 0;
-    const taxAmount = Number(inv.tax_amount) || 0;
-    const discountAmount = Number(inv.discount_amount) || 0;
+    const invCurrency: CurrencyCode = inv.currency || currency;
+    const cust = inv.customer || customerMap.get(inv.customer_id);
+    const invItems = inv.items || [];
+    const calc = invItems.length > 0
+      ? calculateQuotationTotals(
+          invItems.map((it) => ({
+            quantity: Number(it.quantity) || 0,
+            unit_price: Number(it.unit_price) || 0,
+            discount_percent: Number(it.discount_percent) || 0,
+            tax_rate: Number(it.tax_rate) || 0,
+          })),
+          invCurrency,
+          {
+            taxMode: inv.tax_mode || organization.default_tax_mode || 'exclusive',
+            businessState: organization.business_state || organization.state,
+            placeOfSupply: inv.place_of_supply || cust?.place_of_supply || cust?.billing_state || cust?.state || organization.business_state || organization.state,
+            gstEnabled: organization.gst_registered !== false,
+          }
+        )
+      : null;
+
+    const grandTotal = calc ? calc.grand_total : (Number(inv.grand_total) || 0);
+    const subtotal = calc ? calc.subtotal : (Number(inv.subtotal) || 0);
+    const taxAmount = calc ? calc.tax_amount : (Number(inv.tax_amount) || 0);
+    const discountAmount = calc ? calc.discount_amount : (Number(inv.discount_amount) || 0);
     const paidAmount = Number(inv.paid_amount) || (inv.is_paid ? grandTotal : 0);
     const balanceAmount = Math.max(0, Number(inv.balance_amount !== undefined ? inv.balance_amount : (grandTotal - paidAmount)));
 
-    totalInvoiced += grandTotal;
-    totalSales += grandTotal;
-    totalPaid += paidAmount;
-    totalOutstanding += balanceAmount;
-    totalTax += taxAmount;
-    totalDiscount += discountAmount;
+    totalInvoiced = roundCurrency(totalInvoiced + grandTotal);
+    totalSales = roundCurrency(totalSales + grandTotal);
+    totalPaid = roundCurrency(totalPaid + paidAmount);
+    totalOutstanding = roundCurrency(totalOutstanding + balanceAmount);
+    totalTax = roundCurrency(totalTax + taxAmount);
+    totalDiscount = roundCurrency(totalDiscount + discountAmount);
+
+    const currMetric = getOrInitCurrencyMetric(invCurrency);
+    currMetric.totalInvoiced = roundCurrency(currMetric.totalInvoiced + grandTotal);
+    currMetric.totalSales = roundCurrency(currMetric.totalSales + grandTotal);
+    currMetric.totalPaid = roundCurrency(currMetric.totalPaid + paidAmount);
+    currMetric.totalOutstanding = roundCurrency(currMetric.totalOutstanding + balanceAmount);
+    currMetric.totalTax = roundCurrency(currMetric.totalTax + taxAmount);
+    currMetric.totalDiscount = roundCurrency(currMetric.totalDiscount + discountAmount);
+    currMetric.invoiceCount += 1;
 
     // Aging analysis for unpaid/partially paid
     if (balanceAmount > 0) {
@@ -335,29 +389,36 @@ export function calculateReportData({
       const overdueDays = differenceInDays(now, dueDate);
 
       if (overdueDays <= 0) {
-        agingCurrent += balanceAmount;
+        agingCurrent = roundCurrency(agingCurrent + balanceAmount);
       } else {
-        totalOverdue += balanceAmount;
-        if (overdueDays <= 30) aging1_30 += balanceAmount;
-        else if (overdueDays <= 60) aging31_60 += balanceAmount;
-        else if (overdueDays <= 90) aging61_90 += balanceAmount;
-        else aging90Plus += balanceAmount;
+        totalOverdue = roundCurrency(totalOverdue + balanceAmount);
+        currMetric.totalOverdue = roundCurrency(currMetric.totalOverdue + balanceAmount);
+        if (overdueDays <= 30) aging1_30 = roundCurrency(aging1_30 + balanceAmount);
+        else if (overdueDays <= 60) aging31_60 = roundCurrency(aging31_60 + balanceAmount);
+        else if (overdueDays <= 90) aging61_90 = roundCurrency(aging61_90 + balanceAmount);
+        else aging90Plus = roundCurrency(aging90Plus + balanceAmount);
       }
     }
 
     // Tax aggregation
-    taxableSales += subtotal;
-    totalTaxCollected += taxAmount;
+    taxableSales = roundCurrency(taxableSales + subtotal);
+    totalTaxCollected = roundCurrency(totalTaxCollected + taxAmount);
 
-    (inv.items || []).forEach((item) => {
-      const itemTax = Number(item.tax_amount) || 0;
-      const itemSubtotal = (Number(item.quantity) || 1) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0);
+    invItems.forEach((item, idx) => {
+      const calcItem = calc?.items[idx];
+      const itemTax = calcItem ? calcItem.tax_amount : (Number(item.tax_amount) || 0);
+      const itemSubtotal = calcItem
+        ? calcItem.taxable_amount
+        : (Number(item.quantity) || 1) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0);
+      const itemCgst = calcItem ? (calcItem.cgst_amount || 0) : (Number(item.cgst_amount) || 0);
+      const itemSgst = calcItem ? (calcItem.sgst_amount || 0) : (Number(item.sgst_amount) || 0);
+      const itemIgst = calcItem ? (calcItem.igst_amount || 0) : (Number(item.igst_amount) || 0);
 
       // India GST components
       if (isIndiaGst) {
-        cgstTotal += Number(item.cgst_amount) || 0;
-        sgstTotal += Number(item.sgst_amount) || 0;
-        igstTotal += Number(item.igst_amount) || 0;
+        cgstTotal = roundCurrency(cgstTotal + itemCgst);
+        sgstTotal = roundCurrency(sgstTotal + itemSgst);
+        igstTotal = roundCurrency(igstTotal + itemIgst);
 
         const hsnCode = item.classification_code || 'General';
         const existingHsn = hsnMap.get(hsnCode) || {
@@ -372,17 +433,17 @@ export function calculateReportData({
           totalTax: 0,
           totalAmount: 0,
         };
-        existingHsn.taxableAmount += itemSubtotal;
-        existingHsn.cgstAmount += Number(item.cgst_amount) || 0;
-        existingHsn.sgstAmount += Number(item.sgst_amount) || 0;
-        existingHsn.igstAmount += Number(item.igst_amount) || 0;
-        existingHsn.totalTax += itemTax;
-        existingHsn.totalAmount += itemSubtotal + itemTax;
+        existingHsn.taxableAmount = roundCurrency(existingHsn.taxableAmount + itemSubtotal);
+        existingHsn.cgstAmount = roundCurrency(existingHsn.cgstAmount + itemCgst);
+        existingHsn.sgstAmount = roundCurrency(existingHsn.sgstAmount + itemSgst);
+        existingHsn.igstAmount = roundCurrency(existingHsn.igstAmount + itemIgst);
+        existingHsn.totalTax = roundCurrency(existingHsn.totalTax + itemTax);
+        existingHsn.totalAmount = roundCurrency(existingHsn.totalAmount + itemSubtotal + itemTax);
         hsnMap.set(hsnCode, existingHsn);
       } else if (isUaeVat) {
-        if ((item.tax_rate || 0) === 5) vatStandardTotal += itemTax;
-        else if ((item.tax_rate || 0) === 0) vatZeroTotal += itemSubtotal;
-        else vatExemptTotal += itemSubtotal;
+        if ((item.tax_rate || 0) === 5) vatStandardTotal = roundCurrency(vatStandardTotal + itemTax);
+        else if ((item.tax_rate || 0) === 0) vatZeroTotal = roundCurrency(vatZeroTotal + itemSubtotal);
+        else vatExemptTotal = roundCurrency(vatExemptTotal + itemSubtotal);
       }
     });
 
@@ -390,10 +451,17 @@ export function calculateReportData({
     if (inv.payment_method && paidAmount > 0) {
       const pmKey = inv.payment_method.toUpperCase();
       const current = paymentMethodTallies.get(pmKey) || { amount: 0, count: 0 };
-      current.amount += paidAmount;
+      current.amount = roundCurrency(current.amount + paidAmount);
       current.count += 1;
       paymentMethodTallies.set(pmKey, current);
     }
+  });
+
+  // Track quotation counts per currency as well
+  processedQuotations.forEach((q) => {
+    const qCurrency: CurrencyCode = q.currency || currency;
+    const currMetric = getOrInitCurrencyMetric(qCurrency);
+    currMetric.quoteCount += 1;
   });
 
   // Calculate Conversion Rate
@@ -408,7 +476,30 @@ export function calculateReportData({
 
   const mapInvoiceToRow = (inv: Invoice): ReportRow => {
     const cust = inv.customer || customerMap.get(inv.customer_id);
-    const grandTotal = Number(inv.grand_total) || 0;
+    const invCurrency: CurrencyCode = inv.currency || currency;
+    const invItems = inv.items || [];
+    const calc = invItems.length > 0
+      ? calculateQuotationTotals(
+          invItems.map((it) => ({
+            quantity: Number(it.quantity) || 0,
+            unit_price: Number(it.unit_price) || 0,
+            discount_percent: Number(it.discount_percent) || 0,
+            tax_rate: Number(it.tax_rate) || 0,
+          })),
+          invCurrency,
+          {
+            taxMode: inv.tax_mode || organization.default_tax_mode || 'exclusive',
+            businessState: organization.business_state || organization.state,
+            placeOfSupply: inv.place_of_supply || cust?.place_of_supply || cust?.billing_state || cust?.state || organization.business_state || organization.state,
+            gstEnabled: organization.gst_registered !== false,
+          }
+        )
+      : null;
+
+    const grandTotal = calc ? calc.grand_total : (Number(inv.grand_total) || 0);
+    const subtotal = calc ? calc.subtotal : (Number(inv.subtotal) || 0);
+    const taxAmount = calc ? calc.tax_amount : (Number(inv.tax_amount) || 0);
+    const discountAmount = calc ? calc.discount_amount : (Number(inv.discount_amount) || 0);
     const paidAmount = Number(inv.paid_amount) || (inv.is_paid ? grandTotal : 0);
     const balanceAmount = Math.max(0, Number(inv.balance_amount !== undefined ? inv.balance_amount : (grandTotal - paidAmount)));
     const dueDate = inv.due_date ? parseISO(inv.due_date) : now;
@@ -428,7 +519,7 @@ export function calculateReportData({
       else agingBracket = '90+';
     }
 
-    const itemsSummary = (inv.items || [])
+    const itemsSummary = invItems
       .map((i) => `${i.description} (${i.quantity} ${i.unit || 'unit'})`)
       .slice(0, 3)
       .join(', ');
@@ -442,16 +533,17 @@ export function calculateReportData({
       customerId: inv.customer_id,
       customerName: cust?.name || 'Customer',
       customerCompany: cust?.company_name || undefined,
-      customerTaxNumber: cust?.tax_number || undefined,
+      customerTaxNumber: inv.customer_gstin || cust?.customer_gstin || cust?.tax_number || undefined,
       status: balanceAmount > 0 && overdueDays > 0 && inv.status !== 'CANCELLED' ? 'OVERDUE' : inv.status,
       statusVariant,
       paymentStatus: inv.is_paid ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID'),
       paymentMethod: inv.payment_method || undefined,
-      currency: inv.currency || currency,
-      subtotal: Number(inv.subtotal) || 0,
-      discountAmount: Number(inv.discount_amount) || 0,
+      currency: invCurrency,
+      taxMode: inv.tax_mode || organization.default_tax_mode || 'exclusive',
+      subtotal,
+      discountAmount,
       taxRate: Number(inv.tax_rate) || 0,
-      taxAmount: Number(inv.tax_amount) || 0,
+      taxAmount,
       grandTotal,
       paidAmount,
       balanceAmount,
@@ -460,16 +552,39 @@ export function calculateReportData({
       agingBracket,
       itemsSummary: itemsSummary || 'No line items recorded',
       staffName: inv.created_by || 'Admin',
-      cgstAmount: isIndiaGst ? (inv.items || []).reduce((sum, i) => sum + (Number(i.cgst_amount) || 0), 0) : undefined,
-      sgstAmount: isIndiaGst ? (inv.items || []).reduce((sum, i) => sum + (Number(i.sgst_amount) || 0), 0) : undefined,
-      igstAmount: isIndiaGst ? (inv.items || []).reduce((sum, i) => sum + (Number(i.igst_amount) || 0), 0) : undefined,
-      hsnCodes: (inv.items || []).map((i) => i.classification_code).filter(Boolean) as string[],
+      cgstAmount: isIndiaGst ? (calc ? calc.cgst_amount : invItems.reduce((sum, i) => sum + (Number(i.cgst_amount) || 0), 0)) : undefined,
+      sgstAmount: isIndiaGst ? (calc ? calc.sgst_amount : invItems.reduce((sum, i) => sum + (Number(i.sgst_amount) || 0), 0)) : undefined,
+      igstAmount: isIndiaGst ? (calc ? calc.igst_amount : invItems.reduce((sum, i) => sum + (Number(i.igst_amount) || 0), 0)) : undefined,
+      hsnCodes: invItems.map((i) => i.classification_code).filter(Boolean) as string[],
     };
   };
 
   const mapQuotationToRow = (q: Quotation): ReportRow => {
     const cust = q.customer || customerMap.get(q.customer_id);
-    const grandTotal = Number(q.grand_total) || 0;
+    const qCurrency: CurrencyCode = q.currency || currency;
+    const qItems = q.items || [];
+    const calc = qItems.length > 0
+      ? calculateQuotationTotals(
+          qItems.map((it) => ({
+            quantity: Number(it.quantity) || 0,
+            unit_price: Number(it.unit_price) || 0,
+            discount_percent: Number(it.discount_percent) || 0,
+            tax_rate: Number(it.tax_rate) || 0,
+          })),
+          qCurrency,
+          {
+            taxMode: q.tax_mode || organization.default_tax_mode || 'exclusive',
+            businessState: organization.business_state || organization.state,
+            placeOfSupply: q.place_of_supply || cust?.place_of_supply || cust?.billing_state || cust?.state || organization.business_state || organization.state,
+            gstEnabled: organization.gst_registered !== false,
+          }
+        )
+      : null;
+
+    const grandTotal = calc ? calc.grand_total : (Number(q.grand_total) || 0);
+    const subtotal = calc ? calc.subtotal : (Number(q.subtotal) || 0);
+    const taxAmount = calc ? calc.tax_amount : (Number(q.tax_amount) || 0);
+    const discountAmount = calc ? calc.discount_amount : (Number(q.discount_amount) || 0);
     const paidAmount = Number(q.paid_amount) || (q.is_paid ? grandTotal : 0);
     const balanceAmount = Math.max(0, Number(q.balance_amount !== undefined ? q.balance_amount : (grandTotal - paidAmount)));
 
@@ -479,7 +594,7 @@ export function calculateReportData({
     else if (q.status === 'REJECTED') statusVariant = 'error';
     else if (q.status === 'EXPIRED') statusVariant = 'warning';
 
-    const itemsSummary = (q.items || [])
+    const itemsSummary = qItems
       .map((i) => `${i.description} (${i.quantity} ${i.unit || 'unit'})`)
       .slice(0, 3)
       .join(', ');
@@ -493,26 +608,27 @@ export function calculateReportData({
       customerId: q.customer_id,
       customerName: cust?.name || 'Customer',
       customerCompany: cust?.company_name || undefined,
-      customerTaxNumber: cust?.tax_number || undefined,
+      customerTaxNumber: q.customer_gstin || cust?.customer_gstin || cust?.tax_number || undefined,
       status: q.status,
       statusVariant,
       paymentStatus: q.is_paid ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID'),
       paymentMethod: q.payment_method || undefined,
-      currency: q.currency || currency,
-      subtotal: Number(q.subtotal) || 0,
-      discountAmount: Number(q.discount_amount) || 0,
+      currency: qCurrency,
+      taxMode: q.tax_mode || organization.default_tax_mode || 'exclusive',
+      subtotal,
+      discountAmount,
       taxRate: Number(q.tax_rate) || 0,
-      taxAmount: Number(q.tax_amount) || 0,
+      taxAmount,
       grandTotal,
       paidAmount,
       balanceAmount,
       dueDate: q.valid_until || undefined,
       itemsSummary: itemsSummary || 'No line items recorded',
       staffName: q.created_by || 'Admin',
-      cgstAmount: isIndiaGst ? (q.items || []).reduce((sum, i) => sum + (Number(i.cgst_amount) || 0), 0) : undefined,
-      sgstAmount: isIndiaGst ? (q.items || []).reduce((sum, i) => sum + (Number(i.sgst_amount) || 0), 0) : undefined,
-      igstAmount: isIndiaGst ? (q.items || []).reduce((sum, i) => sum + (Number(i.igst_amount) || 0), 0) : undefined,
-      hsnCodes: (q.items || []).map((i) => i.classification_code).filter(Boolean) as string[],
+      cgstAmount: isIndiaGst ? (calc ? calc.cgst_amount : qItems.reduce((sum, i) => sum + (Number(i.cgst_amount) || 0), 0)) : undefined,
+      sgstAmount: isIndiaGst ? (calc ? calc.sgst_amount : qItems.reduce((sum, i) => sum + (Number(i.sgst_amount) || 0), 0)) : undefined,
+      igstAmount: isIndiaGst ? (calc ? calc.igst_amount : qItems.reduce((sum, i) => sum + (Number(i.igst_amount) || 0), 0)) : undefined,
+      hsnCodes: qItems.map((i) => i.classification_code).filter(Boolean) as string[],
     };
   };
 
@@ -567,9 +683,9 @@ export function calculateReportData({
     const key = isBroadRange ? format(d, 'MMM yyyy') : format(d, 'dd MMM');
 
     const pt = chartPointsMap.get(key) || { label: key, sales: 0, invoiced: 0, paid: 0, count: 0 };
-    pt.invoiced += Number(inv.grand_total) || 0;
-    pt.sales += Number(inv.grand_total) || 0;
-    pt.paid += Number(inv.paid_amount) || (inv.is_paid ? Number(inv.grand_total) || 0 : 0);
+    pt.invoiced = roundCurrency(pt.invoiced + (Number(inv.grand_total) || 0));
+    pt.sales = roundCurrency(pt.sales + (Number(inv.grand_total) || 0));
+    pt.paid = roundCurrency(pt.paid + (Number(inv.paid_amount) || (inv.is_paid ? Number(inv.grand_total) || 0 : 0)));
     pt.count += 1;
     chartPointsMap.set(key, pt);
   });
@@ -588,6 +704,11 @@ export function calculateReportData({
 
   // Role Security Redactions
   const isStaff = userRole === 'STAFF';
+  const currencyBreakdown = isStaff ? [] : Array.from(currencyMap.values());
+  const effectiveCurrency: CurrencyCode = currencyBreakdown.length === 1
+    ? currencyBreakdown[0].currency
+    : currency;
+
   const metrics: ReportMetricSummary = {
     totalSales: isStaff ? 0 : totalSales,
     totalInvoiced: isStaff ? 0 : totalInvoiced,
@@ -599,7 +720,7 @@ export function calculateReportData({
     quoteCount: processedQuotations.length,
     invoiceCount: processedInvoices.length,
     conversionRate,
-    currency,
+    currency: effectiveCurrency,
   };
 
   const aging: AgingSummary = {
@@ -667,6 +788,7 @@ export function calculateReportData({
     startDate,
     endDate,
     metrics,
+    currencyBreakdown,
     aging,
     taxSummary,
     trendChart,
@@ -678,9 +800,9 @@ export function calculateReportData({
       name: organization.name,
       email: organization.email,
       phone: organization.phone || undefined,
-      address: [organization.address_line1, organization.city, organization.state, organization.country].filter(Boolean).join(', '),
-      taxNumber: organization.gst_vat_number || undefined,
-      currency,
+      address: [organization.address_line1, organization.city, organization.business_state || organization.state, organization.country].filter(Boolean).join(', '),
+      taxNumber: organization.gstin || organization.gst_vat_number || undefined,
+      currency: effectiveCurrency,
       country: organization.country || undefined,
       taxSystem: organization.tax_system || undefined,
       taxLabel: organization.tax_id_label || countryProfile.taxLabel,

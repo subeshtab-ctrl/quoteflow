@@ -21,6 +21,7 @@ export const LineItemSchema = z.object({
   igst_rate: z.number().optional(),
   igst_amount: z.number().optional(),
   tax_category: z.string().nullish().or(z.literal('')),
+  tax_mode: z.enum(['exclusive', 'inclusive']).optional(),
 }).passthrough();
 
 export const QuotationFormSchema = z.object({
@@ -33,6 +34,10 @@ export const QuotationFormSchema = z.object({
   discount_type: z.enum(['PERCENTAGE', 'FIXED']).default('PERCENTAGE'),
   discount_value: z.coerce.number().min(0).default(0),
   tax_rate: z.coerce.number().min(0).max(100).default(0),
+  tax_mode: z.enum(['exclusive', 'inclusive']).optional().default('exclusive'),
+  tax_name: z.string().nullish().or(z.literal('')),
+  place_of_supply: z.string().nullish().or(z.literal('')),
+  customer_gstin: z.string().nullish().or(z.literal('')),
   notes: z.string().optional(),
   terms_conditions: z.string().optional(),
   attachments: z.array(z.any()).optional().default([]),
@@ -74,6 +79,10 @@ export const CustomerFormSchema = z
     country: z.string().default('India'),
     postal_code: z.string().optional(),
     tax_number: z.string().optional(),
+    customer_gstin: z.string().optional(),
+    billing_state: z.string().optional(),
+    state_code: z.string().optional(),
+    place_of_supply: z.string().optional(),
     notes: z.string().optional(),
   })
   .superRefine((data, ctx) => {
@@ -184,6 +193,13 @@ export const OrganizationSettingsSchema = z.object({
   goods_classification_label: z.string().nullish().or(z.literal('')),
   service_classification_label: z.string().nullish().or(z.literal('')),
   tax_rate_type: z.string().nullish().or(z.literal('')),
+  default_tax_mode: z.enum(['exclusive', 'inclusive']).optional().default('exclusive'),
+  gst_registered: z.boolean().optional(),
+  gstin: z.string().nullish().or(z.literal('')),
+  business_state: z.string().nullish().or(z.literal('')),
+  state_code: z.string().nullish().or(z.literal('')),
+  default_gst_rate: z.coerce.number().min(0).max(100).optional(),
+  hsn_sac_enabled: z.boolean().optional(),
   require_full_payment_for_invoice: z.boolean().optional().default(true),
   mode: z.enum(['test', 'live']).optional(),
 }).passthrough();

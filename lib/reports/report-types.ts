@@ -97,6 +97,19 @@ export interface ReportFilterState {
   environment?: 'live' | 'test';
 }
 
+export interface CurrencyMetricBreakdown {
+  currency: CurrencyCode;
+  totalSales: number;
+  totalInvoiced: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  totalOverdue: number;
+  totalTax: number;
+  totalDiscount: number;
+  invoiceCount: number;
+  quoteCount: number;
+}
+
 export interface ReportMetricSummary {
   totalSales: number;
   totalInvoiced: number;
@@ -181,6 +194,7 @@ export interface ReportRow {
   paymentStatus: string;
   paymentMethod?: string;
   currency: CurrencyCode;
+  taxMode?: 'exclusive' | 'inclusive';
   subtotal: number;
   discountAmount: number;
   taxRate: number;
@@ -208,6 +222,7 @@ export interface ReportResponseData {
   startDate: string;
   endDate: string;
   metrics: ReportMetricSummary;
+  currencyBreakdown?: CurrencyMetricBreakdown[];
   aging: AgingSummary;
   taxSummary: TaxBreakdownSummary;
   trendChart: ChartDataPoint[];

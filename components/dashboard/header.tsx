@@ -96,7 +96,7 @@ export function DashboardHeader({
 
   const { openCommandPalette, openAiModal } = useThemeCustomization();
 
-  // Fetch authenticated user profile
+  // Fetch authenticated user profile only if not already provided by Server Layout
   useEffect(() => {
     let isMounted = true;
 
@@ -114,17 +114,19 @@ export function DashboardHeader({
       }
     };
 
-    fetchProfile();
+    if (!initialUser) {
+      fetchProfile();
+    }
 
     // Listen to Supabase auth events
     const supabase = createClient();
     if (supabase) {
       const {
         data: { subscription },
-      } = supabase.auth.onAuthStateChange((event, session) => {
+      } = supabase.auth.onAuthStateChange((event) => {
         if (event === 'SIGNED_OUT') {
           if (isMounted) setUserProfile(null);
-        } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        } else if (event === 'USER_UPDATED') {
           fetchProfile();
         }
       });
@@ -138,46 +140,26 @@ export function DashboardHeader({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [initialUser]);
 
-  // Poll notifications (relaxed to 60s when active)
-  useEffect(() => {
-    const fetchNotifs = async () => {
-      try {
-        const res = await fetch('/api/notifications');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.notifications) {
-            const newUnread = data.notifications.filter((n: any) => !n.is_read).length;
-            if (prevUnreadCountRef.current !== null && newUnread > prevUnreadCountRef.current) {
-              playNotificationChime();
-            }
-            prevUnreadCountRef.current = newUnread;
-            setNotifications(data.notifications);
+  // CPU-Optimized: On-demand notification fetch (background setInterval & focus polling disabled to save Serverless CPU)
+  const fetchNotifs = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/notifications');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.notifications) {
+          const newUnread = data.notifications.filter((n: any) => !n.is_read).length;
+          if (prevUnreadCountRef.current !== null && newUnread > prevUnreadCountRef.current) {
+            playNotificationChime();
           }
+          prevUnreadCountRef.current = newUnread;
+          setNotifications(data.notifications);
         }
-      } catch {
-        // Fallback
       }
-    };
-    fetchNotifs();
-    // CPU-Optimized: 3-minute poll interval + instant refresh on window focus
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      fetchNotifs();
-    }, 180000);
-
-    const handleFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        fetchNotifs();
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-    };
+    } catch {
+      // Fallback
+    }
   }, []);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
@@ -276,7 +258,13 @@ export function DashboardHeader({
         {/* Notifications Popover */}
         <div className="relative">
           <button
-            onClick={() => setIsNotifOpen(!isNotifOpen)}
+            onClick={() => {
+              const nextOpen = !isNotifOpen;
+              setIsNotifOpen(nextOpen);
+              if (nextOpen) {
+                fetchNotifs();
+              }
+            }}
             className="relative rounded-xl p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
             aria-label="Notifications"
           >

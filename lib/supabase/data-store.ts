@@ -65,6 +65,7 @@ export function buildInvoiceNotesWithPaymentRefs(
   finalRef?: string | null,
   generalRef?: string | null
 ): string {
+  const isExplicitEmpty = baseNotes !== undefined && baseNotes !== null && baseNotes.trim() === '';
   let cleanBase = (baseNotes || '')
     .replace(/\n*\s*Payment References?:[\s\S]*$/i, '')
     .trim();
@@ -86,7 +87,8 @@ export function buildInvoiceNotesWithPaymentRefs(
   }
 
   if (lines.length === 0) {
-    return cleanBase || DEFAULT_INVOICE_NOTES;
+    if (isExplicitEmpty) return '';
+    return cleanBase || (baseNotes === undefined ? DEFAULT_INVOICE_NOTES : cleanBase);
   }
 
   const prefix = cleanBase ? `${cleanBase}\n\n` : '';
@@ -337,67 +339,22 @@ class QuoteFlowStore {
     return path.join(dir, 'org-settings.json');
   }
 
-  private loadOrgSettingsFromFile(): Record<string, {
-    name?: string;
-    default_currency?: string;
-    require_full_payment_for_invoice?: boolean;
-    invoice_prefix?: string;
-    invoice_start_number?: number;
-    current_invoice_counter?: number;
-    mode?: 'test' | 'live';
-    current_test_invoice_counter?: number;
-    current_test_quotation_counter?: number;
-    brand_color?: string | null;
-  }> {
+  private loadOrgSettingsFromFile(): Record<string, Partial<Organization> & Record<string, any>> {
     try {
       const p = this.getOrgSettingsFilePath();
       if (fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         const parsed = JSON.parse(raw) || {};
-        const result: Record<string, {
-          require_full_payment_for_invoice?: boolean;
-          invoice_prefix?: string;
-          invoice_start_number?: number;
-          current_invoice_counter?: number;
-          mode?: 'test' | 'live';
-          current_test_invoice_counter?: number;
-          current_test_quotation_counter?: number;
-          brand_color?: string | null;
-          name?: string;
-          default_currency?: string;
-        }> = {};
+        const result: Record<string, Partial<Organization> & Record<string, any>> = {};
         for (const [key, val] of Object.entries(parsed)) {
           if (val && typeof val === 'object') {
             result[key] = {
+              ...(val as any),
               ...(typeof (val as any).name === 'string' && (val as any).name.trim()
                 ? { name: (val as any).name.trim() }
                 : {}),
               ...(typeof (val as any).default_currency === 'string' && (val as any).default_currency.trim()
-                ? { default_currency: (val as any).default_currency.trim() }
-                : {}),
-              ...(typeof (val as any).require_full_payment_for_invoice === 'boolean'
-                ? { require_full_payment_for_invoice: (val as any).require_full_payment_for_invoice }
-                : {}),
-              ...(typeof (val as any).invoice_prefix === 'string'
-                ? { invoice_prefix: (val as any).invoice_prefix }
-                : {}),
-              ...(typeof (val as any).invoice_start_number === 'number'
-                ? { invoice_start_number: (val as any).invoice_start_number }
-                : {}),
-              ...(typeof (val as any).current_invoice_counter === 'number'
-                ? { current_invoice_counter: (val as any).current_invoice_counter }
-                : {}),
-              ...((val as any).mode === 'test' || (val as any).mode === 'live'
-                ? { mode: (val as any).mode }
-                : {}),
-              ...(typeof (val as any).current_test_invoice_counter === 'number'
-                ? { current_test_invoice_counter: (val as any).current_test_invoice_counter }
-                : {}),
-              ...(typeof (val as any).current_test_quotation_counter === 'number'
-                ? { current_test_quotation_counter: (val as any).current_test_quotation_counter }
-                : {}),
-              ...(typeof (val as any).brand_color === 'string' || (val as any).brand_color === null
-                ? { brand_color: (val as any).brand_color }
+                ? { default_currency: (val as any).default_currency.trim() as any }
                 : {}),
             };
           }
@@ -415,6 +372,21 @@ class QuoteFlowStore {
         ...(all[orgId] || {}),
         ...(data.name !== undefined && typeof data.name === 'string' && data.name.trim() ? { name: data.name.trim() } : {}),
         ...(data.default_currency !== undefined ? { default_currency: data.default_currency } : {}),
+        ...(data.default_tax_mode !== undefined ? { default_tax_mode: data.default_tax_mode } : {}),
+        ...(data.default_tax_rate !== undefined ? { default_tax_rate: data.default_tax_rate } : {}),
+        ...(data.gst_registered !== undefined ? { gst_registered: data.gst_registered } : {}),
+        ...(data.gstin !== undefined ? { gstin: data.gstin } : {}),
+        ...(data.business_state !== undefined ? { business_state: data.business_state } : {}),
+        ...(data.state_code !== undefined ? { state_code: data.state_code } : {}),
+        ...(data.default_gst_rate !== undefined ? { default_gst_rate: data.default_gst_rate } : {}),
+        ...(data.hsn_sac_enabled !== undefined ? { hsn_sac_enabled: data.hsn_sac_enabled } : {}),
+        ...(data.country !== undefined ? { country: data.country } : {}),
+        ...(data.tax_system !== undefined ? { tax_system: data.tax_system } : {}),
+        ...(data.tax_id_label !== undefined ? { tax_id_label: data.tax_id_label } : {}),
+        ...(data.goods_classification_label !== undefined ? { goods_classification_label: data.goods_classification_label } : {}),
+        ...(data.service_classification_label !== undefined ? { service_classification_label: data.service_classification_label } : {}),
+        ...(data.default_terms !== undefined ? { default_terms: data.default_terms } : {}),
+        ...(data.invoice_footer !== undefined ? { invoice_footer: data.invoice_footer } : {}),
         ...(data.require_full_payment_for_invoice !== undefined
           ? { require_full_payment_for_invoice: Boolean(data.require_full_payment_for_invoice) }
           : {}),
@@ -589,6 +561,13 @@ class QuoteFlowStore {
         ...(data.default_show_bank_details !== undefined ? { default_show_bank_details: data.default_show_bank_details } : {}),
         ...(data.default_show_upi_details !== undefined ? { default_show_upi_details: data.default_show_upi_details } : {}),
         ...(data.default_show_crypto_details !== undefined ? { default_show_crypto_details: data.default_show_crypto_details } : {}),
+        ...(data.default_tax_mode !== undefined ? { default_tax_mode: data.default_tax_mode } : {}),
+        ...(data.gst_registered !== undefined ? { gst_registered: data.gst_registered } : {}),
+        ...(data.gstin !== undefined ? { gstin: data.gstin } : {}),
+        ...(data.business_state !== undefined ? { business_state: data.business_state } : {}),
+        ...(data.state_code !== undefined ? { state_code: data.state_code } : {}),
+        ...(data.default_gst_rate !== undefined ? { default_gst_rate: data.default_gst_rate } : {}),
+        ...(data.hsn_sac_enabled !== undefined ? { hsn_sac_enabled: data.hsn_sac_enabled } : {}),
       };
       const p = this.getPaymentSettingsFilePath();
       fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
@@ -1715,7 +1694,17 @@ class QuoteFlowStore {
   }
 
   // --- ORGANIZATIONS ---
+  private orgCacheExpiry: Map<string, number> = new Map();
+  private static readonly ORG_CACHE_TTL_MS = 30_000;
+
   public async getOrganization(orgId: string = DEFAULT_ORG_ID): Promise<Organization | null> {
+    const now = Date.now();
+    const cachedOrg = this.organizations.get(orgId);
+    const expiry = this.orgCacheExpiry.get(orgId) || 0;
+    if (cachedOrg && expiry > now) {
+      return cachedOrg;
+    }
+
     try {
       const supabase = createAdminClient();
       if (supabase) {
@@ -1797,11 +1786,26 @@ class QuoteFlowStore {
             default_show_bank_details: effectivePayment.default_show_bank_details ?? (data as any).default_show_bank_details ?? true,
             default_show_upi_details: effectivePayment.default_show_upi_details ?? (data as any).default_show_upi_details ?? true,
             default_show_crypto_details: effectivePayment.default_show_crypto_details ?? (data as any).default_show_crypto_details ?? false,
+            default_tax_mode: localSettings.default_tax_mode ?? effectivePayment.default_tax_mode ?? (data as any).default_tax_mode ?? 'exclusive',
+            default_tax_rate: localSettings.default_tax_rate ?? (data as any).default_tax_rate ?? 18,
+            gst_registered: localSettings.gst_registered ?? effectivePayment.gst_registered ?? (data as any).gst_registered ?? false,
+            gstin: localSettings.gstin ?? effectivePayment.gstin ?? (data as any).gstin ?? (data as any).gst_vat_number ?? '',
+            business_state: localSettings.business_state ?? effectivePayment.business_state ?? (data as any).business_state ?? (data as any).state ?? '',
+            state_code: localSettings.state_code ?? effectivePayment.state_code ?? (data as any).state_code ?? '',
+            default_gst_rate: localSettings.default_gst_rate ?? effectivePayment.default_gst_rate ?? (data as any).default_gst_rate ?? 18,
+            hsn_sac_enabled: localSettings.hsn_sac_enabled ?? effectivePayment.hsn_sac_enabled ?? (data as any).hsn_sac_enabled ?? true,
+            country: localSettings.country || data.country || 'India',
+            tax_system: localSettings.tax_system || (data as any).tax_system || 'GST',
+            goods_classification_label: localSettings.goods_classification_label || (data as any).goods_classification_label || 'HSN Code',
+            service_classification_label: localSettings.service_classification_label || (data as any).service_classification_label || 'SAC Code',
+            default_terms: localSettings.default_terms !== undefined ? localSettings.default_terms : (data as any).default_terms,
             brand_color: localSettings.brand_color || (data as any).brand_color || '#4f46e5',
             name: localSettings.name || data.name,
             default_currency: (localSettings.default_currency || data.default_currency || 'INR') as any,
           } as Organization;
           this.organizations.set(data.id, fullOrg);
+          this.orgCacheExpiry.set(data.id, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
+          this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
           return fullOrg;
         }
       }
@@ -1816,7 +1820,7 @@ class QuoteFlowStore {
       }
       const localSettings = this.loadOrgSettingsFromFile()[orgId] || {};
       const localPayment = this.loadPaymentSettingsFromFile()[orgId] || {};
-      return {
+      const resolvedFallback = {
         ...cached,
         require_full_payment_for_invoice:
           localSettings.require_full_payment_for_invoice !== undefined
@@ -1850,10 +1854,26 @@ class QuoteFlowStore {
         default_show_bank_details: localPayment.default_show_bank_details ?? cached.default_show_bank_details ?? true,
         default_show_upi_details: localPayment.default_show_upi_details ?? cached.default_show_upi_details ?? true,
         default_show_crypto_details: localPayment.default_show_crypto_details ?? cached.default_show_crypto_details ?? false,
+        default_tax_mode: localSettings.default_tax_mode ?? localPayment.default_tax_mode ?? cached.default_tax_mode ?? 'exclusive',
+        default_tax_rate: localSettings.default_tax_rate ?? cached.default_tax_rate ?? 18,
+        gst_registered: localSettings.gst_registered ?? localPayment.gst_registered ?? cached.gst_registered ?? false,
+        gstin: localSettings.gstin ?? localPayment.gstin ?? cached.gstin ?? cached.gst_vat_number ?? '',
+        business_state: localSettings.business_state ?? localPayment.business_state ?? cached.business_state ?? cached.state ?? '',
+        state_code: localSettings.state_code ?? localPayment.state_code ?? cached.state_code ?? '',
+        default_gst_rate: localSettings.default_gst_rate ?? localPayment.default_gst_rate ?? cached.default_gst_rate ?? 18,
+        hsn_sac_enabled: localSettings.hsn_sac_enabled ?? localPayment.hsn_sac_enabled ?? cached.hsn_sac_enabled ?? true,
+        country: localSettings.country || cached.country || 'India',
+        tax_system: localSettings.tax_system || cached.tax_system || 'GST',
+        goods_classification_label: localSettings.goods_classification_label || cached.goods_classification_label || 'HSN Code',
+        service_classification_label: localSettings.service_classification_label || cached.service_classification_label || 'SAC Code',
+        default_terms: localSettings.default_terms !== undefined ? localSettings.default_terms : cached.default_terms,
         brand_color: localSettings.brand_color || cached.brand_color || '#4f46e5',
         name: localSettings.name || cached.name,
         default_currency: (localSettings.default_currency || cached.default_currency || 'INR') as any,
       } as Organization;
+      this.organizations.set(orgId, resolvedFallback);
+      this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
+      return resolvedFallback;
     }
     return null;
   }
@@ -1907,9 +1927,11 @@ class QuoteFlowStore {
 
   public setCachedOrganization(orgId: string, org: Organization): void {
     this.organizations.set(orgId, org);
+    this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
   }
 
   public async updateOrganization(orgId: string = DEFAULT_ORG_ID, data: Partial<Organization>): Promise<Organization> {
+    this.orgCacheExpiry.delete(orgId);
     let org = (await this.getOrganization(orgId)) || this.organizations.get(orgId);
     if (!org) {
       org = {
@@ -1948,6 +1970,7 @@ class QuoteFlowStore {
       updated_at: new Date().toISOString(),
     };
     this.organizations.set(orgId, updated);
+    this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
     this.saveOrgSettingsToFile(orgId, updated);
     this.savePaymentSettingsToFile(orgId, updated);
 
@@ -2008,6 +2031,13 @@ class QuoteFlowStore {
           default_show_bank_details: updated.default_show_bank_details,
           default_show_upi_details: updated.default_show_upi_details,
           default_show_crypto_details: updated.default_show_crypto_details,
+          default_tax_mode: updated.default_tax_mode,
+          gst_registered: updated.gst_registered,
+          gstin: updated.gstin,
+          business_state: updated.business_state,
+          state_code: updated.state_code,
+          default_gst_rate: updated.default_gst_rate,
+          hsn_sac_enabled: updated.hsn_sac_enabled,
         };
 
         try {
@@ -2336,6 +2366,9 @@ class QuoteFlowStore {
       phone: parsed.phone || undefined,
       phone_country_code: parsed.countryCode,
       auth_method: authMethod,
+      customer_gstin: raw.customer_gstin || raw.tax_number || undefined,
+      billing_state: raw.billing_state || raw.state || undefined,
+      place_of_supply: raw.place_of_supply || raw.billing_state || raw.state || undefined,
     };
   }
 
@@ -2563,10 +2596,10 @@ class QuoteFlowStore {
             billing_address: data.billing_address || null,
             shipping_address: data.shipping_address || null,
             city: data.city || null,
-            state: data.state || null,
+            state: data.billing_state || data.state || null,
             country: data.country || 'India',
             postal_code: data.postal_code || null,
-            tax_number: data.tax_number || null,
+            tax_number: data.customer_gstin || data.tax_number || null,
             notes: data.notes || null,
           })
           .select()
@@ -2576,7 +2609,7 @@ class QuoteFlowStore {
           console.error('Supabase customer insert error:', error);
           throw error;
         } else if (inserted) {
-          const normalized = this.normalizeCustomer(inserted, org?.country || undefined);
+          const normalized = this.normalizeCustomer({ ...inserted, ...newCustomer }, org?.country || undefined);
           this.customers.set(normalized.id, normalized);
           return normalized;
         }
@@ -2611,6 +2644,9 @@ class QuoteFlowStore {
       phone: hasPhone ? cleanPhone : undefined,
       email: hasEmail ? cleanEmail : undefined,
       auth_method: authMethod,
+      customer_gstin: data.customer_gstin !== undefined ? data.customer_gstin : (existing?.customer_gstin || existing?.tax_number),
+      billing_state: data.billing_state !== undefined ? data.billing_state : (existing?.billing_state || existing?.state),
+      place_of_supply: data.place_of_supply !== undefined ? data.place_of_supply : (existing?.place_of_supply || existing?.billing_state || existing?.state),
       updated_at: new Date().toISOString()
     } as Customer;
     this.customers.set(id, updated);
@@ -2634,10 +2670,14 @@ class QuoteFlowStore {
         if (data.billing_address !== undefined) updatePayload.billing_address = data.billing_address;
         if (data.shipping_address !== undefined) updatePayload.shipping_address = data.shipping_address;
         if (data.city !== undefined) updatePayload.city = data.city;
-        if (data.state !== undefined) updatePayload.state = data.state;
+        if (data.billing_state !== undefined || data.state !== undefined) {
+          updatePayload.state = data.billing_state || data.state || null;
+        }
         if (data.country !== undefined) updatePayload.country = data.country;
         if (data.postal_code !== undefined) updatePayload.postal_code = data.postal_code;
-        if (data.tax_number !== undefined) updatePayload.tax_number = data.tax_number;
+        if (data.customer_gstin !== undefined || data.tax_number !== undefined) {
+          updatePayload.tax_number = data.customer_gstin || data.tax_number || null;
+        }
         if (data.notes !== undefined) updatePayload.notes = data.notes;
 
         const { data: updatedRow, error } = await supabase
@@ -3730,11 +3770,27 @@ class QuoteFlowStore {
     pin_protection_enabled?: boolean;
     pin?: string | null;
     pin_hash?: string | null;
+    tax_mode?: any;
+    tax_name?: string | null;
+    place_of_supply?: string | null;
+    customer_gstin?: string | null;
   }): Promise<Quotation> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
     const customerId = data.customer_id || 'b0000000-0000-0000-0000-000000000001';
+    const customer = this.customers.get(customerId);
     const env: 'test' | 'live' = org?.mode === 'test' ? 'test' : 'live';
+
+    const effectiveTaxMode = data.tax_mode || org?.default_tax_mode || 'exclusive';
+    const effectivePlaceOfSupply =
+      data.place_of_supply ||
+      customer?.place_of_supply ||
+      customer?.billing_state ||
+      customer?.state ||
+      org?.business_state ||
+      org?.state ||
+      null;
+    const effectiveSupplierState = org?.business_state || org?.state || null;
 
     // Recalculate totals server-side
     const calculation = calculateQuotationTotals({
@@ -3742,6 +3798,11 @@ class QuoteFlowStore {
       discount_type: data.discount_type || 'PERCENTAGE',
       discount_value: data.discount_value || 0,
       tax_rate: data.tax_rate || 0,
+      tax_mode: effectiveTaxMode,
+      country: org?.country || 'India',
+      supplier_state: effectiveSupplierState,
+      place_of_supply: effectivePlaceOfSupply,
+      tax_name: data.tax_name || org?.tax_system || 'GST',
     });
 
     const quotationNumber = await this.generateNextQuotationNumber(orgId, env);
@@ -3781,9 +3842,23 @@ class QuoteFlowStore {
       discount_amount: calculation.discount_amount,
       tax_rate: calculation.tax_rate,
       tax_amount: calculation.tax_amount,
+      tax_mode: calculation.tax_mode,
+      tax_name: calculation.tax_name,
+      taxable_subtotal: calculation.taxable_amount,
+      place_of_supply: effectivePlaceOfSupply,
+      supplier_state: effectiveSupplierState,
+      supplier_gstin: org?.gstin || org?.gst_vat_number || null,
+      customer_gstin: data.customer_gstin || customer?.customer_gstin || customer?.tax_number || null,
+      cgst_rate: calculation.cgst_rate,
+      cgst_amount: calculation.cgst_amount,
+      sgst_rate: calculation.sgst_rate,
+      sgst_amount: calculation.sgst_amount,
+      igst_rate: calculation.igst_rate,
+      igst_amount: calculation.igst_amount,
+      tax_breakdown: calculation.tax_breakdown,
       grand_total: calculation.grand_total,
-      notes: data.notes || '',
-      terms_conditions: data.terms_conditions || org?.default_terms || '',
+      notes: data.notes !== undefined ? data.notes : '',
+      terms_conditions: data.terms_conditions !== undefined ? data.terms_conditions : (org?.default_terms || ''),
       public_token: publicToken,
       public_token_hash: publicTokenHash,
       is_token_revoked: false,
@@ -4084,6 +4159,10 @@ class QuoteFlowStore {
       pin_protection_enabled?: boolean;
       pin?: string | null;
       pin_hash?: string | null;
+      tax_mode?: any;
+      tax_name?: string | null;
+      place_of_supply?: string | null;
+      customer_gstin?: string | null;
     },
     orgId?: string
   ): Promise<Quotation> {
@@ -4105,6 +4184,14 @@ class QuoteFlowStore {
       throw new Error('Approved quotation is immutable. Please create a revision.');
     }
 
+    const org = await this.getOrganization(existing.organization_id);
+    const effectiveTaxMode = data.tax_mode || existing.tax_mode || org?.default_tax_mode || 'exclusive';
+    const effectivePlaceOfSupply =
+      data.place_of_supply !== undefined
+        ? data.place_of_supply
+        : existing.place_of_supply;
+    const effectiveSupplierState = org?.business_state || org?.state || null;
+
     let calculation: any = null;
     let newItems = this.quotationItems.get(id) || [];
 
@@ -4114,6 +4201,11 @@ class QuoteFlowStore {
         discount_type: data.discount_type || existing.discount_type,
         discount_value: data.discount_value !== undefined ? data.discount_value : existing.discount_value,
         tax_rate: data.tax_rate !== undefined ? data.tax_rate : existing.tax_rate,
+        tax_mode: effectiveTaxMode,
+        country: org?.country || 'India',
+        supplier_state: effectiveSupplierState,
+        place_of_supply: effectivePlaceOfSupply,
+        tax_name: data.tax_name || existing.tax_name || org?.tax_system || 'GST',
       });
 
       newItems = calculation.items.map((item: any, idx: number) => {
@@ -4131,6 +4223,7 @@ class QuoteFlowStore {
           discount_amount: item.discount_amount,
           tax_rate: item.tax_rate,
           tax_amount: item.tax_amount,
+          tax_mode: item.tax_mode,
           line_total: item.line_total,
           sort_order: idx,
           item_type: orig.item_type || 'GOODS',
@@ -4167,6 +4260,18 @@ class QuoteFlowStore {
       discount_amount: calculation ? calculation.discount_amount : existing.discount_amount,
       tax_rate: calculation ? calculation.tax_rate : existing.tax_rate,
       tax_amount: calculation ? calculation.tax_amount : existing.tax_amount,
+      tax_mode: calculation ? calculation.tax_mode : (data.tax_mode || existing.tax_mode),
+      tax_name: calculation ? calculation.tax_name : (data.tax_name || existing.tax_name),
+      taxable_subtotal: calculation ? calculation.taxable_amount : (existing.taxable_subtotal ?? existing.subtotal),
+      place_of_supply: effectivePlaceOfSupply,
+      customer_gstin: data.customer_gstin !== undefined ? data.customer_gstin : existing.customer_gstin,
+      cgst_rate: calculation ? calculation.cgst_rate : existing.cgst_rate,
+      cgst_amount: calculation ? calculation.cgst_amount : existing.cgst_amount,
+      sgst_rate: calculation ? calculation.sgst_rate : existing.sgst_rate,
+      sgst_amount: calculation ? calculation.sgst_amount : existing.sgst_amount,
+      igst_rate: calculation ? calculation.igst_rate : existing.igst_rate,
+      igst_amount: calculation ? calculation.igst_amount : existing.igst_amount,
+      tax_breakdown: calculation ? calculation.tax_breakdown : existing.tax_breakdown,
       grand_total: calculation ? calculation.grand_total : existing.grand_total,
       notes: data.notes !== undefined ? data.notes : existing.notes,
       terms_conditions: data.terms_conditions !== undefined ? data.terms_conditions : existing.terms_conditions,
@@ -6041,12 +6146,20 @@ class QuoteFlowStore {
       discount_type: quotation.discount_type,
       discount_value: quotation.discount_value,
       tax_rate: quotation.tax_rate,
+      tax_mode: quotation.tax_mode,
+      tax_name: quotation.tax_name,
+      place_of_supply: quotation.place_of_supply,
+      customer_gstin: quotation.customer_gstin,
+      tax_breakdown: quotation.tax_breakdown,
+      subtotal: quotation.subtotal,
+      tax_amount: quotation.tax_amount,
+      grand_total: quotation.grand_total,
       notes: buildInvoiceNotesWithPaymentRefs(
-        DEFAULT_INVOICE_NOTES,
+        quotation.notes !== undefined ? quotation.notes : DEFAULT_INVOICE_NOTES,
         quotation.advance_payment_notes,
         quotation.final_payment_notes
       ),
-      terms_conditions: DEFAULT_INVOICE_TERMS,
+      terms_conditions: quotation.terms_conditions !== undefined ? quotation.terms_conditions : DEFAULT_INVOICE_TERMS,
       payment_terms: 'Net 30 Days',
       items: invoiceItems,
       attachments: (quotation.attachments || []) as any,
@@ -6078,7 +6191,14 @@ class QuoteFlowStore {
     payment_terms?: string | null;
     items: Array<any>;
     attachments?: AttachmentItem[];
+    tax_mode?: 'exclusive' | 'inclusive';
+    tax_name?: string | null;
+    place_of_supply?: string | null;
+    customer_gstin?: string | null;
     tax_breakdown?: any[];
+    subtotal?: number;
+    tax_amount?: number;
+    grand_total?: number;
     discount_type?: any;
     discount_value?: number;
     tax_rate?: number;
@@ -6095,6 +6215,7 @@ class QuoteFlowStore {
   }): Promise<Invoice> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
+    const customer = this.customers.get(data.customer_id) || (await this.getCustomerById(data.customer_id, orgId));
     let env: 'test' | 'live' = org?.mode === 'test' ? 'test' : 'live';
     if (data.environment) {
       env = data.environment;
@@ -6168,6 +6289,11 @@ class QuoteFlowStore {
       discount_type: data.discount_type || 'PERCENTAGE',
       discount_value: data.discount_value || 0,
       tax_rate: data.tax_rate || 0,
+      tax_mode: data.tax_mode || org?.default_tax_mode || 'exclusive',
+      tax_name: data.tax_name || 'GST',
+      business_state: org?.business_state || '',
+      place_of_supply: data.place_of_supply || customer?.place_of_supply || customer?.billing_state || '',
+      gst_registered: org?.gst_registered,
     });
 
     const invoiceItems: InvoiceItem[] = (data.items || []).map((item, idx) => ({
@@ -6214,8 +6340,6 @@ class QuoteFlowStore {
       resolvedTerms = defaultInvoiceTerms;
     } else if (resolvedTerms === null) {
       resolvedTerms = '';
-    } else if (resolvedTerms.includes('Quotation valid for 30 days') || resolvedTerms.includes('50% advance required')) {
-      resolvedTerms = defaultInvoiceTerms;
     }
 
     let resolvedNotes = data.notes;
@@ -6223,8 +6347,6 @@ class QuoteFlowStore {
       resolvedNotes = defaultInvoiceNotes;
     } else if (resolvedNotes === null) {
       resolvedNotes = '';
-    } else if (resolvedNotes.includes('Payment within 30 days of completion')) {
-      resolvedNotes = defaultInvoiceNotes;
     }
 
     const finalNotes =
@@ -6252,14 +6374,18 @@ class QuoteFlowStore {
       issue_date: data.issue_date,
       due_date: data.due_date,
       currency: data.currency,
-      subtotal: calculated.subtotal,
+      subtotal: data.subtotal !== undefined ? data.subtotal : calculated.subtotal,
       discount_type: data.discount_type || 'PERCENTAGE',
       discount_value: data.discount_value || 0,
       discount_amount: calculated.discount_amount,
-      tax_rate: data.tax_rate || calculated.tax_rate || 0,
-      tax_amount: calculated.tax_amount,
-      grand_total: calculated.grand_total,
-      tax_breakdown: data.tax_breakdown || [],
+      tax_rate: data.tax_rate !== undefined ? data.tax_rate : (calculated.tax_rate || 0),
+      tax_amount: data.tax_amount !== undefined ? data.tax_amount : calculated.tax_amount,
+      tax_mode: data.tax_mode || org?.default_tax_mode || 'exclusive',
+      tax_name: data.tax_name || 'GST',
+      place_of_supply: data.place_of_supply || customer?.place_of_supply || customer?.billing_state || null,
+      customer_gstin: data.customer_gstin || customer?.customer_gstin || customer?.tax_number || null,
+      grand_total: data.grand_total !== undefined ? data.grand_total : calculated.grand_total,
+      tax_breakdown: (data.tax_breakdown && data.tax_breakdown.length > 0) ? data.tax_breakdown : calculated.tax_breakdown,
       notes: finalNotes,
       terms_conditions: resolvedTerms,
       payment_terms: data.payment_terms || 'Net 30 Days',
@@ -6269,8 +6395,8 @@ class QuoteFlowStore {
       payment_notes: data.payment_notes ?? null,
       advance_payment_notes: data.advance_payment_notes ?? null,
       final_payment_notes: data.final_payment_notes ?? null,
-      paid_amount: isPaid ? calculated.grand_total : (data.paid_amount !== undefined ? data.paid_amount : 0),
-      balance_amount: isPaid ? 0 : (data.balance_amount !== undefined ? data.balance_amount : calculated.grand_total),
+      paid_amount: isPaid ? (data.grand_total !== undefined ? data.grand_total : calculated.grand_total) : (data.paid_amount !== undefined ? data.paid_amount : 0),
+      balance_amount: isPaid ? 0 : (data.balance_amount !== undefined ? data.balance_amount : (data.grand_total !== undefined ? data.grand_total : calculated.grand_total)),
       payment_confirmed_by_company: data.payment_confirmed_by_company ?? isPaid,
       attachments: data.attachments || [],
       created_by: data.created_by || 'User',
@@ -6304,7 +6430,6 @@ class QuoteFlowStore {
     }
 
     await this.persistInvoiceToSupabase(newInvoice);
-    const customer = this.customers.get(data.customer_id);
 
     return {
       ...newInvoice,
@@ -6351,6 +6476,35 @@ class QuoteFlowStore {
       audit_history: [auditItem, ...existingAudit],
       updated_at: now,
     };
+
+    if (
+      data.items ||
+      data.tax_mode ||
+      data.tax_rate !== undefined ||
+      data.discount_type ||
+      data.discount_value !== undefined ||
+      data.place_of_supply !== undefined
+    ) {
+      const org = await this.getOrganization(orgId);
+      const customer = this.customers.get(inv.customer_id) || (await this.getCustomerById(inv.customer_id, orgId));
+      const calculated = calculateQuotationTotals({
+        items: data.items || inv.items || [],
+        discount_type: data.discount_type || inv.discount_type || 'PERCENTAGE',
+        discount_value: data.discount_value !== undefined ? data.discount_value : (inv.discount_value || 0),
+        tax_rate: data.tax_rate !== undefined ? data.tax_rate : (inv.tax_rate || 0),
+        tax_mode: data.tax_mode || inv.tax_mode || org?.default_tax_mode || 'exclusive',
+        tax_name: data.tax_name || inv.tax_name || 'GST',
+        business_state: org?.business_state || '',
+        place_of_supply: data.place_of_supply !== undefined ? (data.place_of_supply || '') : (inv.place_of_supply || customer?.place_of_supply || customer?.billing_state || ''),
+        gst_registered: org?.gst_registered,
+      });
+
+      updated.subtotal = calculated.subtotal;
+      updated.discount_amount = calculated.discount_amount;
+      updated.tax_amount = calculated.tax_amount;
+      updated.grand_total = calculated.grand_total;
+      updated.tax_breakdown = calculated.tax_breakdown;
+    }
 
     if (data.advance_payment_notes !== undefined) {
       updated.advance_payment_notes = data.advance_payment_notes;

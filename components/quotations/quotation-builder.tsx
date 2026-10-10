@@ -59,6 +59,7 @@ import {
 import { getCountryProfile } from '@/lib/tax/country-config';
 import { FileAttachmentsUploader } from '@/components/common/file-attachments-uploader';
 import { COUNTRY_CODES, getDefaultCountryCode, cleanPhoneNumber } from '@/lib/country-codes';
+import { INDIAN_STATES } from '@/lib/tax/india-gst';
 
 interface QuotationBuilderProps {
   customers: Customer[];
@@ -164,13 +165,19 @@ export function QuotationBuilder({
   const [overallTaxRate, setOverallTaxRate] = useState<number>(
     initialQuotation?.tax_rate || 0
   );
+  const [taxMode, setTaxMode] = useState<'exclusive' | 'inclusive'>(
+    initialQuotation?.tax_mode || organization?.default_tax_mode || 'exclusive'
+  );
+  const [placeOfSupply, setPlaceOfSupply] = useState<string>(
+    initialQuotation?.place_of_supply || ''
+  );
 
   // Notes & Terms
   const [notes, setNotes] = useState<string>(
-    initialQuotation?.notes || 'Payment within 30 days of completion.'
+    initialQuotation ? (initialQuotation.notes ?? '') : 'Payment within 30 days of completion.'
   );
   const [terms, setTerms] = useState<string>(
-    initialQuotation?.terms_conditions || organization.default_terms || ''
+    initialQuotation ? (initialQuotation.terms_conditions ?? '') : (organization.default_terms || '')
   );
 
   // Payment Details & Instructions
@@ -386,15 +393,28 @@ export function QuotationBuilder({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const selectedCustomer = customerList.find((c) => c.id === customerId);
+  const resolvedPlaceOfSupply =
+    placeOfSupply ||
+    selectedCustomer?.place_of_supply ||
+    selectedCustomer?.billing_state ||
+    selectedCustomer?.state ||
+    organization?.business_state ||
+    organization?.state ||
+    '';
+
   // Live Calculations
   const calculated = calculateQuotationTotals({
     items,
     discount_type: discountType,
     discount_value: discountValue,
     tax_rate: overallTaxRate,
+    tax_mode: taxMode,
+    tax_name: organization?.tax_system === 'VAT' ? 'VAT' : 'GST',
+    business_state: organization?.business_state || organization?.state || '',
+    place_of_supply: resolvedPlaceOfSupply,
+    gst_registered: organization?.gst_registered ?? true,
   });
-
-  const selectedCustomer = customerList.find((c) => c.id === customerId);
 
   // Quick Add Customer Handler
   const handleQuickAddCustomer = async (e: React.FormEvent) => {
@@ -546,6 +566,10 @@ export function QuotationBuilder({
         discount_type: discountType,
         discount_value: discountValue,
         tax_rate: overallTaxRate,
+        tax_mode: taxMode,
+        tax_name: organization?.tax_system === 'VAT' ? 'VAT' : 'GST',
+        place_of_supply: resolvedPlaceOfSupply || null,
+        customer_gstin: selectedCustomer?.customer_gstin || selectedCustomer?.tax_number || null,
         notes,
         terms_conditions: terms,
         items,
@@ -836,7 +860,9 @@ export function QuotationBuilder({
                   <option value="USD">USD ($)</option>
                   <option value="EUR">EUR (€)</option>
                   <option value="GBP">GBP (£)</option>
-                  <option value="AED">AED (AED)</option>
+                  <option value="AED">AED (د.إ)</option>
+                  <option value="SAR">SAR (ر.س)</option>
+                  <option value="KWD">KWD (د.ك)</option>
                 </select>
               </div>
             </div>
@@ -1104,8 +1130,61 @@ export function QuotationBuilder({
           {/* Step 4: Overall Discount, Tax, Notes, Terms */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              4. Discount & Terms
+              4. Tax Mode, Discount & Terms
             </h3>
+
+            {/* Tax Mode Selector: Exclusive vs Inclusive */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Tax Calculation Mode
+                </label>
+                <div className="flex rounded-lg border border-slate-300 overflow-hidden bg-slate-50 p-0.5 h-10">
+                  <button
+                    type="button"
+                    onClick={() => setTaxMode('exclusive')}
+                    className={`flex-1 text-xs font-bold rounded-md transition-all ${
+                      taxMode === 'exclusive'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Tax Exclusive (Add Tax)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxMode('inclusive')}
+                    className={`flex-1 text-xs font-bold rounded-md transition-all ${
+                      taxMode === 'inclusive'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Tax Inclusive (Included)
+                  </button>
+                </div>
+              </div>
+
+              {(countryProfile.isIndiaGst || (organization?.country || 'India').toLowerCase() === 'india') && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Place of Supply (State)
+                  </label>
+                  <select
+                    value={resolvedPlaceOfSupply}
+                    onChange={(e) => setPlaceOfSupply(e.target.value)}
+                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-900 focus:border-indigo-600 focus:outline-none"
+                  >
+                    <option value="">Same as Business State ({organization?.business_state || organization?.state || 'Default'})</option>
+                    {INDIAN_STATES.map((st) => (
+                      <option key={st.code} value={st.name}>
+                        {st.name} ({st.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -1949,7 +2028,7 @@ export function QuotationBuilder({
             {/* Total Breakdown */}
             <div className="border-t border-slate-200 pt-4 space-y-2 text-xs">
               <div className="flex justify-between text-slate-600">
-                <span>Subtotal</span>
+                <span>{taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal'}</span>
                 <span>{formatCurrency(calculated.subtotal, currency)}</span>
               </div>
               {calculated.discount_amount > 0 && (
@@ -1958,12 +2037,22 @@ export function QuotationBuilder({
                   <span>-{formatCurrency(calculated.discount_amount, currency)}</span>
                 </div>
               )}
-              {calculated.tax_amount > 0 && (
+              {calculated.tax_breakdown && calculated.tax_breakdown.length > 0 ? (
+                calculated.tax_breakdown.map((tb, idx) => (
+                  <div key={idx} className="flex justify-between text-slate-600">
+                    <span>{tb.name}</span>
+                    <span>{formatCurrency(tb.amount, currency)}</span>
+                  </div>
+                ))
+              ) : calculated.tax_amount > 0 ? (
                 <div className="flex justify-between text-slate-600">
-                  <span>Tax ({calculated.tax_rate}%)</span>
+                  <span>
+                    {organization?.tax_system === 'VAT' ? 'VAT' : 'GST'} {calculated.tax_rate}%
+                    {taxMode === 'inclusive' ? ' (Included)' : ''}
+                  </span>
                   <span>{formatCurrency(calculated.tax_amount, currency)}</span>
                 </div>
-              )}
+              ) : null}
               <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm">
                 <span className="font-bold text-slate-900">Estimated Total</span>
                 <span className="text-xl font-extrabold text-indigo-700">

@@ -59,7 +59,7 @@ export default async function DashboardPage() {
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
   // Get org first to determine active environment, then scope all queries
-  const organization = await store.getOrganization(orgId);
+  const organization = auth?.organization || (await store.getOrganization(orgId));
   const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
 
   const [analytics, quotations, invoices] = await Promise.all([

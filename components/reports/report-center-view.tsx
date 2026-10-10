@@ -720,6 +720,57 @@ export function ReportCenterView({ initialData }: ReportCenterViewProps) {
         </button>
       </div>
 
+      {/* Multi-Currency Breakdown (when transactions span multiple currencies) */}
+      {data.currencyBreakdown && data.currencyBreakdown.length > 1 && (
+        <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 shadow-xs space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+              Multi-Currency Financial Breakdown (Grouped by Currency)
+            </h3>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Currencies are grouped separately without cross-currency summation
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.currencyBreakdown.map((cb) => (
+              <div
+                key={cb.currency}
+                className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-2xs space-y-2"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                  <span className="text-xs font-black text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                    {cb.currency}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    {cb.invoiceCount} inv • {cb.quoteCount} quotes
+                  </span>
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Invoiced:</span>
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      {formatCurrency(cb.totalInvoiced, cb.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Received:</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(cb.totalPaid, cb.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Pending:</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">
+                      {formatCurrency(cb.totalOutstanding, cb.currency)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 5. Original Visual Charts Grid (Print: hidden) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 print:hidden">
         {/* Sales / Invoicing Timeline Trend */}
@@ -1081,22 +1132,22 @@ export function ReportCenterView({ initialData }: ReportCenterViewProps) {
                       </span>
                     </td>
                     <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                      {formatCurrency(row.grandTotal, currency)}
+                      {formatCurrency(row.grandTotal, row.currency || currency)}
                     </td>
                     {visibleColumns.tax && (
                       <td className="p-3 text-right text-slate-500 whitespace-nowrap">
-                        {formatCurrency(row.taxAmount, currency)}
+                        {formatCurrency(row.taxAmount, row.currency || currency)}
                       </td>
                     )}
                     <td className="p-3 text-right font-medium text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                      {formatCurrency(row.paidAmount, currency)}
+                      {formatCurrency(row.paidAmount, row.currency || currency)}
                     </td>
                     <td
                       className={`p-3 text-right font-bold whitespace-nowrap ${
                         row.balanceAmount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'
                       }`}
                     >
-                      {formatCurrency(row.balanceAmount, currency)}
+                      {formatCurrency(row.balanceAmount, row.currency || currency)}
                     </td>
                     <td className="p-3 text-center print:hidden">
                       <Link href={row.linkHref}>
@@ -1109,28 +1160,62 @@ export function ReportCenterView({ initialData }: ReportCenterViewProps) {
                 ))
               )}
             </tbody>
-            {/* Table Totals Row */}
+            {/* Table Totals Row (Grouped by Currency if multiple currencies exist) */}
             <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100">
-              <tr>
-                <td className="p-3" colSpan={4}>
-                  TOTALS ({data.rows.length} records)
-                </td>
-                <td className="p-3 text-right font-black">
-                  {formatCurrency(data.rows.reduce((s, r) => s + r.grandTotal, 0), currency)}
-                </td>
-                {visibleColumns.tax && (
-                  <td className="p-3 text-right font-bold text-slate-600 dark:text-slate-400">
-                    {formatCurrency(data.rows.reduce((s, r) => s + r.taxAmount, 0), currency)}
-                  </td>
-                )}
-                <td className="p-3 text-right font-black text-emerald-600">
-                  {formatCurrency(data.rows.reduce((s, r) => s + r.paidAmount, 0), currency)}
-                </td>
-                <td className="p-3 text-right font-black text-amber-600">
-                  {formatCurrency(data.rows.reduce((s, r) => s + r.balanceAmount, 0), currency)}
-                </td>
-                <td className="p-3 print:hidden"></td>
-              </tr>
+              {(() => {
+                const currenciesInRows = Array.from(new Set(data.rows.map((r) => r.currency || currency)));
+                if (currenciesInRows.length <= 1) {
+                  const rowCurr = currenciesInRows[0] || currency;
+                  return (
+                    <tr>
+                      <td className="p-3" colSpan={4}>
+                        TOTALS ({data.rows.length} records)
+                      </td>
+                      <td className="p-3 text-right font-black">
+                        {formatCurrency(data.rows.reduce((s, r) => s + r.grandTotal, 0), rowCurr)}
+                      </td>
+                      {visibleColumns.tax && (
+                        <td className="p-3 text-right font-bold text-slate-600 dark:text-slate-400">
+                          {formatCurrency(data.rows.reduce((s, r) => s + r.taxAmount, 0), rowCurr)}
+                        </td>
+                      )}
+                      <td className="p-3 text-right font-black text-emerald-600">
+                        {formatCurrency(data.rows.reduce((s, r) => s + r.paidAmount, 0), rowCurr)}
+                      </td>
+                      <td className="p-3 text-right font-black text-amber-600">
+                        {formatCurrency(data.rows.reduce((s, r) => s + r.balanceAmount, 0), rowCurr)}
+                      </td>
+                      <td className="p-3 print:hidden"></td>
+                    </tr>
+                  );
+                }
+
+                return currenciesInRows.map((currCode) => {
+                  const matchingRows = data.rows.filter((r) => (r.currency || currency) === currCode);
+                  return (
+                    <tr key={currCode} className="border-t border-slate-200/60 dark:border-slate-800">
+                      <td className="p-3" colSpan={4}>
+                        TOTALS — {currCode} ({matchingRows.length} records)
+                      </td>
+                      <td className="p-3 text-right font-black">
+                        {formatCurrency(matchingRows.reduce((s, r) => s + r.grandTotal, 0), currCode)}
+                      </td>
+                      {visibleColumns.tax && (
+                        <td className="p-3 text-right font-bold text-slate-600 dark:text-slate-400">
+                          {formatCurrency(matchingRows.reduce((s, r) => s + r.taxAmount, 0), currCode)}
+                        </td>
+                      )}
+                      <td className="p-3 text-right font-black text-emerald-600">
+                        {formatCurrency(matchingRows.reduce((s, r) => s + r.paidAmount, 0), currCode)}
+                      </td>
+                      <td className="p-3 text-right font-black text-amber-600">
+                        {formatCurrency(matchingRows.reduce((s, r) => s + r.balanceAmount, 0), currCode)}
+                      </td>
+                      <td className="p-3 print:hidden"></td>
+                    </tr>
+                  );
+                });
+              })()}
             </tfoot>
           </table>
         </div>

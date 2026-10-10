@@ -1,7 +1,11 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Invoice } from '@/types/database';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import {
+  formatCurrency,
+  calculateQuotationTotals,
+  isValidDocumentText,
+} from '@/lib/quotations/calculations';
 import { format } from 'date-fns';
 
 import { registerPdfFonts } from '@/lib/pdf/font-loader';
@@ -174,14 +178,41 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   const currency = invoice.currency || 'INR';
-  const grandTotal = Number(invoice.grand_total) || 0;
+  const taxMode = invoice.tax_mode || org.default_tax_mode || 'exclusive';
+  const placeOfSupply = invoice.place_of_supply || customer.place_of_supply || customer.billing_state || customer.state || org.business_state || org.state || '';
+  const items = invoice.items || [];
+
+  const calcTotals = calculateQuotationTotals(
+    items.map(it => ({
+      quantity: Number(it.quantity) || 0,
+      unit_price: Number(it.unit_price) || 0,
+      discount_percent: Number(it.discount_percent) || 0,
+      tax_rate: Number(it.tax_rate) || 0,
+    })),
+    currency,
+    {
+      taxMode,
+      businessState: org.business_state || org.state,
+      placeOfSupply,
+      gstEnabled: org.gst_registered !== false,
+    }
+  );
+
+  const displaySubtotal = items.length > 0 ? calcTotals.subtotal : (Number(invoice.subtotal) || 0);
+  const displayDiscount = items.length > 0 ? calcTotals.discount_amount : (Number(invoice.discount_amount) || 0);
+  const displayTax = items.length > 0 ? calcTotals.tax_amount : (Number(invoice.tax_amount) || 0);
+  const grandTotal = items.length > 0 ? calcTotals.grand_total : (Number(invoice.grand_total) || 0);
+  const displayTaxBreakdown = calcTotals.tax_breakdown.length > 0
+    ? calcTotals.tax_breakdown
+    : (invoice.tax_breakdown || []);
+
   const isPaid = Boolean(invoice.is_paid || invoice.status === 'PAID');
   const paidAmount = invoice.paid_amount !== undefined
     ? Number(invoice.paid_amount)
     : (isPaid ? grandTotal : 0);
   const balanceAmount = invoice.balance_amount !== undefined
     ? Number(invoice.balance_amount)
-    : (isPaid ? 0 : grandTotal);
+    : (isPaid ? 0 : Math.max(0, grandTotal - paidAmount));
 
   // 1. Company Header (Top Left) & Invoice Details (Top Right)
   const headerStartY = 14;
@@ -219,7 +250,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   const compAddress = [
     org.address_line1,
-    [org.city, org.state, org.postal_code].filter(Boolean).join(' '),
+    [org.city, org.business_state || org.state, org.postal_code].filter(Boolean).join(' '),
     org.country,
   ].filter(Boolean).join(', ');
 
@@ -235,11 +266,12 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.text(contactLine, margin, compY);
   compY += 3.8;
 
-  if (org.gst_vat_number) {
+  const orgGstin = org.gstin || org.gst_vat_number;
+  if (orgGstin) {
     doc.setFont(fontName, 'bold');
     doc.setTextColor(51, 65, 85);
     const taxLabel = currency === 'INR' ? 'GSTIN' : (currency === 'AED' ? 'TRN' : 'Tax ID');
-    doc.text(`${taxLabel}: ${org.gst_vat_number}`, margin, compY);
+    doc.text(`${taxLabel}: ${orgGstin}`, margin, compY);
     compY += 3.8;
   }
 
@@ -272,6 +304,14 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     nextDateY += 4.5;
   }
 
+  if (displayTax > 0) {
+    doc.setFont(fontName, 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Tax Mode: ${taxMode === 'inclusive' ? 'Tax Included' : 'Tax Excluded'}`, pageWidth - margin, nextDateY, { align: 'right' });
+    nextDateY += 4;
+  }
+
   const headerEndY = Math.max(compY, nextDateY) + 3;
 
   // Header Divider
@@ -285,15 +325,18 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   // Calculate card height dynamically
   const customerName = customer.company_name || customer.name || 'Valued Client';
   const hasAttn = Boolean(customer.company_name && customer.name);
-  const custAddress = [customer.billing_address, customer.city, customer.state, customer.postal_code]
+  const custAddress = [customer.billing_address, customer.city, customer.billing_state || customer.state, customer.postal_code]
     .filter(Boolean)
     .join(', ');
-  const hasTaxNumber = Boolean(customer.tax_number);
+  const customerTaxNumber = invoice.customer_gstin || customer.customer_gstin || customer.tax_number;
+  const hasTaxNumber = Boolean(customerTaxNumber);
+  const hasPlaceOfSupply = Boolean(currency === 'INR' && placeOfSupply);
 
   let leftLinesCount = 2; // BILLED TO + Name
   if (hasAttn) leftLinesCount += 1;
   if (custAddress) leftLinesCount += 1;
   if (hasTaxNumber) leftLinesCount += 1;
+  if (hasPlaceOfSupply) leftLinesCount += 1;
 
   const cardHeight = Math.max(26, leftLinesCount * 4.2 + 8);
 
@@ -335,7 +378,15 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   if (hasTaxNumber) {
     doc.setFont(fontName, 'bold');
     doc.setTextColor(51, 65, 85);
-    doc.text(`Tax ID / GST: ${customer.tax_number}`, margin + 5, cardLeftY);
+    doc.text(`${currency === 'INR' ? 'GSTIN' : 'Tax ID / GST'}: ${customerTaxNumber}`, margin + 5, cardLeftY);
+    cardLeftY += 3.8;
+  }
+
+  if (hasPlaceOfSupply) {
+    doc.setFont(fontName, 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(79, 70, 229);
+    doc.text(`Place of Supply: ${placeOfSupply}`, margin + 5, cardLeftY);
   }
 
   // Right: Settlement Status
@@ -400,13 +451,15 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   }
 
   // 3. Line Items Table (7 Columns Matching Print Sheet)
-  const items = invoice.items || [];
   const tableData = items.map((it, idx) => {
     let typeCode = it.item_type || 'Item';
     if (it.classification_code) {
       const prefix = it.classification_type || (it.item_type === 'GOODS' ? 'HSN' : 'SAC');
       typeCode = `${prefix}: ${it.classification_code}`;
     }
+
+    const calcItem = calcTotals.items[idx];
+    const lineTotal = calcItem ? calcItem.line_total : it.line_total;
 
     return {
       num: String(idx + 1),
@@ -415,7 +468,7 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
       qty: `${it.quantity} ${it.unit || 'unit'}`,
       rate: formatCurrency(it.unit_price, currency),
       tax: it.tax_rate > 0 ? `${it.tax_rate}%` : '-',
-      total: formatCurrency(it.line_total, currency),
+      total: formatCurrency(lineTotal, currency),
     };
   });
 
@@ -423,7 +476,8 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   autoTable(doc, {
     startY: tableStartY,
-    margin: { left: margin, right: margin },
+    margin: { left: margin, right: margin, bottom: 20 },
+    showHead: 'everyPage',
     theme: 'plain',
     styles: {
       font: fontName,
@@ -469,8 +523,18 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
 
   let finalTableY = (doc as any).lastAutoTable.finalY + 5;
 
-  // Check if financial summary fits on the current page
-  if (finalTableY + 55 > pageHeight - 15) {
+  // 4. Notes & Terms & Conditions (Left) vs Financial Summary (Right)
+  const hasNotes = isValidDocumentText(invoice.notes);
+  const hasTerms = isValidDocumentText(invoice.terms_conditions);
+
+  const notesLines = hasNotes ? doc.splitTextToSize(invoice.notes!.trim(), 90) : [];
+  const termsLines = hasTerms ? doc.splitTextToSize(invoice.terms_conditions!.trim(), 90) : [];
+  const estimatedLeftHeight = (hasNotes ? notesLines.length * 3.8 + 10 : 0) + (hasTerms ? termsLines.length * 3.8 + 10 : 0);
+  const estimatedRightHeight = 35 + displayTaxBreakdown.length * 5;
+  const requiredBlockHeight = Math.max(estimatedLeftHeight, estimatedRightHeight, 45);
+
+  // Check if financial summary and notes/terms fit on the current page without overlapping footer
+  if (finalTableY + requiredBlockHeight > pageHeight - 18) {
     doc.addPage();
     finalTableY = margin + 5;
   }
@@ -479,10 +543,6 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.setDrawColor(241, 245, 249);
   doc.setLineWidth(0.3);
   doc.line(margin, finalTableY, pageWidth - margin, finalTableY);
-
-  // 4. Notes & Payment Terms (Left) vs Financial Summary (Right)
-  const hasNotes = Boolean(invoice.notes && invoice.notes.trim());
-  const hasTerms = Boolean(invoice.terms_conditions && invoice.terms_conditions.trim());
 
   let leftCurY = finalTableY + 5;
   if (hasNotes) {
@@ -495,22 +555,24 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.setFont(fontName, 'normal');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    const notesLines = doc.splitTextToSize(invoice.notes!.trim(), 90);
     doc.text(notesLines, margin, leftCurY);
     leftCurY += notesLines.length * 3.8 + 4;
   }
 
   if (hasTerms) {
+    if (leftCurY + termsLines.length * 3.8 + 8 > pageHeight - 18) {
+      doc.addPage();
+      leftCurY = margin + 5;
+    }
     doc.setFont(fontName, 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(51, 65, 85);
-    doc.text('PAYMENT TERMS', margin, leftCurY);
+    doc.text('TERMS & CONDITIONS', margin, leftCurY);
     leftCurY += 4;
 
     doc.setFont(fontName, 'normal');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    const termsLines = doc.splitTextToSize(invoice.terms_conditions!.trim(), 90);
     doc.text(termsLines, margin, leftCurY);
     leftCurY += termsLines.length * 3.8 + 4;
   }
@@ -525,25 +587,25 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
-  doc.text('Subtotal', totalsX, rightCurY);
+  doc.text(taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal', totalsX, rightCurY);
   doc.setFont(fontName, 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(formatCurrency(invoice.subtotal, currency), rightX, rightCurY, { align: 'right' });
+  doc.text(formatCurrency(displaySubtotal, currency), rightX, rightCurY, { align: 'right' });
   rightCurY += 5;
 
   // Discount
-  if ((invoice.discount_amount || 0) > 0) {
+  if (displayDiscount > 0) {
     doc.setFont(fontName, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(5, 150, 105); // emerald-600
     doc.text('Discount', totalsX, rightCurY);
-    doc.text(`-${formatCurrency(invoice.discount_amount || 0, currency)}`, rightX, rightCurY, { align: 'right' });
+    doc.text(`-${formatCurrency(displayDiscount, currency)}`, rightX, rightCurY, { align: 'right' });
     rightCurY += 5;
   }
 
-  // Tax Breakdown
-  if (invoice.tax_breakdown && invoice.tax_breakdown.length > 0) {
-    for (const tb of invoice.tax_breakdown) {
+  // Tax Breakdown (only shown when tax > 0)
+  if (displayTaxBreakdown.length > 0) {
+    for (const tb of displayTaxBreakdown) {
       doc.setFont(fontName, 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(100, 116, 139);
@@ -553,14 +615,14 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
       doc.text(formatCurrency(tb.amount, currency), rightX, rightCurY, { align: 'right' });
       rightCurY += 5;
     }
-  } else {
+  } else if (displayTax > 0) {
     doc.setFont(fontName, 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
-    doc.text('Tax Total', totalsX, rightCurY);
+    doc.text(`Tax Total ${taxMode === 'inclusive' ? '(Included)' : ''}`.trim(), totalsX, rightCurY);
     doc.setFont(fontName, 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(formatCurrency(invoice.tax_amount, currency), rightX, rightCurY, { align: 'right' });
+    doc.text(formatCurrency(displayTax, currency), rightX, rightCurY, { align: 'right' });
     rightCurY += 5;
   }
 
@@ -578,22 +640,22 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
   doc.setFont(fontName, 'bold');
   doc.setFontSize(12);
   doc.setTextColor(79, 70, 229); // brand indigo
-  doc.text(formatCurrency(invoice.grand_total, currency), rightX, rightCurY, { align: 'right' });
+  doc.text(formatCurrency(grandTotal, currency), rightX, rightCurY, { align: 'right' });
   rightCurY += 6;
 
   // Amount Paid (only show if advance / partial payment and not paid in full)
-  if (!isPaid && invoice.paid_amount !== undefined && Number(invoice.paid_amount) > 0) {
+  if (!isPaid && paidAmount > 0) {
     doc.setFont(fontName, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(5, 150, 105);
     const paidLabel = `Amount Paid${invoice.advance_percentage ? ` (${invoice.advance_percentage}% Advance)` : ''}`;
     doc.text(paidLabel, totalsX, rightCurY);
-    doc.text(`-${formatCurrency(invoice.paid_amount, currency)}`, rightX, rightCurY, { align: 'right' });
+    doc.text(`-${formatCurrency(paidAmount, currency)}`, rightX, rightCurY, { align: 'right' });
     rightCurY += 5;
   }
 
   // Remaining Balance Due (only show if not paid in full and balance > 0)
-  if (!isPaid && invoice.balance_amount !== undefined && Number(invoice.balance_amount) > 0) {
+  if (!isPaid && balanceAmount > 0 && paidAmount > 0) {
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.2);
     doc.line(totalsX, rightCurY - 1, rightX, rightCurY - 1);
@@ -604,11 +666,10 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     doc.setTextColor(15, 23, 42);
     doc.text('Remaining Balance Due', totalsX, rightCurY);
 
-    const bal = Number(invoice.balance_amount);
     doc.setFont(fontName, 'bold');
     doc.setFontSize(10);
     doc.setTextColor(217, 119, 6); // amber-600
-    doc.text(formatCurrency(bal, currency), rightX, rightCurY, { align: 'right' });
+    doc.text(formatCurrency(balanceAmount, currency), rightX, rightCurY, { align: 'right' });
     rightCurY += 5;
   }
 
@@ -625,23 +686,22 @@ export async function generateInvoicePdf(invoice: Invoice): Promise<Uint8Array> 
     rightCurY += payLines.length * 3.5;
   }
 
-  // 5. Footer
-  if (org.invoice_footer) {
-    const footerY = pageHeight - 10;
-    doc.setDrawColor(241, 245, 249);
-    doc.setLineWidth(0.2);
-    doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
-
-    doc.setFont(fontName, 'italic');
-    doc.setFontSize(7.5);
-    doc.setTextColor(148, 163, 184);
-    doc.text(org.invoice_footer, pageWidth / 2, footerY, { align: 'center' });
-  }
-
-  // 6. Watermarks & Environment/Status Overlays on every page
+  // 5. Footer & Watermarks on every page
   const totalPages = (doc.internal as any).getNumberOfPages ? (doc.internal as any).getNumberOfPages() : 1;
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
+
+    if (org.invoice_footer) {
+      const footerY = pageHeight - 10;
+      doc.setDrawColor(241, 245, 249);
+      doc.setLineWidth(0.2);
+      doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
+
+      doc.setFont(fontName, 'italic');
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(org.invoice_footer, pageWidth / 2, footerY, { align: 'center' });
+    }
 
     if (invoice.environment === 'test') {
       // Top test banner

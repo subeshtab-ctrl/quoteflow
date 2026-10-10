@@ -63,50 +63,8 @@ export function SupportChatFloatingWidget({
     prevCountRef.current = messages.length;
   }, [messages.length]);
 
-  // Silent Background Polling (No UI flicker or reset)
-  useEffect(() => {
-    let isMounted = true;
-    if (ticket.status === 'resolved' || ticket.status === 'closed') {
-      return;
-    }
-
-    const pollTicket = async () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      try {
-        const res = await fetch(`/api/support/tickets/${ticket.id}`, { cache: 'no-store' });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.ticket && isMounted) {
-            setTicket(json.ticket);
-            if (json.ticket.messages) {
-              setMessages(json.ticket.messages);
-            }
-            onTicketUpdated?.(json.ticket);
-          }
-        }
-      } catch {
-        // Silent background fallback
-      }
-    };
-
-    // CPU-Optimized: 60-second interval + instant refresh on window focus
-    const interval = setInterval(pollTicket, 60000);
-
-    const handleFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        pollTicket();
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [ticket.id, ticket.status, onTicketUpdated]);
+  // CPU-Optimized: Background setInterval & focus polling disabled to eliminate idle Serverless CPU usage.
+  // Ticket messages refresh on widget open and immediately after sending a message.
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

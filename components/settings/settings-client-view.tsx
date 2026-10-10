@@ -59,6 +59,7 @@ import {
   LogoFit,
 } from '@/lib/utils/logo';
 import { COUNTRIES, getCountryProfile } from '@/lib/tax/country-config';
+import { INDIAN_STATES, validateGstin, getStateCodeByName, getStateNameByCode } from '@/lib/tax/india-gst';
 import { TrainingGuideModal } from '@/components/training/training-guide-modal';
 import { SupportView } from '@/components/support/support-view';
 import { AppearanceSettingsView } from '@/components/settings/appearance-settings-view';
@@ -1188,21 +1189,97 @@ export function SettingsClientView({
           />
         </div>
 
-        {/* Country-Adaptive Tax & Item Classification Configuration */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
+        {/* Country-Adaptive Tax, Calculation Mode & India GST Configuration */}
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-5">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Receipt className="h-5 w-5 text-indigo-500" />
-                <span>Tax System & Item Classification ({org.country || 'India'})</span>
+                <span>Tax Settings & GST Breakdown ({org.country || 'India'})</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Automatically adapts classification codes (HSN/SAC for India, HS Code for UAE, SKU for others) and tax rates without hardcoding India GST for other countries.
+                Configure Tax Exclusive vs Tax Inclusive calculation mode, India GST state rules, and item classification codes.
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* 1. Tax Calculation Mode: Exclusive vs Inclusive */}
+          <div className="space-y-2.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Default Tax Calculation Mode
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setOrg({ ...org, default_tax_mode: 'exclusive' })}
+                className={`text-left p-4 rounded-xl border-2 transition-all ${
+                  (org.default_tax_mode || 'exclusive') === 'exclusive'
+                    ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 shadow-xs'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                    Tax Exclusive (Add Tax on Top)
+                  </span>
+                  <span
+                    className={`h-4 w-4 rounded-full border flex items-center justify-center ${
+                      (org.default_tax_mode || 'exclusive') === 'exclusive'
+                        ? 'border-indigo-600 bg-indigo-600'
+                        : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {(org.default_tax_mode || 'exclusive') === 'exclusive' && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                    )}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Tax is calculated on top of the entered item rate.
+                </p>
+                <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-800 text-[11px] font-mono text-slate-600 dark:text-slate-300 space-y-0.5">
+                  <div>Entered ₹5,000 + 5% Tax:</div>
+                  <div>Subtotal: ₹5,000.00 | Tax: ₹250.00 | <span className="font-bold text-indigo-600 dark:text-indigo-400">Total: ₹5,250.00</span></div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOrg({ ...org, default_tax_mode: 'inclusive' })}
+                className={`text-left p-4 rounded-xl border-2 transition-all ${
+                  org.default_tax_mode === 'inclusive'
+                    ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 shadow-xs'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                    Tax Inclusive (Tax Included in Price)
+                  </span>
+                  <span
+                    className={`h-4 w-4 rounded-full border flex items-center justify-center ${
+                      org.default_tax_mode === 'inclusive'
+                        ? 'border-indigo-600 bg-indigo-600'
+                        : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {org.default_tax_mode === 'inclusive' && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                    )}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Entered item amount already includes tax; final total remains unchanged.
+                </p>
+                <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-800 text-[11px] font-mono text-slate-600 dark:text-slate-300 space-y-0.5">
+                  <div>Entered ₹5,000 (5% Inclusive):</div>
+                  <div>Taxable: ₹4,761.90 | Tax: ₹238.10 | <span className="font-bold text-emerald-600 dark:text-emerald-400">Total: ₹5,000.00</span></div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
             <div className="space-y-1">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                 Tax System
@@ -1234,15 +1311,142 @@ export function SettingsClientView({
             />
           </div>
 
-          <div className="p-3.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 text-xs text-indigo-800 dark:text-indigo-300 space-y-1">
-            <p className="font-semibold flex items-center gap-1.5">
-              <span>Current Configuration Profile:</span>
-              <span className="font-bold underline">{org.country || 'India'}</span>
-            </p>
-            <p className="text-[11px] text-indigo-700/90 dark:text-indigo-400">
-              Goods items will prompt for <span className="font-bold">{org.goods_classification_label || 'HSN Code'}</span>. Services items will prompt for <span className="font-bold">{org.service_classification_label || 'SAC Code'}</span>. Invoices and quotations will display these fields according to this company profile.
-            </p>
-          </div>
+          {/* India GST Automatic Breakdown Settings */}
+          {((org.country || 'India').toLowerCase() === 'india' || (org.tax_system || 'GST') === 'GST') && (
+            <div className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>🇮🇳 India GST Automatic Breakdown (CGST / SGST / IGST)</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Automatically splits GST into CGST + SGST for intra-state supply or IGST for inter-state supply based on Place of Supply.
+                  </p>
+                </div>
+                <IOSSwitch
+                  checked={org.gst_registered ?? true}
+                  onChange={(checked) => setOrg({ ...org, gst_registered: checked })}
+                />
+              </div>
+
+              {(org.gst_registered ?? true) && (
+                <div className="space-y-4 pt-2 border-t border-indigo-100 dark:border-indigo-900/50">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div>
+                      <Input
+                        label="Company GSTIN (15-Char)"
+                        placeholder="27AAPFU0939F1ZV"
+                        value={org.gstin || org.gst_vat_number || ''}
+                        onChange={(e) => {
+                          const upper = e.target.value.toUpperCase().replace(/\s+/g, '');
+                          const code = upper.length >= 2 ? upper.slice(0, 2) : '';
+                          const stateName = code ? getStateNameByCode(code) : undefined;
+                          setOrg({
+                            ...org,
+                            gstin: upper,
+                            gst_vat_number: upper,
+                            ...(stateName
+                              ? {
+                                  business_state: stateName,
+                                  state: stateName,
+                                  state_code: code,
+                                }
+                              : {}),
+                          });
+                        }}
+                      />
+                      {(org.gstin || org.gst_vat_number) &&
+                        !validateGstin(org.gstin || org.gst_vat_number).valid && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                            {validateGstin(org.gstin || org.gst_vat_number).error}
+                          </p>
+                        )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        Business State (Origin)
+                      </label>
+                      <select
+                        value={org.business_state || org.state || ''}
+                        onChange={(e) => {
+                          const st = e.target.value;
+                          const code = getStateCodeByName(st) || '';
+                          setOrg({
+                            ...org,
+                            business_state: st,
+                            state: st,
+                            state_code: code,
+                          });
+                        }}
+                        className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      >
+                        <option value="">Select Business State...</option>
+                        {INDIAN_STATES.map((st) => (
+                          <option key={st.code} value={st.name}>
+                            {st.name} ({st.code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <Input
+                      label="State Code"
+                      placeholder="e.g. 27"
+                      value={org.state_code || getStateCodeByName(org.business_state || org.state) || ''}
+                      onChange={(e) => setOrg({ ...org, state_code: e.target.value })}
+                    />
+
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        Default GST Rate
+                      </label>
+                      <select
+                        value={org.default_gst_rate ?? org.default_tax_rate ?? 18}
+                        onChange={(e) => {
+                          const r = parseFloat(e.target.value) || 0;
+                          setOrg({ ...org, default_gst_rate: r, default_tax_rate: r });
+                        }}
+                        className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      >
+                        <option value={0}>0% (Nil Rated / Exempt)</option>
+                        <option value={5}>5% GST</option>
+                        <option value={12}>12% GST</option>
+                        <option value={18}>18% GST (Standard)</option>
+                        <option value={28}>28% GST</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <div>
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        Enable HSN / SAC Code Columns on Documents
+                      </span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Displays HSN/SAC classification codes on quotations, invoices, and PDFs.
+                      </p>
+                    </div>
+                    <IOSSwitch
+                      checked={org.hsn_sac_enabled ?? true}
+                      onChange={(checked) => setOrg({ ...org, hsn_sac_enabled: checked })}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px] text-indigo-900 dark:text-indigo-200 bg-white/70 dark:bg-slate-900/70 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
+                    <div>
+                      <span className="font-bold text-indigo-700 dark:text-indigo-300">• Intra-State Supply (Same State):</span>{' '}
+                      Customer Place of Supply matches {org.business_state || org.state || 'Business State'} → Splits 50/50 into <span className="font-semibold">CGST + SGST</span>.
+                    </div>
+                    <div>
+                      <span className="font-bold text-indigo-700 dark:text-indigo-300">• Inter-State Supply (Different State):</span>{' '}
+                      Customer Place of Supply differs from {org.business_state || org.state || 'Business State'} → Applies full <span className="font-semibold">IGST</span>.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Quotation Numbering & Defaults */}
@@ -1279,7 +1483,9 @@ export function SettingsClientView({
                 <option value="USD">USD ($)</option>
                 <option value="EUR">EUR (€)</option>
                 <option value="GBP">GBP (£)</option>
-                <option value="AED">AED (AED)</option>
+                <option value="AED">AED (د.إ)</option>
+                <option value="SAR">SAR (ر.س)</option>
+                <option value="KWD">KWD (د.ك)</option>
               </select>
             </div>
 
@@ -1289,9 +1495,10 @@ export function SettingsClientView({
               min="0"
               max="100"
               value={org.default_tax_rate}
-              onChange={(e) =>
-                setOrg({ ...org, default_tax_rate: parseFloat(e.target.value) || 0 })
-              }
+              onChange={(e) => {
+                const r = parseFloat(e.target.value) || 0;
+                setOrg({ ...org, default_tax_rate: r, default_gst_rate: r });
+              }}
             />
           </div>
 

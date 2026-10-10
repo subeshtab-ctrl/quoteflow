@@ -10,6 +10,7 @@ import { BillingBanner } from '@/components/billing/billing-banner';
 import { WelcomeTrialTrigger } from '@/components/billing/welcome-trial-trigger';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService } from '@/lib/billing/subscription-service';
+import { store } from '@/lib/supabase/data-store';
 
 export async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const auth = await getAuthenticatedUserContext();
@@ -43,12 +44,13 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
 
   const brandColor = auth.organization.brand_color || '#4f46e5';
 
-  let subscriptionAccess = null;
-  try {
-    subscriptionAccess = await subscriptionService.getBusinessSubscriptionAccess(auth.orgId);
-  } catch (err) {
-    console.warn('Could not fetch subscription access:', err);
-  }
+  const [subscriptionAccess, initialNotifications] = await Promise.all([
+    subscriptionService.getBusinessSubscriptionAccess(auth.orgId).catch((err) => {
+      console.warn('Could not fetch subscription access:', err);
+      return null;
+    }),
+    store.getNotifications(auth.orgId, { environment: isTestMode ? 'test' : 'live' }).catch(() => []),
+  ]);
 
   return (
     <div
@@ -69,7 +71,7 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col min-w-0">
         <TestModeBanner isTestMode={isTestMode} userRole={auth.role} />
-        <DashboardHeader initialUser={userProfile} />
+        <DashboardHeader initialUser={userProfile} initialNotifications={initialNotifications} />
         <BillingBanner access={subscriptionAccess} />
         <WelcomeTrialTrigger
           orgId={auth.orgId}

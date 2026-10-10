@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Quotation, QuotationChatMessage } from '@/types/database';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import { formatCurrency, calculateQuotationTotals, isValidDocumentText } from '@/lib/quotations/calculations';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -129,7 +129,45 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
   const org = quotation.organization || initialQuotation.organization;
   const customer = quotation.customer;
-  const grandTotalFormatted = formatCurrency(quotation.grand_total, quotation.currency);
+  const taxMode = quotation.tax_mode || org?.default_tax_mode || 'exclusive';
+  const placeOfSupply =
+    quotation.place_of_supply ||
+    customer?.place_of_supply ||
+    customer?.billing_state ||
+    customer?.state ||
+    null;
+  const isIndiaGst = Boolean(
+    org?.country === 'India' ||
+      quotation.currency === 'INR' ||
+      org?.gst_registered ||
+      org?.gstin ||
+      org?.gst_vat_number
+  );
+  const calculated = calculateQuotationTotals(
+    (quotation.items || []).map((it) => ({
+      quantity: Number(it.quantity) || 0,
+      unit_price: Number(it.unit_price) || 0,
+      tax_rate: Number(it.tax_rate) || 0,
+    })),
+    quotation.discount_type || null,
+    Number(quotation.discount_value) || 0,
+    {
+      taxMode,
+      taxName: quotation.tax_name || org?.tax_label || 'GST',
+      isIndiaGst,
+      businessState: org?.business_state || org?.state || null,
+      placeOfSupply,
+    }
+  );
+  const displaySubtotal = calculated.subtotal;
+  const displayDiscount = calculated.discount_amount;
+  const displayTax = calculated.tax_amount;
+  const displayTotal = calculated.grand_total;
+  const displayTaxBreakdown =
+    quotation.tax_breakdown && quotation.tax_breakdown.length > 0
+      ? quotation.tax_breakdown
+      : calculated.tax_breakdown;
+  const grandTotalFormatted = formatCurrency(displayTotal, quotation.currency);
   const isDemo = token === 'sec_8f92m1k4092b' || quotation.quotation_number === 'Q-000042';
 
   const getValidityEndTime = (validUntil?: string | null) => {
@@ -538,32 +576,10 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     loadChatMessages(false);
   }, [currentToken]);
 
-  // CPU-Optimized: Poll ONLY when chat popup is actively open
-  // If closed, 0 requests are made, completely eliminating background CPU drain.
+  // CPU-Optimized: Fetch once when chat popup is opened; background setInterval & focus polling disabled to save Serverless CPU.
   useEffect(() => {
     if (!isChatPopupOpen) return;
-
-    // Refresh immediately upon opening
     loadChatMessages(true);
-
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      loadChatMessages(false);
-    }, 25000);
-
-    const handleFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        loadChatMessages(false);
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-    };
   }, [isChatPopupOpen, currentToken]);
 
   const handleSendChat = async (e: React.FormEvent) => {
@@ -1190,13 +1206,15 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
                 {org?.address_line1 && `${org.address_line1}, `}
                 {org?.city && `${org.city}, `}
-                {org?.state} {org?.postal_code}
+                {org?.business_state || org?.state} {org?.postal_code}
                 <br />
                 {org?.email} {org?.phone ? `• ${org.phone}` : ''}
-                {org?.gst_vat_number && (
+                {(org?.gstin || org?.gst_vat_number) && (
                   <>
                     <br />
-                    <span className="font-medium text-slate-600">GST / Tax ID: {org.gst_vat_number}</span>
+                    <span className="font-medium text-slate-600">
+                      GSTIN / Tax ID: {org.gstin || org.gst_vat_number}
+                    </span>
                   </>
                 )}
               </p>
@@ -1218,6 +1236,14 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   <span className="font-medium text-slate-600">Valid Until:</span>{' '}
                   {formatDate(quotation.valid_until)}
                 </p>
+                {displayTax > 0 && (
+                  <p>
+                    <span className="font-medium text-slate-600">Tax Mode:</span>{' '}
+                    <span className="font-semibold text-indigo-700">
+                      {taxMode === 'inclusive' ? 'Tax Included' : 'Tax Excluded'}
+                    </span>
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1236,13 +1262,23 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               )}
               <p className="text-xs text-slate-500 mt-1">
                 {customer?.billing_address && `${customer.billing_address}, `}
-                {customer?.city} {customer?.state} {customer?.postal_code}
+                {customer?.city} {customer?.billing_state || customer?.state} {customer?.postal_code}
                 <br />
                 Email: {customer?.email} {customer?.phone ? `| Tel: ${customer.phone}` : ''}
-                {customer?.tax_number && (
+                {(quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number) && (
                   <>
                     <br />
-                    Tax ID: {customer.tax_number}
+                    <span className="font-medium text-slate-700">
+                      GSTIN / Tax ID: {quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number}
+                    </span>
+                  </>
+                )}
+                {placeOfSupply && (
+                  <>
+                    <br />
+                    <span className="font-semibold text-indigo-700">
+                      Place of Supply: {placeOfSupply}
+                    </span>
                   </>
                 )}
               </p>
@@ -1276,38 +1312,44 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(quotation.items || []).map((item, idx) => (
-                  <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3.5 px-4 text-center text-xs text-slate-400 font-medium">
-                      {idx + 1}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <p className="font-semibold text-slate-800">{item.description}</p>
-                      {item.classification_code && (
-                        <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
-                          <span className="text-slate-400">
-                            {item.classification_type || (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')}:
-                          </span>{' '}
-                          <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
-                            {item.classification_code}
-                          </span>
-                        </p>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-center text-slate-600">
-                      {item.quantity} <span className="text-xs text-slate-400">{item.unit}</span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right text-slate-700">
-                      {formatCurrency(item.unit_price, quotation.currency)}
-                    </td>
-                    <td className="py-3.5 px-4 text-center text-xs text-slate-500 font-medium">
-                      {item.tax_rate > 0 ? `${item.tax_rate}%` : '-'}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-semibold text-slate-900">
-                      {formatCurrency(item.line_total, quotation.currency)}
-                    </td>
-                  </tr>
-                ))}
+                {(quotation.items || []).map((item, idx) => {
+                  const calcItem = calculated.items[idx];
+                  const lineTotal = calcItem ? calcItem.line_total : item.line_total;
+                  return (
+                    <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-3.5 px-4 text-center text-xs text-slate-400 font-medium">
+                        {idx + 1}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-semibold text-slate-800">{item.description}</p>
+                        {item.classification_code && (
+                          <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                            <span className="text-slate-400">
+                              {item.classification_type || (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')}:
+                            </span>{' '}
+                            <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {item.classification_code}
+                            </span>
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-center text-slate-600">
+                        {item.quantity} <span className="text-xs text-slate-400">{item.unit}</span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right text-slate-700">
+                        {formatCurrency(item.unit_price, quotation.currency)}
+                      </td>
+                      <td className="py-3.5 px-4 text-center text-xs text-slate-500 font-medium">
+                        {item.tax_rate > 0
+                          ? `${item.tax_rate}%${taxMode === 'inclusive' ? ' (Incl.)' : ''}`
+                          : '-'}
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-semibold text-slate-900">
+                        {formatCurrency(lineTotal, quotation.currency)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1348,24 +1390,24 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           {/* Financial Calculation Summary Breakdown */}
           <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2">
             <div className="w-full sm:w-1/2 space-y-3">
-              {quotation.notes && (
+              {isValidDocumentText(quotation.notes) && (
                 <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
                     Notes & Specifications
                   </h4>
                   <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
-                    {quotation.notes}
+                    {quotation.notes!.trim()}
                   </p>
                 </div>
               )}
 
-              {quotation.terms_conditions && (
+              {isValidDocumentText(quotation.terms_conditions) && (
                 <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
                     Terms & Conditions
                   </h4>
                   <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
-                    {quotation.terms_conditions.replace(
+                    {quotation.terms_conditions!.trim().replace(
                       /Quotation valid for \d+ days?/gi,
                       `Quotation valid for ${validityDays} ${validityDays === 1 ? 'day' : 'days'}`
                     )}
@@ -1714,31 +1756,42 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
 
             <div className="w-full sm:w-5/12 space-y-2.5 rounded-xl bg-slate-50/70 p-5 border border-slate-200">
               <div className="flex justify-between text-xs text-slate-600">
-                <span>Subtotal</span>
+                <span>{taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal'}</span>
                 <span className="font-semibold text-slate-800">
-                  {formatCurrency(quotation.subtotal, quotation.currency)}
+                  {formatCurrency(displaySubtotal, quotation.currency)}
                 </span>
               </div>
 
-              {quotation.discount_amount > 0 && (
+              {displayDiscount > 0 && (
                 <div className="flex justify-between text-xs text-rose-600">
                   <span>
                     Discount ({quotation.discount_type === 'PERCENTAGE' ? `${quotation.discount_value}%` : 'Fixed'})
                   </span>
                   <span className="font-semibold">
-                    -{formatCurrency(quotation.discount_amount, quotation.currency)}
+                    -{formatCurrency(displayDiscount, quotation.currency)}
                   </span>
                 </div>
               )}
 
-              {quotation.tax_amount > 0 && (
+              {displayTaxBreakdown.length > 0 ? (
+                displayTaxBreakdown.map((tb, idx) => (
+                  <div key={idx} className="flex justify-between text-xs text-slate-600">
+                    <span>{tb.label}</span>
+                    <span className="font-semibold text-slate-800">
+                      {formatCurrency(tb.amount, quotation.currency)}
+                    </span>
+                  </div>
+                ))
+              ) : displayTax > 0 ? (
                 <div className="flex justify-between text-xs text-slate-600">
-                  <span>Taxes & Levies ({quotation.tax_rate}%)</span>
+                  <span>
+                    {quotation.tax_name || org?.tax_label || 'Tax'} ({quotation.tax_rate}%{taxMode === 'inclusive' ? ' Included' : ''})
+                  </span>
                   <span className="font-semibold text-slate-800">
-                    {formatCurrency(quotation.tax_amount, quotation.currency)}
+                    {formatCurrency(displayTax, quotation.currency)}
                   </span>
                 </div>
-              )}
+              ) : null}
 
               <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
                 <span className="text-sm font-bold text-slate-900">Total Quotation Value</span>

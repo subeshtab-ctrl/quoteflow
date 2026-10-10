@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Customer, Product, Organization, CurrencyCode, DiscountType, InvoiceStatus, AttachmentItem } from '@/types/database';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import { calculateQuotationTotals, formatCurrency } from '@/lib/quotations/calculations';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -27,7 +27,8 @@ import {
   Smartphone,
   Mail,
 } from 'lucide-react';
-import { getCountryProfile, COUNTRIES, calculateItemTaxBreakdown } from '@/lib/tax/country-config';
+import { getCountryProfile, COUNTRIES } from '@/lib/tax/country-config';
+import { INDIAN_STATES } from '@/lib/tax/india-gst';
 import { FileAttachmentsUploader } from '@/components/common/file-attachments-uploader';
 import { COUNTRY_CODES, getDefaultCountryCode, cleanPhoneNumber } from '@/lib/country-codes';
 
@@ -153,6 +154,24 @@ export function InvoiceBuilder({
   ];
 
   const [isInterstate, setIsInterstate] = useState<boolean>(false);
+  const [taxMode, setTaxMode] = useState<'exclusive' | 'inclusive'>(
+    initialInvoice?.tax_mode ||
+      fromQuotation?.tax_mode ||
+      organization?.default_tax_mode ||
+      'exclusive'
+  );
+  const [placeOfSupply, setPlaceOfSupply] = useState<string>(
+    initialInvoice?.place_of_supply || fromQuotation?.place_of_supply || ''
+  );
+  const [discountType, setDiscountType] = useState<DiscountType>(
+    initialInvoice?.discount_type || fromQuotation?.discount_type || 'PERCENTAGE'
+  );
+  const [discountValue, setDiscountValue] = useState<number>(
+    initialInvoice?.discount_value || fromQuotation?.discount_value || 0
+  );
+  const [overallTaxRate, setOverallTaxRate] = useState<number>(
+    initialInvoice?.tax_rate ?? fromQuotation?.tax_rate ?? 0
+  );
 
   // Initial Items
   const defaultItems: InvoiceItemState[] = fromQuotation?.items?.length
@@ -410,61 +429,67 @@ export function InvoiceBuilder({
     );
   };
 
-  // Live Calculations
-  const calculatedItems = items.map((item) => {
-    const qty = Math.max(0, Number(item.quantity) || 0);
-    const price = Math.max(0, Number(item.unit_price) || 0);
-    const discVal = Math.max(0, Number(item.discount_value) || 0);
-    const base = qty * price;
-    const discAmt =
-      item.discount_type === 'PERCENTAGE'
-        ? (base * Math.min(100, discVal)) / 100
-        : Math.min(base, discVal);
-    const taxable = Math.max(0, base - discAmt);
-    const taxRate = Math.max(0, Number(item.tax_rate) || 0);
-    const taxBreakdown = calculateItemTaxBreakdown({
-      countryCode: organization.country,
-      taxRate,
-      taxableAmount: taxable,
-      isInterstate,
-    });
-    const lineTotal = taxable + taxBreakdown.totalTax;
+  const selectedCustomer = customerList.find((c) => c.id === customerId);
+  const resolvedPlaceOfSupply =
+    placeOfSupply ||
+    selectedCustomer?.place_of_supply ||
+    selectedCustomer?.billing_state ||
+    selectedCustomer?.state ||
+    (isInterstate ? 'Interstate' : (organization?.business_state || organization?.state || ''));
 
+  // Centralized Live Calculations
+  const calculated = calculateQuotationTotals({
+    items,
+    discount_type: discountType,
+    discount_value: discountValue,
+    tax_rate: overallTaxRate,
+    tax_mode: taxMode,
+    tax_name: organization?.tax_system === 'VAT' ? 'VAT' : 'GST',
+    business_state: organization?.business_state || organization?.state || '',
+    place_of_supply: resolvedPlaceOfSupply,
+    gst_registered: organization?.gst_registered ?? true,
+  });
+
+  const calculatedItems = items.map((item, idx) => {
+    const calcItem = calculated.items[idx];
     return {
       ...item,
-      base,
-      discountAmount: discAmt,
-      taxableAmount: taxable,
-      taxAmount: taxBreakdown.totalTax,
-      lineTotal,
-      taxBreakdown,
+      base: calcItem ? calcItem.line_total : 0,
+      discountAmount: calcItem ? calcItem.discount_amount : 0,
+      taxableAmount: calcItem ? calcItem.line_total : 0,
+      taxAmount: calcItem ? calcItem.tax_amount : 0,
+      lineTotal: calcItem ? calcItem.line_total : 0,
     };
   });
 
-  const subtotal = calculatedItems.reduce((acc, i) => acc + i.base, 0);
-  const totalDiscount = calculatedItems.reduce((acc, i) => acc + i.discountAmount, 0);
-  const taxableTotal = calculatedItems.reduce((acc, i) => acc + i.taxableAmount, 0);
-  const totalTax = calculatedItems.reduce((acc, i) => acc + i.taxAmount, 0);
-  const grandTotal = taxableTotal + totalTax;
+  const subtotal = calculated.subtotal;
+  const totalDiscount = calculated.discount_amount;
+  const taxableTotal = calculated.subtotal;
+  const totalTax = calculated.tax_amount;
+  const grandTotal = calculated.grand_total;
 
-  // Aggregate Tax Breakdown for Indian GST or UAE VAT
-  const aggregateTaxBreakdown = (() => {
-    if (countryProfile.isIndiaGst) {
-      if (isInterstate) {
-        return [{ label: 'IGST (Interstate)', rate: 0, amount: totalTax }];
-      } else {
-        const half = Math.round((totalTax / 2 + Number.EPSILON) * 100) / 100;
-        return [
-          { label: 'CGST (Central GST)', rate: 0, amount: half },
-          { label: 'SGST (State GST)', rate: 0, amount: totalTax - half },
-        ];
-      }
-    }
-    if (countryProfile.isUaeVat) {
-      return [{ label: 'UAE VAT (5%)', rate: 5, amount: totalTax }];
-    }
-    return [{ label: `${countryProfile.taxSystem} Total`, rate: 0, amount: totalTax }];
-  })();
+  const aggregateTaxBreakdown =
+    calculated.tax_breakdown && calculated.tax_breakdown.length > 0
+      ? calculated.tax_breakdown.map((tb) => ({
+          label: tb.name,
+          name: tb.name,
+          rate: tb.rate,
+          amount: tb.amount,
+        }))
+      : totalTax > 0
+      ? [
+          {
+            label: `${organization?.tax_system === 'VAT' ? 'VAT' : 'GST'} (${calculated.tax_rate}%)${
+              taxMode === 'inclusive' ? ' (Included)' : ''
+            }`,
+            name: `${organization?.tax_system === 'VAT' ? 'VAT' : 'GST'} (${calculated.tax_rate}%)${
+              taxMode === 'inclusive' ? ' (Included)' : ''
+            }`,
+            rate: calculated.tax_rate,
+            amount: totalTax,
+          },
+        ]
+      : [];
 
   const handleSaveInvoice = async (targetStatus: InvoiceStatus) => {
     if (!customerId) {
@@ -491,12 +516,19 @@ export function InvoiceBuilder({
         issue_date: issueDate,
         due_date: dueDate,
         currency,
+        discount_type: discountType,
+        discount_value: discountValue,
+        tax_rate: overallTaxRate,
+        tax_mode: taxMode,
+        tax_name: organization?.tax_system === 'VAT' ? 'VAT' : 'GST',
+        place_of_supply: resolvedPlaceOfSupply || null,
+        customer_gstin: selectedCustomer?.customer_gstin || selectedCustomer?.tax_number || null,
         payment_terms: paymentTerms,
         payment_method: paymentMethod,
         notes: (notes || '').trim(),
         terms_conditions: (terms || '').trim(),
         attachments,
-        tax_breakdown: aggregateTaxBreakdown,
+        tax_breakdown: calculated.tax_breakdown,
         items: calculatedItems.map((item, idx) => ({
           product_id: item.product_id || null,
           description: item.description,
@@ -513,12 +545,6 @@ export function InvoiceBuilder({
           item_type: item.item_type,
           classification_type: item.classification_type,
           classification_code: item.classification_code,
-          cgst_rate: item.taxBreakdown.cgstRate,
-          cgst_amount: item.taxBreakdown.cgstAmount,
-          sgst_rate: item.taxBreakdown.sgstRate,
-          sgst_amount: item.taxBreakdown.sgstAmount,
-          igst_rate: item.taxBreakdown.igstRate,
-          igst_amount: item.taxBreakdown.igstAmount,
         })),
       };
 
@@ -539,8 +565,6 @@ export function InvoiceBuilder({
       setIsLoading(false);
     }
   };
-
-  const selectedCustomer = customerList.find((c) => c.id === customerId);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16">
@@ -814,7 +838,9 @@ export function InvoiceBuilder({
                 >
                   <option value="INR">INR (₹)</option>
                   <option value="USD">USD ($)</option>
-                  <option value="AED">AED (AED)</option>
+                  <option value="AED">AED (د.إ)</option>
+                  <option value="SAR">SAR (ر.س)</option>
+                  <option value="KWD">KWD (د.ك)</option>
                   <option value="EUR">EUR (€)</option>
                   <option value="GBP">GBP (£)</option>
                 </select>
@@ -883,23 +909,58 @@ export function InvoiceBuilder({
                   />
                 )}
               </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Tax Calculation Mode
+                </label>
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50 dark:bg-slate-900 p-0.5 h-10">
+                  <button
+                    type="button"
+                    onClick={() => setTaxMode('exclusive')}
+                    className={`flex-1 text-[11px] font-bold rounded-md transition-all ${
+                      taxMode === 'exclusive'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    Exclusive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxMode('inclusive')}
+                    className={`flex-1 text-[11px] font-bold rounded-md transition-all ${
+                      taxMode === 'inclusive'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    Inclusive
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {/* India GST Specific: Interstate vs Intrastate toggle */}
+            {/* India GST Specific: Place of Supply & Interstate */}
             {countryProfile.isIndiaGst && (
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={isInterstate}
-                    onChange={(e) => setIsInterstate(e.target.checked)}
-                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>Interstate Transaction (100% IGST)</span>
-                </label>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  {isInterstate ? 'Applies Integrated GST (IGST)' : 'Applies Central GST (CGST) + State GST (SGST)'}
-                </p>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Place of Supply (State)
+                  </label>
+                  <select
+                    value={resolvedPlaceOfSupply}
+                    onChange={(e) => setPlaceOfSupply(e.target.value)}
+                    className="w-full h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">Same as Business State ({organization?.business_state || organization?.state || 'Default'})</option>
+                    {INDIAN_STATES.map((st) => (
+                      <option key={st.code} value={st.name}>
+                        {st.name} ({st.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
           </div>
@@ -1215,7 +1276,7 @@ export function InvoiceBuilder({
 
           <div className="space-y-2 text-xs">
             <div className="flex justify-between text-slate-600 dark:text-slate-400">
-              <span>Items Subtotal</span>
+              <span>{taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal'}</span>
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(subtotal, currency)}
               </span>
@@ -1227,13 +1288,6 @@ export function InvoiceBuilder({
                 <span>-{formatCurrency(totalDiscount, currency)}</span>
               </div>
             )}
-
-            <div className="flex justify-between text-slate-600 dark:text-slate-400">
-              <span>Taxable Amount</span>
-              <span className="font-semibold text-slate-900 dark:text-slate-100">
-                {formatCurrency(taxableTotal, currency)}
-              </span>
-            </div>
 
             {/* Country Adaptive Tax Breakdown */}
             {aggregateTaxBreakdown.map((tb, idx) => (

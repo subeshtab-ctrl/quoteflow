@@ -114,26 +114,7 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
       .catch(() => {});
   };
 
-  // Poll open ticket for live developer responses (CPU-Optimized)
-  useEffect(() => {
-    if (!activeTicket || activeTicket.status === 'resolved' || activeTicket.status === 'closed') return;
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      loadTicketDetails(activeTicket.id);
-    }, 60000);
-
-    const handleFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        loadTicketDetails(activeTicket.id);
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [activeTicket?.id, activeTicket?.status]);
+  // CPU-Optimized: Background setInterval & focus polling disabled to eliminate idle Serverless CPU usage.
 
   const handleFileUpload = async (file: File, isReply = false) => {
     if (!file) return;

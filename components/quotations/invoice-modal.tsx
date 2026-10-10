@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Quotation, Organization, Customer } from '@/types/database';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import { Quotation, Organization, Customer, TaxMode } from '@/types/database';
+import { formatCurrency, calculateQuotationTotals, isValidDocumentText } from '@/lib/quotations/calculations';
+import { INDIAN_STATES } from '@/lib/tax/india-gst';
 import { formatDate } from '@/lib/utils';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
@@ -191,6 +192,9 @@ export function InvoiceModal({
               if (match.po_number) setPoNumber(match.po_number);
               if (match.payment_terms) setPaymentTerms(match.payment_terms);
               if (match.payment_method) setPaymentMode(match.payment_method);
+              if (match.tax_mode === 'inclusive' || match.tax_mode === 'exclusive') setTaxMode(match.tax_mode);
+              if (match.place_of_supply) setPlaceOfSupply(match.place_of_supply);
+              if (match.customer_gstin) setClientTaxId(match.customer_gstin);
               if (typeof match.notes === 'string') setInvoiceNotes(match.notes);
               if (typeof match.terms_conditions === 'string') setInvoiceTerms(match.terms_conditions);
               if (match.items && match.items.length > 0) {
@@ -241,22 +245,36 @@ export function InvoiceModal({
   const [clientAttn, setClientAttn] = useState(
     customer?.company_name && customer?.name ? customer.name : ''
   );
-  const [clientTaxId, setClientTaxId] = useState(customer?.tax_number || '');
+  const [clientTaxId, setClientTaxId] = useState(
+    quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number || ''
+  );
   const [clientAddress, setClientAddress] = useState(
     [customer?.billing_address, customer?.city, customer?.state, customer?.postal_code]
       .filter(Boolean)
       .join(', ')
   );
+  const [taxMode, setTaxMode] = useState<TaxMode>(
+    quotation.tax_mode || organization?.default_tax_mode || 'exclusive'
+  );
+  const [placeOfSupply, setPlaceOfSupply] = useState<string>(
+    quotation.place_of_supply ||
+      customer?.place_of_supply ||
+      customer?.billing_state ||
+      customer?.state ||
+      organization?.business_state ||
+      organization?.state ||
+      ''
+  );
 
-  // Invoice Notes & Terms (Replacing Bank Remittance and Quotation Terms)
+  // Invoice Notes & Terms (Inherited from Quotation if specified, or defaults)
   const defaultInvoiceNotes =
-    'Thank you for your business. Please remit payment according to the agreed terms.';
-  const defaultInvoiceTerms = [
-    '1. Payment is due within agreed terms from the date of invoice.',
-    '2. Please quote the invoice number when making remittance.',
-    '3. Overdue payments may be subject to interest as permitted by applicable law.',
-    '4. Goods/services provided in accordance with approved scope are non-refundable.',
-  ].join('\n');
+    quotation.notes !== undefined
+      ? (quotation.notes || '')
+      : (organization?.invoice_footer || '');
+  const defaultInvoiceTerms =
+    quotation.terms_conditions !== undefined
+      ? (quotation.terms_conditions || '')
+      : '';
 
   const [invoiceNotes, setInvoiceNotes] = useState(defaultInvoiceNotes);
   const [invoiceTerms, setInvoiceTerms] = useState(defaultInvoiceTerms);
@@ -295,13 +313,32 @@ export function InvoiceModal({
       );
       setClientName(customer?.company_name || customer?.name || 'Valued Client');
       setClientAttn(customer?.company_name && customer?.name ? customer.name : '');
-      setClientTaxId(customer?.tax_number || '');
+      setClientTaxId(quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number || '');
       setClientAddress(
         [customer?.billing_address, customer?.city, customer?.state, customer?.postal_code]
           .filter(Boolean)
           .join(', ')
       );
-      setInvoiceNotes(organization?.invoice_footer || defaultInvoiceNotes);
+      setTaxMode(quotation.tax_mode || organization?.default_tax_mode || 'exclusive');
+      setPlaceOfSupply(
+        quotation.place_of_supply ||
+          customer?.place_of_supply ||
+          customer?.billing_state ||
+          customer?.state ||
+          organization?.business_state ||
+          organization?.state ||
+          ''
+      );
+      setInvoiceNotes(
+        quotation.notes !== undefined
+          ? (quotation.notes || '')
+          : (organization?.invoice_footer || '')
+      );
+      setInvoiceTerms(
+        quotation.terms_conditions !== undefined
+          ? (quotation.terms_conditions || '')
+          : ''
+      );
       setItems(
         (quotation.items || []).map((item, idx) => ({
           id: item.id || `item_${idx}_${Date.now()}`,
@@ -320,22 +357,30 @@ export function InvoiceModal({
     }
   }, [isOpen, quotation, customer, organization]);
 
-  // Calculations
-  const subtotal = items.reduce(
-    (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
-    0
+  // Centralized Tax Calculations
+  const calculated = calculateQuotationTotals(
+    items.map((it) => ({
+      quantity: Number(it.quantity) || 0,
+      unit_price: Number(it.unit_price) || 0,
+      tax_rate: Number(it.tax_rate) || 0,
+    })),
+    discountType,
+    Number(discountValue) || 0,
+    {
+      taxMode,
+      taxName: quotation.tax_name || organization?.tax_label || 'GST',
+      isIndiaGst:
+        organization?.country === 'India' ||
+        currency === 'INR' ||
+        Boolean(organization?.gst_registered || organization?.gstin || organization?.gst_vat_number),
+      businessState: organization?.business_state || organization?.state || null,
+      placeOfSupply: placeOfSupply || customer?.place_of_supply || customer?.billing_state || customer?.state || null,
+    }
   );
-  const discountAmount =
-    discountType === 'PERCENTAGE'
-      ? (subtotal * (Number(discountValue) || 0)) / 100
-      : Number(discountValue) || 0;
-  const taxableAmount = Math.max(0, subtotal - discountAmount);
-  const taxAmount = items.reduce((sum, it) => {
-    const itemTotal = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
-    const itemTax = (itemTotal * (Number(it.tax_rate) || 0)) / 100;
-    return sum + itemTax;
-  }, 0);
-  const grandTotal = taxableAmount + taxAmount;
+  const subtotal = calculated.subtotal;
+  const discountAmount = calculated.discount_amount;
+  const taxAmount = calculated.tax_amount;
+  const grandTotal = calculated.grand_total;
 
   // Item handlers
   const handleItemChange = (index: number, field: keyof InvoiceItem, val: any) => {
@@ -355,7 +400,7 @@ export function InvoiceModal({
         quantity: 1,
         unit: 'pcs',
         unit_price: 1000,
-        tax_rate: 18,
+        tax_rate: organization?.default_gst_rate ?? organization?.default_tax_rate ?? 18,
         item_type: 'GOODS',
         classification_type: 'HSN',
         classification_code: '',
@@ -372,7 +417,7 @@ export function InvoiceModal({
         quantity: 1,
         unit: 'service',
         unit_price: 1000,
-        tax_rate: 18,
+        tax_rate: organization?.default_gst_rate ?? organization?.default_tax_rate ?? 18,
         item_type: 'SERVICE',
         classification_type: 'SAC',
         classification_code: '998311',
@@ -405,11 +450,21 @@ export function InvoiceModal({
     setPaymentMode('Electronic Funds Transfer / UPI');
     setClientName(customer?.company_name || customer?.name || 'Valued Client');
     setClientAttn(customer?.company_name && customer?.name ? customer.name : '');
-    setClientTaxId(customer?.tax_number || '');
+    setClientTaxId(quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number || '');
     setClientAddress(
       [customer?.billing_address, customer?.city, customer?.state, customer?.postal_code]
         .filter(Boolean)
         .join(', ')
+    );
+    setTaxMode(quotation.tax_mode || organization?.default_tax_mode || 'exclusive');
+    setPlaceOfSupply(
+      quotation.place_of_supply ||
+        customer?.place_of_supply ||
+        customer?.billing_state ||
+        customer?.state ||
+        organization?.business_state ||
+        organization?.state ||
+        ''
     );
     setInvoiceNotes(defaultInvoiceNotes);
     setInvoiceTerms(defaultInvoiceTerms);
@@ -453,26 +508,40 @@ export function InvoiceModal({
         issue_date: invoiceDate,
         due_date: dueDate,
         currency: currency,
+        tax_mode: taxMode,
+        tax_rate: calculated.effective_tax_rate,
+        tax_name: quotation.tax_name || organization?.tax_label || 'GST',
+        place_of_supply: placeOfSupply || null,
+        customer_gstin: clientTaxId || null,
+        subtotal: calculated.subtotal,
+        discount_amount: calculated.discount_amount,
+        tax_amount: calculated.tax_amount,
+        grand_total: calculated.grand_total,
+        tax_breakdown: calculated.tax_breakdown,
         payment_terms: paymentTerms,
         payment_method: paymentMode,
         notes: (invoiceNotes || '').trim(),
         terms_conditions: (invoiceTerms || '').trim(),
         discount_type: discountType,
         discount_value: discountValue,
-        items: items.map((it, idx) => ({
-          id: it.id,
-          description: it.description,
-          quantity: it.quantity,
-          unit: it.unit,
-          unit_price: it.unit_price,
-          tax_rate: it.tax_rate,
-          tax_amount: (it.quantity * it.unit_price * it.tax_rate) / 100,
-          line_total: (it.quantity * it.unit_price) * (1 + it.tax_rate / 100),
-          sort_order: idx + 1,
-          item_type: it.item_type || (it.unit === 'service' || it.unit === 'hrs' ? 'SERVICE' : 'GOODS'),
-          classification_type: it.classification_type || (it.item_type === 'GOODS' ? 'HSN' : 'SAC'),
-          classification_code: it.classification_code || '',
-        })),
+        items: items.map((it, idx) => {
+          const calcItem = calculated.items[idx];
+          return {
+            id: it.id,
+            description: it.description,
+            quantity: it.quantity,
+            unit: it.unit,
+            unit_price: it.unit_price,
+            tax_rate: it.tax_rate,
+            taxable_amount: calcItem ? calcItem.taxable_amount : it.quantity * it.unit_price,
+            tax_amount: calcItem ? calcItem.tax_amount : (it.quantity * it.unit_price * it.tax_rate) / 100,
+            line_total: calcItem ? calcItem.line_total : (it.quantity * it.unit_price) * (1 + it.tax_rate / 100),
+            sort_order: idx + 1,
+            item_type: it.item_type || (it.unit === 'service' || it.unit === 'hrs' ? 'SERVICE' : 'GOODS'),
+            classification_type: it.classification_type || (it.item_type === 'GOODS' ? 'HSN' : 'SAC'),
+            classification_code: it.classification_code || '',
+          };
+        }),
       };
 
       let res;
@@ -810,9 +879,9 @@ export function InvoiceModal({
             <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
               <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
                 <Building2 className="h-4 w-4 text-indigo-600" />
-                <span>Billed To (Customer Details)</span>
+                <span>Billed To & GST Supply Details</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Input
                   label="Customer / Company Name *"
                   value={clientName}
@@ -832,6 +901,23 @@ export function InvoiceModal({
                   onChange={(e) => setClientTaxId(e.target.value)}
                   placeholder="e.g. 29ABCDE1234F1Z5"
                 />
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Place of Supply (State)
+                  </label>
+                  <select
+                    value={placeOfSupply}
+                    onChange={(e) => setPlaceOfSupply(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Auto / Same as Business</option>
+                    {INDIAN_STATES.map((st) => (
+                      <option key={st.code} value={st.name}>
+                        {st.code} - {st.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <Input
                 label="Billing Address"
@@ -844,9 +930,37 @@ export function InvoiceModal({
             {/* Section 3: Line Items Editor */}
             <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <Receipt className="h-4 w-4 text-indigo-600" />
-                  <span>Invoice Products & Services</span>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <Receipt className="h-4 w-4 text-indigo-600" />
+                    <span>Invoice Products & Services</span>
+                  </div>
+                  <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setTaxMode('exclusive')}
+                      className={cn(
+                        'px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors',
+                        taxMode === 'exclusive'
+                          ? 'bg-white text-indigo-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      )}
+                    >
+                      Tax Exclusive
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxMode('inclusive')}
+                      className={cn(
+                        'px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors',
+                        taxMode === 'inclusive'
+                          ? 'bg-white text-indigo-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      )}
+                    >
+                      Tax Inclusive
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -874,7 +988,10 @@ export function InvoiceModal({
 
               <div className="space-y-3">
                 {items.map((item, idx) => {
-                  const lineTotal = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                  const calcItem = calculated.items[idx];
+                  const lineTotal = calcItem
+                    ? calcItem.line_total
+                    : (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
                   const isGoods = item.item_type !== 'SERVICE';
                   return (
                     <div
@@ -1079,14 +1196,14 @@ export function InvoiceModal({
                 value={invoiceNotes}
                 onChange={(e) => setInvoiceNotes(e.target.value)}
                 rows={2}
-                placeholder="Payment instructions, remittance advice or thank you note..."
+                placeholder="Leave blank to hide Notes section on the document..."
               />
               <Textarea
                 label="Invoice Terms & Conditions"
                 value={invoiceTerms}
                 onChange={(e) => setInvoiceTerms(e.target.value)}
                 rows={4}
-                placeholder="Invoice terms and conditions..."
+                placeholder="Leave blank to hide Terms & Conditions section on the document..."
               />
             </div>
 
@@ -1146,14 +1263,14 @@ export function InvoiceModal({
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                   {organization?.address_line1 && `${organization.address_line1}, `}
                   {organization?.city && `${organization.city}, `}
-                  {organization?.state} {organization?.postal_code}
+                  {organization?.business_state || organization?.state} {organization?.postal_code}
                   <br />
                   Email: {organization?.email} | Tel: {organization?.phone || 'N/A'}
-                  {organization?.gst_vat_number && (
+                  {(organization?.gstin || organization?.gst_vat_number) && (
                     <>
                       <br />
                       <span className="font-semibold text-slate-700">GSTIN / Tax ID:</span>{' '}
-                      {organization.gst_vat_number}
+                      {organization.gstin || organization.gst_vat_number}
                     </>
                   )}
                 </p>
@@ -1230,6 +1347,11 @@ export function InvoiceModal({
                     Customer Tax ID / GSTIN: {clientTaxId}
                   </p>
                 )}
+                {placeOfSupply && (
+                  <p className="font-semibold text-indigo-700 mt-0.5">
+                    Place of Supply: {placeOfSupply}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1243,6 +1365,12 @@ export function InvoiceModal({
                   </p>
                   <p>
                     Mode: <span className="font-medium text-slate-700">{paymentMode}</span>
+                  </p>
+                  <p>
+                    Tax Mode:{' '}
+                    <span className="font-semibold text-slate-700">
+                      {taxMode === 'inclusive' ? 'Tax Inclusive' : 'Tax Exclusive'}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -1263,7 +1391,10 @@ export function InvoiceModal({
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {items.map((item, idx) => {
-                    const lineTotal = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                    const calcItem = calculated.items[idx];
+                    const lineTotal = calcItem
+                      ? calcItem.line_total
+                      : (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
                     return (
                       <tr key={item.id || idx}>
                         <td className="py-3 px-3 text-center text-slate-400">{idx + 1}</td>
@@ -1288,7 +1419,7 @@ export function InvoiceModal({
                           {formatCurrency(item.unit_price, currency)}
                         </td>
                         <td className="py-3 px-3 text-center text-slate-500">
-                          {item.tax_rate > 0 ? `${item.tax_rate}%` : '-'}
+                          {item.tax_rate > 0 ? `${item.tax_rate}%${taxMode === 'inclusive' ? ' (Incl.)' : ''}` : '-'}
                         </td>
                         <td className="py-3 px-3 text-right font-semibold text-slate-900">
                           {formatCurrency(lineTotal, currency)}
@@ -1303,15 +1434,15 @@ export function InvoiceModal({
             {/* Totals Breakdown & Terms/Payment Details */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2">
               <div className="w-full sm:w-1/2 space-y-3 text-xs">
-                {invoiceNotes && (
+                {isValidDocumentText(invoiceNotes) && (
                   <div>
                     <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
                       Notes:
                     </span>
-                    <p className="text-slate-600 mt-0.5 leading-relaxed">{invoiceNotes}</p>
+                    <p className="text-slate-600 mt-0.5 leading-relaxed">{invoiceNotes.trim()}</p>
                   </div>
                 )}
-                {Boolean(invoiceTerms && invoiceTerms.trim()) && (
+                {isValidDocumentText(invoiceTerms) && (
                   <div>
                     <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
                       Terms & Conditions:
@@ -1330,7 +1461,7 @@ export function InvoiceModal({
 
               <div className="w-full sm:w-5/12 space-y-2 text-xs rounded-xl bg-slate-50 p-4 border border-slate-200">
                 <div className="flex justify-between text-slate-600">
-                  <span>Subtotal</span>
+                  <span>{taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal'}</span>
                   <span className="font-semibold text-slate-800">
                     {formatCurrency(subtotal, currency)}
                   </span>
@@ -1341,14 +1472,23 @@ export function InvoiceModal({
                     <span className="font-semibold">-{formatCurrency(discountAmount, currency)}</span>
                   </div>
                 )}
-                {taxAmount > 0 && (
+                {calculated.tax_breakdown.length > 0 ? (
+                  calculated.tax_breakdown.map((tb, idx) => (
+                    <div key={idx} className="flex justify-between text-slate-600">
+                      <span>{tb.label}</span>
+                      <span className="font-semibold text-slate-800">
+                        {formatCurrency(tb.amount, currency)}
+                      </span>
+                    </div>
+                  ))
+                ) : taxAmount > 0 ? (
                   <div className="flex justify-between text-slate-600">
-                    <span>Tax Amount</span>
+                    <span>Tax {taxMode === 'inclusive' ? '(Included)' : ''}</span>
                     <span className="font-semibold text-slate-800">
                       {formatCurrency(taxAmount, currency)}
                     </span>
                   </div>
-                )}
+                ) : null}
                 <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm">
                   <span className="font-bold text-slate-900">Total Amount</span>
                   <span className="text-xl font-black text-indigo-700">

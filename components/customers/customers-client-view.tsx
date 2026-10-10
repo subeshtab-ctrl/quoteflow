@@ -31,6 +31,7 @@ import {
   formatPhoneNumber,
   splitPhoneNumber,
 } from '@/lib/country-codes';
+import { INDIAN_STATES, findIndianState } from '@/lib/tax/india-gst';
 
 export function CustomersClientView({
   initialCustomers,
@@ -76,6 +77,7 @@ export function CustomersClientView({
   const [email, setEmail] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
+  const [placeOfSupply, setPlaceOfSupply] = useState('');
   const [taxNumber, setTaxNumber] = useState('');
   const [billingAddress, setBillingAddress] = useState('');
 
@@ -92,6 +94,7 @@ export function CustomersClientView({
   const [editEmail, setEditEmail] = useState('');
   const [editCity, setEditCity] = useState('');
   const [editState, setEditState] = useState('');
+  const [editPlaceOfSupply, setEditPlaceOfSupply] = useState('');
   const [editTaxNumber, setEditTaxNumber] = useState('');
   const [editBillingAddress, setEditBillingAddress] = useState('');
 
@@ -112,8 +115,9 @@ export function CustomersClientView({
         : '';
     setEditEmail(cleanEmail);
     setEditCity(cust.city || '');
-    setEditState(cust.state || '');
-    setEditTaxNumber(cust.tax_number || '');
+    setEditState(cust.billing_state || cust.state || '');
+    setEditPlaceOfSupply(cust.place_of_supply || cust.billing_state || cust.state || '');
+    setEditTaxNumber(cust.customer_gstin || cust.tax_number || '');
     setEditBillingAddress(cust.billing_address || '');
     setEditError(null);
     setIsEditOpen(true);
@@ -137,6 +141,11 @@ export function CustomersClientView({
       return;
     }
 
+    const matchedState = findIndianState(editState.trim());
+    const effectiveState = matchedState ? matchedState.name : editState.trim();
+    const effectiveStateCode = matchedState ? matchedState.code : undefined;
+    const effectivePos = editPlaceOfSupply.trim() || effectiveState;
+
     setIsUpdating(true);
     try {
       const res = await fetch(`/api/customers/${editingCustomer.id}`, {
@@ -149,8 +158,12 @@ export function CustomersClientView({
           phone: cleanPhone || '',
           email: cleanEmail || '',
           city: editCity.trim() || undefined,
-          state: editState.trim() || undefined,
-          tax_number: editTaxNumber.trim() || undefined,
+          state: effectiveState || undefined,
+          billing_state: effectiveState || undefined,
+          state_code: effectiveStateCode,
+          place_of_supply: effectivePos || undefined,
+          tax_number: editTaxNumber.trim().toUpperCase() || undefined,
+          customer_gstin: editTaxNumber.trim().toUpperCase() || undefined,
           billing_address: editBillingAddress.trim() || undefined,
         }),
       });
@@ -222,6 +235,11 @@ export function CustomersClientView({
       return;
     }
 
+    const matchedState = findIndianState(state.trim());
+    const effectiveState = matchedState ? matchedState.name : state.trim();
+    const effectiveStateCode = matchedState ? matchedState.code : undefined;
+    const effectivePos = placeOfSupply.trim() || effectiveState;
+
     setIsLoading(true);
     try {
       const res = await fetch('/api/customers', {
@@ -234,8 +252,12 @@ export function CustomersClientView({
           phone: cleanPhone || undefined,
           email: cleanEmail || undefined,
           city: city.trim() || undefined,
-          state: state.trim() || undefined,
-          tax_number: taxNumber.trim() || undefined,
+          state: effectiveState || undefined,
+          billing_state: effectiveState || undefined,
+          state_code: effectiveStateCode,
+          place_of_supply: effectivePos || undefined,
+          tax_number: taxNumber.trim().toUpperCase() || undefined,
+          customer_gstin: taxNumber.trim().toUpperCase() || undefined,
           billing_address: billingAddress.trim() || undefined,
         }),
       });
@@ -255,6 +277,7 @@ export function CustomersClientView({
       setEmail('');
       setCity('');
       setState('');
+      setPlaceOfSupply('');
       setTaxNumber('');
       setBillingAddress('');
     } catch (err: any) {
@@ -522,24 +545,58 @@ export function CustomersClientView({
           </div>
 
           {/* Section 3: Billing & Tax Details */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <datalist id="indian-states-datalist">
+            {INDIAN_STATES.map((st) => (
+              <option key={st.code} value={st.name}>
+                {st.code} - {st.name}
+              </option>
+            ))}
+          </datalist>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="City"
               value={city}
               onChange={(e) => setCity(e.target.value)}
               placeholder="e.g. Kochi"
             />
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Billing State {findIndianState(state) ? `(Code: ${findIndianState(state)?.code})` : ''}
+              </label>
+              <input
+                type="text"
+                list="indian-states-datalist"
+                value={state}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setState(val);
+                  if (!placeOfSupply || placeOfSupply === state) {
+                    setPlaceOfSupply(val);
+                  }
+                }}
+                placeholder="e.g. Kerala"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Place of Supply (GST)
+              </label>
+              <input
+                type="text"
+                list="indian-states-datalist"
+                value={placeOfSupply}
+                onChange={(e) => setPlaceOfSupply(e.target.value)}
+                placeholder="Defaults to Billing State"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
             <Input
-              label="State"
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-              placeholder="e.g. Kerala"
-            />
-            <Input
-              label="Tax / GST ID"
+              label="Customer GSTIN / Tax ID"
               value={taxNumber}
-              onChange={(e) => setTaxNumber(e.target.value)}
-              placeholder="GSTIN"
+              onChange={(e) => setTaxNumber(e.target.value.toUpperCase())}
+              placeholder="e.g. 32AABCU9603R1ZM"
             />
           </div>
 
@@ -641,24 +698,50 @@ export function CustomersClientView({
           </div>
 
           {/* Section 3: Billing & Tax Details */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="City"
               value={editCity}
               onChange={(e) => setEditCity(e.target.value)}
               placeholder="e.g. Kochi"
             />
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Billing State {findIndianState(editState) ? `(Code: ${findIndianState(editState)?.code})` : ''}
+              </label>
+              <input
+                type="text"
+                list="indian-states-datalist"
+                value={editState}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEditState(val);
+                  if (!editPlaceOfSupply || editPlaceOfSupply === editState) {
+                    setEditPlaceOfSupply(val);
+                  }
+                }}
+                placeholder="e.g. Kerala"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Place of Supply (GST)
+              </label>
+              <input
+                type="text"
+                list="indian-states-datalist"
+                value={editPlaceOfSupply}
+                onChange={(e) => setEditPlaceOfSupply(e.target.value)}
+                placeholder="Defaults to Billing State"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
             <Input
-              label="State"
-              value={editState}
-              onChange={(e) => setEditState(e.target.value)}
-              placeholder="e.g. Kerala"
-            />
-            <Input
-              label="Tax / GST ID"
+              label="Customer GSTIN / Tax ID"
               value={editTaxNumber}
-              onChange={(e) => setEditTaxNumber(e.target.value)}
-              placeholder="GSTIN"
+              onChange={(e) => setEditTaxNumber(e.target.value.toUpperCase())}
+              placeholder="e.g. 32AABCU9603R1ZM"
             />
           </div>
 

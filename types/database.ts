@@ -15,6 +15,7 @@ export type QuotationStatus =
   | 'CANCELLED';
 
 export type TaxSystem = 'GST' | 'VAT' | 'SALES_TAX' | 'CUSTOM';
+export type TaxMode = 'exclusive' | 'inclusive';
 export type InvoiceStatus =
   | 'DRAFT'
   | 'ISSUED'
@@ -98,10 +99,18 @@ export interface Organization {
   state?: string | null;
   country?: string | null;
   tax_system?: TaxSystem | string | null;
+  tax_label?: string | null;
   tax_id_label?: string | null;
   goods_classification_label?: string | null;
   service_classification_label?: string | null;
   tax_rate_type?: 'INTRASTATE_INTERSTATE' | 'SINGLE';
+  default_tax_mode?: TaxMode;
+  gst_registered?: boolean;
+  gstin?: string | null;
+  business_state?: string | null;
+  state_code?: string | null;
+  default_gst_rate?: number;
+  hsn_sac_enabled?: boolean;
   postal_code?: string | null;
   logo_url?: string | null;
   brand_color?: string | null;
@@ -184,6 +193,10 @@ export interface Customer {
   country?: string;
   postal_code?: string;
   tax_number?: string;
+  customer_gstin?: string;
+  billing_state?: string;
+  state_code?: string;
+  place_of_supply?: string;
   notes?: string;
   environment?: 'test' | 'live';
   is_demo?: boolean;
@@ -239,9 +252,11 @@ export interface QuotationItem {
   unit_price: number;
   discount_type: DiscountType;
   discount_value: number;
+  discount_percent?: number;
   discount_amount: number;
   tax_rate: number;
   tax_amount: number;
+  tax_mode?: TaxMode;
   line_total: number;
   sort_order: number;
   item_type?: 'GOODS' | 'SERVICE';
@@ -337,6 +352,20 @@ export interface Quotation {
   discount_amount: number;
   tax_rate: number;
   tax_amount: number;
+  tax_mode?: TaxMode;
+  tax_name?: string | null;
+  taxable_subtotal?: number;
+  place_of_supply?: string | null;
+  supplier_state?: string | null;
+  supplier_gstin?: string | null;
+  customer_gstin?: string | null;
+  cgst_rate?: number;
+  cgst_amount?: number;
+  sgst_rate?: number;
+  sgst_amount?: number;
+  igst_rate?: number;
+  igst_amount?: number;
+  tax_breakdown?: InvoiceTaxBreakdown[];
   grand_total: number;
   notes?: string | null;
   terms_conditions?: string | null;
@@ -428,9 +457,11 @@ export interface InvoiceItem {
   unit_price: number;
   discount_type?: DiscountType;
   discount_value?: number;
+  discount_percent?: number;
   discount_amount?: number;
   tax_rate: number;
   tax_amount: number;
+  tax_mode?: TaxMode;
   line_total: number;
   sort_order: number;
   item_type?: 'GOODS' | 'SERVICE';
@@ -448,8 +479,10 @@ export interface InvoiceItem {
 
 export interface InvoiceTaxBreakdown {
   label: string;
+  name?: string;
   rate: number;
   amount: number;
+  is_inclusive?: boolean;
 }
 
 export interface Invoice {
@@ -474,6 +507,19 @@ export interface Invoice {
   discount_amount?: number;
   tax_rate: number;
   tax_amount: number;
+  tax_mode?: TaxMode;
+  tax_name?: string | null;
+  taxable_subtotal?: number;
+  place_of_supply?: string | null;
+  supplier_state?: string | null;
+  supplier_gstin?: string | null;
+  customer_gstin?: string | null;
+  cgst_rate?: number;
+  cgst_amount?: number;
+  sgst_rate?: number;
+  sgst_amount?: number;
+  igst_rate?: number;
+  igst_amount?: number;
   grand_total: number;
   tax_breakdown?: InvoiceTaxBreakdown[];
   notes?: string | null;
