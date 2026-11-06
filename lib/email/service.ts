@@ -1621,6 +1621,62 @@ export function generateAdminOtpEmail(params: {
 }
 
 /**
+ * Generate branded Admin Password Reset email with 6-digit verification code
+ */
+export function generateAdminPasswordResetEmail(params: {
+  email: string;
+  otpCode: string;
+}): EmailPayload {
+  const safeOtpCode = escapeHtml(params.otpCode);
+  const subject = `QuoteFlow Admin Password Reset Code: ${params.otpCode}`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0b0f19; color: #f1f5f9; margin: 0; padding: 24px; }
+          .card { max-width: 500px; margin: 0 auto; background: #111827; border-radius: 16px; padding: 36px; border: 1px solid #374151; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
+          .badge { display: inline-block; background: #ec4899; color: #ffffff; padding: 4px 12px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+          .code-box { background: #1f2937; border: 2px dashed #ec4899; border-radius: 12px; padding: 20px; text-align: center; margin: 24px 0; }
+          .code-digits { font-size: 38px; font-weight: 900; letter-spacing: 10px; color: #f472b6; font-family: monospace; }
+          .note { font-size: 13px; color: #9ca3af; line-height: 1.6; }
+          .footer { font-size: 12px; color: #6b7280; margin-top: 32px; border-top: 1px solid #1f2937; padding-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="badge">Password Reset</div>
+          <h2 style="margin: 0 0 10px 0; font-size: 22px; font-weight: 800; color: #ffffff;">Reset Admin Password</h2>
+          <p class="note">
+            A password reset request was initiated for your QuoteFlow Developer Admin account. Use this single-use 6-digit verification code to set your new password:
+          </p>
+          <div class="code-box">
+            <div style="font-size: 11px; font-weight: 700; color: #f472b6; margin-bottom: 8px; text-transform: uppercase;">Reset Code (Expires in 10 mins)</div>
+            <div class="code-digits">${safeOtpCode}</div>
+          </div>
+          <p class="note" style="font-size: 12px;">
+            If you did not initiate this request, you can safely ignore this email; your existing password will remain unchanged.
+          </p>
+          <div class="footer">
+            <p>QuoteFlow Platform © 2026 • Developer Operations Console</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  return {
+    to: params.email,
+    fromName: 'QuoteFlow Admin Security',
+    subject,
+    html,
+    text: `QuoteFlow Admin Password Reset Code: ${params.otpCode}\n\nEnter this code on blendandbold.com/admin to reset your password. Valid for 10 minutes.`,
+  };
+}
+
+/**
  * High-level helper to safely dispatch a quotation notification or follow-up email to a customer
  */
 export async function sendQuotationEmail(

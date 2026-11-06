@@ -70,7 +70,7 @@ export const DEFAULT_OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
  */
 export function generateSecureOtp(
   target: string,
-  type: 'VERIFICATION' | 'PASSWORD_RESET' | 'ADMIN' = 'VERIFICATION',
+  type: 'VERIFICATION' | 'PASSWORD_RESET' | 'ADMIN' | 'ADMIN_RESET' = 'VERIFICATION',
   maxAttempts: number = 5,
   expiryMs: number = DEFAULT_OTP_EXPIRY_MS
 ): { otp: string; expiresAt: number } {
@@ -110,7 +110,7 @@ export function generateSecureOtp(
 export function verifySecureOtp(
   target: string,
   inputOtp: string,
-  type: 'VERIFICATION' | 'PASSWORD_RESET' | 'ADMIN' = 'VERIFICATION'
+  type: 'VERIFICATION' | 'PASSWORD_RESET' | 'ADMIN' | 'ADMIN_RESET' = 'VERIFICATION'
 ): {
   valid: boolean;
   reason?: 'NOT_FOUND' | 'EXPIRED' | 'MAX_ATTEMPTS' | 'ALREADY_USED' | 'INVALID';
