@@ -4,7 +4,10 @@ import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 export async function POST() {
   const auth = await getAuthenticatedUserContext();
-  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  if (!auth || !auth.orgId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const orgId = auth.orgId;
   await store.markAllNotificationsRead(orgId);
   return NextResponse.json({ success: true });
 }

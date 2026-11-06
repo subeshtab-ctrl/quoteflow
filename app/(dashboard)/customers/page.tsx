@@ -15,15 +15,20 @@ export default async function CustomersPage() {
   const organization = await store.getOrganization(orgId);
   const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
 
-  const customers = await store.getCustomers(orgId, { environment: env });
-  const quotations = await store.getQuotations(orgId, { environment: env });
+  const [customers, quotations, invoices] = await Promise.all([
+    store.getCustomers(orgId, { environment: env }),
+    store.getQuotations(orgId, { environment: env }),
+    store.getInvoices(orgId, { environment: env }),
+  ]);
 
   return (
     <DashboardLayout>
       <CustomersClientView
         initialCustomers={customers}
         quotations={quotations}
-        organizationCountry={organization?.country}
+        invoices={invoices}
+        organization={organization}
+        organizationCountry={organization?.business_country || organization?.country}
       />
     </DashboardLayout>
   );

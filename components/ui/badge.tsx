@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { QuotationStatus, InvoiceStatus } from '@/types/database';
+import { checkQuotationInProgressOverdue } from '@/lib/quotations/timeline';
 
 interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: 'default' | 'secondary' | 'outline' | 'success' | 'warning' | 'destructive' | 'purple' | 'emerald' | 'cyan';
@@ -40,6 +41,9 @@ export function StatusBadge({
   completedUnpaid,
   paymentStatus,
   paidAmount,
+  isOverdue,
+  quotation,
+  hideWarning = false,
 }: {
   status: QuotationStatus | string;
   className?: string;
@@ -47,13 +51,26 @@ export function StatusBadge({
   completedUnpaid?: boolean;
   paymentStatus?: string;
   paidAmount?: number;
+  isOverdue?: boolean;
+  quotation?: {
+    status?: string;
+    in_progress_at?: string | null;
+    estimated_days?: number | null;
+    estimated_completion_date?: string | null;
+    estimated_time_text?: string | null;
+    updated_at?: string | null;
+  } | null;
+  hideWarning?: boolean;
 }) {
   const isPartiallyPaid =
     !isPaid && (paymentStatus === 'PARTIALLY_PAID' || (paidAmount !== undefined && paidAmount > 0));
 
+  const overdueInfo = !hideWarning && quotation ? checkQuotationInProgressOverdue(quotation) : null;
+  const isOverdueState = !hideWarning && (isOverdue ?? Boolean(overdueInfo?.isOverdue));
+
   switch (status) {
     case 'COMPLETED':
-      if (isPaid === false || completedUnpaid === true) {
+      if (!isPaid) {
         if (isPartiallyPaid) {
           return (
             <Badge
@@ -124,6 +141,21 @@ export function StatusBadge({
         </Badge>
       );
     case 'IN_PROGRESS':
+      if (isOverdueState) {
+        return (
+          <Badge
+            variant="warning"
+            className={cn(
+              'bg-amber-100/90 text-amber-900 border-amber-300 dark:bg-amber-950/80 dark:text-amber-200 dark:border-amber-700 font-bold',
+              className
+            )}
+            title={overdueInfo?.overdueText ? `Timeline Overdue (${overdueInfo.overdueText})` : 'Timeline Overdue'}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+            In Progress
+          </Badge>
+        );
+      }
       return (
         <Badge
           variant="cyan"

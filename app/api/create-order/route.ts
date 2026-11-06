@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { razorpayService } from '@/lib/billing/razorpay';
 import { DEFAULT_PLANS } from '@/lib/billing/subscription-service';
+import { SUBSCRIPTION_CONFIG } from '@/lib/billing/subscription-config';
 import { syncCloudAdminConfig } from '@/lib/billing/dev-admin-auth';
 
 export async function POST(req: NextRequest) {
@@ -18,10 +19,7 @@ export async function POST(req: NextRequest) {
     const planSlug = body.plan_slug;
 
     // Never trust client-submitted amount. Determine strictly server-side.
-    let amount = DEFAULT_PLANS.STANDARD_199.amount; // default 19900 paise (₹199)
-    if (planSlug === 'promo_99') {
-      amount = DEFAULT_PLANS.PROMO_99.amount; // 9900 paise (₹99)
-    }
+    const amount = SUBSCRIPTION_CONFIG.INDIA.amountPaise; // 14900 paise (₹149)
 
     if (amount < 100) {
       return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });

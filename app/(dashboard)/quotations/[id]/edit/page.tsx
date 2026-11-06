@@ -30,8 +30,8 @@ export default async function EditQuotationPage({ params }: EditQuotationPagePro
     notFound();
   }
 
-  // If already approved or completed, direct editing is locked
-  if (quote.status === 'APPROVED' || quote.status === 'PAYMENT_COMPLETED' || quote.status === 'COMPLETED') {
+  // If already completed, direct editing is locked (completed quotes cannot be edited)
+  if (quote.status === 'COMPLETED' || quote.status === 'PAYMENT_COMPLETED') {
     redirect(`/quotations/${id}`);
   }
 

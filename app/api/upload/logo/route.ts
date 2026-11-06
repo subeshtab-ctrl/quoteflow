@@ -8,7 +8,10 @@ import path from 'path';
 export async function POST(req: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const supabase = createAdminClient();
 
     const contentType = req.headers.get('content-type') || '';
@@ -120,7 +123,10 @@ export async function POST(req: NextRequest) {
 export async function DELETE() {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
 
     // Reset logo in store
     await store.updateOrganization(orgId, {

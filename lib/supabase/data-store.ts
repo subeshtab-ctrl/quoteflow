@@ -36,8 +36,25 @@ import {
   SupportTicketMessage,
   SupportTicketAttachment,
   AdminAuditLog,
+  PaymentCountryRule,
+  PaymentEvent,
+  WhatsAppConnection,
+  WhatsAppTemplate,
+  WhatsAppMessage,
+  WhatsAppMessageStatus,
+  DeletedQuotationRecord,
+  PersistentRecommendationRecord,
+  RecommendationStatus,
+  RecommendationActionTaken,
+  RecommendationResolvedReason,
 } from '@/types/database';
-import { calculateQuotationTotals } from '@/lib/quotations/calculations';
+import {
+  ALL_COUNTRIES,
+  getDefaultCountryRules,
+  findCountry,
+  getBillingDetailsForCountry,
+} from '@/lib/billing/country-rules';
+import { calculateQuotationTotals, harmonizePaymentTerms, harmonizeTermsAndConditions } from '@/lib/quotations/calculations';
 import { generateDocumentHash, generateSecureToken, hashToken } from '@/lib/quotations/tokens';
 import { createAdminClient } from '@/lib/supabase/service-role';
 import fs from 'fs';
@@ -45,6 +62,17 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { cleanPhoneNumber, getDefaultCountryCode, splitPhoneNumber, formatPhoneNumber } from '@/lib/country-codes';
+
+export const isCloudflareWorker =
+  typeof window !== 'undefined' ||
+  process.env.NEXT_RUNTIME === 'edge' ||
+  Boolean(process.env.CF_PAGES) ||
+  Boolean(process.env.CLOUDFLARE_WORKER) ||
+  (typeof navigator !== 'undefined' && (navigator.userAgent === 'Cloudflare-Workers' || navigator.userAgent?.includes('Cloudflare'))) ||
+  (typeof globalThis !== 'undefined' && (
+    typeof (globalThis as any).WebSocketPair !== 'undefined' ||
+    typeof (globalThis as any).Cloudflare !== 'undefined'
+  ));
 
 // Default Demo Organization
 export const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -124,6 +152,25 @@ class QuoteFlowStore {
   private adminAuditLogs: AdminAuditLog[] = [];
   private ticketCounter: number = 0;
   private reminderLogs: Map<string, Set<string>> = new Map();
+  private deletedQuotations: Map<string, DeletedQuotationRecord> = new Map();
+  private recommendations: Map<string, PersistentRecommendationRecord> = new Map();
+  private whatsappConnections: Map<string, WhatsAppConnection> = new Map();
+  private whatsappTemplates: Map<string, WhatsAppTemplate[]> = new Map();
+  private whatsappMessages: Map<string, WhatsAppMessage[]> = new Map();
+  // Fast In-Memory File Cache to prevent repeated fs.readFileSync/JSON.parse and eliminate CPU spikes on Cloudflare Workers
+  private cachedOrgSettings: Record<string, Partial<Organization> & Record<string, any>> | null = null;
+  private cachedPayments: Record<string, any> | null = null;
+  private cachedPaymentSettings: Record<string, Partial<Organization>> | null = null;
+  private cachedInvoices: Invoice[] | null = null;
+  private cachedSubscriptions: Record<string, BusinessSubscription> | null = null;
+  private cachedSubscriptionPayments: SubscriptionPayment[] | null = null;
+  private cachedSupportTickets: Record<string, SupportTicket> | null = null;
+  private cachedTestUsage: Record<string, { usage_date: string; orders_created: number }> = {};
+  private cachedTestEmails: TestEmailRecord[] = [];
+  private cachedReminderLogs: Record<string, string[]> = {};
+  private cachedAdminAuditLogs: AdminAuditLog[] = [];
+  private cachedPaymentCountryRules: PaymentCountryRule[] = [];
+  private cachedPaymentEvents: PaymentEvent[] = [];
 
   public getDemoQuotation(): Quotation {
     const existing = this.quotations.get(DEMO_PORTAL_QUOTE_ID);
@@ -330,6 +377,7 @@ class QuoteFlowStore {
   }
 
   private getOrgSettingsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try {
@@ -340,9 +388,16 @@ class QuoteFlowStore {
   }
 
   private loadOrgSettingsFromFile(): Record<string, Partial<Organization> & Record<string, any>> {
+    if (this.cachedOrgSettings !== null) {
+      return this.cachedOrgSettings;
+    }
+    if (isCloudflareWorker) {
+      this.cachedOrgSettings = {};
+      return {};
+    }
     try {
       const p = this.getOrgSettingsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         const parsed = JSON.parse(raw) || {};
         const result: Record<string, Partial<Organization> & Record<string, any>> = {};
@@ -359,9 +414,11 @@ class QuoteFlowStore {
             };
           }
         }
+        this.cachedOrgSettings = result;
         return result;
       }
     } catch {}
+    this.cachedOrgSettings = {};
     return {};
   }
 
@@ -397,13 +454,24 @@ class QuoteFlowStore {
         ...(data.current_test_invoice_counter !== undefined ? { current_test_invoice_counter: data.current_test_invoice_counter } : {}),
         ...(data.current_test_quotation_counter !== undefined ? { current_test_quotation_counter: data.current_test_quotation_counter } : {}),
         ...(data.brand_color !== undefined ? { brand_color: data.brand_color } : {}),
+        ...(data.business_country !== undefined ? { business_country: data.business_country } : {}),
+        ...(data.business_country_name !== undefined ? { business_country_name: data.business_country_name } : {}),
+        ...(data.billing_region !== undefined ? { billing_region: data.billing_region } : {}),
+        ...(data.billing_currency !== undefined ? { billing_currency: data.billing_currency } : {}),
+        ...(data.payment_provider !== undefined ? { payment_provider: data.payment_provider } : {}),
+        ...(data.country_locked !== undefined ? { country_locked: Boolean(data.country_locked) } : {}),
+        ...(data.country_pending_change !== undefined ? { country_pending_change: data.country_pending_change } : {}),
       };
-      fs.writeFileSync(this.getOrgSettingsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
+      this.cachedOrgSettings = all;
+      if (isCloudflareWorker) return;
+      const p = this.getOrgSettingsFilePath();
+      if (p) fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
     } catch {}
   }
 
   // ---- TEST USAGE (quota: 20 orders/day per org) ----
   private getTestUsageFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -412,9 +480,10 @@ class QuoteFlowStore {
   }
 
   private loadTestUsageFromFile(): Record<string, { usage_date: string; orders_created: number }> {
+    if (isCloudflareWorker) return this.cachedTestUsage;
     try {
       const p = this.getTestUsageFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         return JSON.parse(raw) || {};
       }
@@ -423,8 +492,11 @@ class QuoteFlowStore {
   }
 
   private saveTestUsageToFile(data: Record<string, { usage_date: string; orders_created: number }>): void {
+    this.cachedTestUsage = data;
+    if (isCloudflareWorker) return;
     try {
-      fs.writeFileSync(this.getTestUsageFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+      const p = this.getTestUsageFilePath();
+      if (p) fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
     } catch {}
   }
 
@@ -473,6 +545,7 @@ class QuoteFlowStore {
 
   // ---- TEST SIMULATED EMAILS ----
   private getTestEmailsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -481,9 +554,10 @@ class QuoteFlowStore {
   }
 
   private loadTestEmailsFromFile(): TestEmailRecord[] {
+    if (isCloudflareWorker) return this.cachedTestEmails;
     try {
       const p = this.getTestEmailsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         return JSON.parse(raw) || [];
       }
@@ -492,8 +566,11 @@ class QuoteFlowStore {
   }
 
   private saveTestEmailsToFile(emails: TestEmailRecord[]): void {
+    this.cachedTestEmails = emails;
+    if (isCloudflareWorker) return;
     try {
-      fs.writeFileSync(this.getTestEmailsFilePath(), JSON.stringify(emails, null, 2), 'utf-8');
+      const p = this.getTestEmailsFilePath();
+      if (p) fs.writeFileSync(p, JSON.stringify(emails, null, 2), 'utf-8');
     } catch {}
   }
 
@@ -528,6 +605,7 @@ class QuoteFlowStore {
 
 
   private getPaymentSettingsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try {
@@ -539,13 +617,22 @@ class QuoteFlowStore {
 
 
   private loadPaymentSettingsFromFile(): Record<string, Partial<Organization>> {
+    if (this.cachedPaymentSettings !== null) {
+      return this.cachedPaymentSettings;
+    }
+    if (isCloudflareWorker) {
+      this.cachedPaymentSettings = {};
+      return {};
+    }
     try {
       const p = this.getPaymentSettingsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || {};
+        this.cachedPaymentSettings = JSON.parse(raw) || {};
+        return this.cachedPaymentSettings!;
       }
     } catch {}
+    this.cachedPaymentSettings = {};
     return {};
   }
 
@@ -560,6 +647,9 @@ class QuoteFlowStore {
         ...(data.default_payment_display_mode !== undefined ? { default_payment_display_mode: data.default_payment_display_mode } : {}),
         ...(data.default_show_bank_details !== undefined ? { default_show_bank_details: data.default_show_bank_details } : {}),
         ...(data.default_show_upi_details !== undefined ? { default_show_upi_details: data.default_show_upi_details } : {}),
+        ...(data.default_show_payment_link !== undefined ? { default_show_payment_link: data.default_show_payment_link } : {}),
+        ...(data.default_payment_link !== undefined ? { default_payment_link: data.default_payment_link } : {}),
+        ...(data.default_payment_link_label !== undefined ? { default_payment_link_label: data.default_payment_link_label } : {}),
         ...(data.default_show_crypto_details !== undefined ? { default_show_crypto_details: data.default_show_crypto_details } : {}),
         ...(data.default_tax_mode !== undefined ? { default_tax_mode: data.default_tax_mode } : {}),
         ...(data.gst_registered !== undefined ? { gst_registered: data.gst_registered } : {}),
@@ -569,14 +659,17 @@ class QuoteFlowStore {
         ...(data.default_gst_rate !== undefined ? { default_gst_rate: data.default_gst_rate } : {}),
         ...(data.hsn_sac_enabled !== undefined ? { hsn_sac_enabled: data.hsn_sac_enabled } : {}),
       };
+      this.cachedPaymentSettings = all;
+      if (isCloudflareWorker) return;
       const p = this.getPaymentSettingsFilePath();
-      fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+      if (p) fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
     } catch (e) {
       console.warn('Failed to save payment settings to file:', e);
     }
   }
 
   private getPaymentsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try {
@@ -623,15 +716,24 @@ class QuoteFlowStore {
       payment_records?: PaymentRecord[];
     }
   > {
+    if (this.cachedPayments !== null) {
+      return this.cachedPayments;
+    }
+    if (isCloudflareWorker || typeof window !== 'undefined' || process.env.NEXT_RUNTIME === 'edge' || !fs?.existsSync) {
+      this.cachedPayments = {};
+      return {};
+    }
     try {
       const p = this.getPaymentsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || {};
+        this.cachedPayments = JSON.parse(raw) || {};
+        return this.cachedPayments!;
       }
     } catch {
       // Fallback
     }
+    this.cachedPayments = {};
     return {};
   }
 
@@ -654,11 +756,14 @@ class QuoteFlowStore {
       payment_display_mode?: PaymentDisplayMode;
       show_bank_details?: boolean;
       show_upi_details?: boolean;
+      show_payment_link?: boolean;
       show_cash_details?: boolean;
       show_crypto_details?: boolean;
       cash_instructions?: string | null;
       bank_details?: BankAccountDetails | null;
       upi_details?: UpiPaymentDetails | null;
+      payment_link?: string | null;
+      payment_link_label?: string | null;
       crypto_details?: CryptoPaymentDetails | null;
       payment_terms_instructions?: string | null;
       accepted_payment_methods?: string[] | null;
@@ -678,8 +783,10 @@ class QuoteFlowStore {
         ...(all[quotationId] || {}),
         ...data,
       };
+      this.cachedPayments = all;
+      if (isCloudflareWorker) return;
       const p = this.getPaymentsFilePath();
-      fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+      if (p) fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
     } catch {
       // Fallback
     }
@@ -708,10 +815,15 @@ class QuoteFlowStore {
     payment_display_mode?: PaymentDisplayMode;
     show_bank_details?: boolean;
     show_upi_details?: boolean;
+    show_payment_link?: boolean;
     show_crypto_details?: boolean;
+    show_cash_details?: boolean;
     bank_details?: BankAccountDetails | null;
     upi_details?: UpiPaymentDetails | null;
+    payment_link?: string | null;
+    payment_link_label?: string | null;
     crypto_details?: CryptoPaymentDetails | null;
+    cash_instructions?: string | null;
     payment_terms_instructions?: string | null;
     accepted_payment_methods?: string[] | null;
     payment_records?: any[];
@@ -754,6 +866,11 @@ class QuoteFlowStore {
         ? Boolean(configMeta.show_upi_details)
         : (filePayment?.show_upi_details ?? existingQuote?.show_upi_details);
 
+    let showPaymentLink =
+      configMeta.show_payment_link !== undefined
+        ? Boolean(configMeta.show_payment_link)
+        : (filePayment?.show_payment_link ?? existingQuote?.show_payment_link);
+
     let showCrypto =
       configMeta.show_crypto_details !== undefined
         ? Boolean(configMeta.show_crypto_details)
@@ -767,31 +884,43 @@ class QuoteFlowStore {
     if (paymentDisplayMode === 'CRYPTO_ONLY') {
       showBank = false;
       showUpi = false;
+      showPaymentLink = false;
       showCash = false;
       showCrypto = true;
     } else if (paymentDisplayMode === 'BANK_ONLY') {
       showBank = true;
       showUpi = false;
+      showPaymentLink = false;
       showCash = false;
       showCrypto = false;
     } else if (paymentDisplayMode === 'UPI_ONLY') {
       showBank = false;
       showUpi = true;
+      showPaymentLink = false;
+      showCash = false;
+      showCrypto = false;
+    } else if (paymentDisplayMode === 'PAYMENT_LINK_ONLY') {
+      showBank = false;
+      showUpi = false;
+      showPaymentLink = true;
       showCash = false;
       showCrypto = false;
     } else if (paymentDisplayMode === 'BOTH') {
       if (showBank === undefined) showBank = true;
       if (showUpi === undefined) showUpi = true;
+      if (showPaymentLink === undefined) showPaymentLink = false;
       if (showCash === undefined) showCash = false;
       if (showCrypto === undefined) showCrypto = false;
     } else if (paymentDisplayMode === 'ALL') {
       if (showBank === undefined) showBank = true;
       if (showUpi === undefined) showUpi = true;
+      if (showPaymentLink === undefined) showPaymentLink = true;
       if (showCash === undefined) showCash = true;
       if (showCrypto === undefined) showCrypto = true;
     } else {
       if (showBank === undefined) showBank = true;
       if (showUpi === undefined) showUpi = true;
+      if (showPaymentLink === undefined) showPaymentLink = false;
       if (showCash === undefined) showCash = true;
       if (showCrypto === undefined) showCrypto = false;
     }
@@ -800,11 +929,14 @@ class QuoteFlowStore {
       payment_display_mode: paymentDisplayMode,
       show_bank_details: showBank,
       show_upi_details: showUpi,
+      show_payment_link: showPaymentLink,
       show_cash_details: showCash,
       show_crypto_details: showCrypto,
       cash_instructions: configMeta.cash_instructions !== undefined ? configMeta.cash_instructions : (filePayment?.cash_instructions ?? existingQuote?.cash_instructions ?? null),
       bank_details: configMeta.bank_details !== undefined ? configMeta.bank_details : (filePayment?.bank_details ?? existingQuote?.bank_details ?? null),
       upi_details: configMeta.upi_details !== undefined ? configMeta.upi_details : (filePayment?.upi_details ?? existingQuote?.upi_details ?? null),
+      payment_link: configMeta.payment_link !== undefined ? configMeta.payment_link : (filePayment?.payment_link ?? existingQuote?.payment_link ?? null),
+      payment_link_label: configMeta.payment_link_label !== undefined ? configMeta.payment_link_label : (filePayment?.payment_link_label ?? existingQuote?.payment_link_label ?? null),
       crypto_details: configMeta.crypto_details !== undefined ? configMeta.crypto_details : (filePayment?.crypto_details ?? existingQuote?.crypto_details ?? null),
       payment_terms_instructions: configMeta.payment_terms_instructions !== undefined ? configMeta.payment_terms_instructions : (filePayment?.payment_terms_instructions ?? existingQuote?.payment_terms_instructions ?? null),
       accepted_payment_methods: configMeta.accepted_payment_methods !== undefined ? configMeta.accepted_payment_methods : (filePayment?.accepted_payment_methods ?? existingQuote?.accepted_payment_methods ?? null),
@@ -949,6 +1081,7 @@ class QuoteFlowStore {
   }
 
   private getInvoicesFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try {
@@ -959,23 +1092,34 @@ class QuoteFlowStore {
   }
 
   private loadInvoicesFromFile(): Invoice[] {
+    if (this.cachedInvoices !== null) {
+      return this.cachedInvoices;
+    }
+    if (isCloudflareWorker || typeof window !== 'undefined' || process.env.NEXT_RUNTIME === 'edge' || !fs?.existsSync) {
+      this.cachedInvoices = [];
+      return [];
+    }
     try {
       const p = this.getInvoicesFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || [];
+        this.cachedInvoices = JSON.parse(raw) || [];
+        return this.cachedInvoices!;
       }
     } catch {
       // Fallback
     }
+    this.cachedInvoices = [];
     return [];
   }
 
   private saveInvoicesToFile(): void {
     try {
       const all = Array.from(this.invoices.values());
+      this.cachedInvoices = all;
+      if (isCloudflareWorker) return;
       const p = this.getInvoicesFilePath();
-      fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+      if (p) fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
     } catch {
       // Fallback
     }
@@ -1086,13 +1230,15 @@ class QuoteFlowStore {
   }
 
   constructor() {
-    // Load any file-persisted invoices
-    const savedInvoices = this.loadInvoicesFromFile();
-    if (savedInvoices && savedInvoices.length > 0) {
-      for (const inv of savedInvoices) {
-        this.invoices.set(inv.id, inv);
-        if (inv.items) {
-          this.invoiceItems.set(inv.id, inv.items);
+    if (!isCloudflareWorker) {
+      // Load any file-persisted invoices (local development only)
+      const savedInvoices = this.loadInvoicesFromFile();
+      if (savedInvoices && savedInvoices.length > 0) {
+        for (const inv of savedInvoices) {
+          this.invoices.set(inv.id, inv);
+          if (inv.items) {
+            this.invoiceItems.set(inv.id, inv.items);
+          }
         }
       }
     }
@@ -1245,6 +1391,9 @@ class QuoteFlowStore {
       unit: 'days',
       tax_rate: 18,
       is_active: true,
+      hsn_code: '998311',
+      classification_type: 'SAC',
+      category: 'Information Technology',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1258,6 +1407,9 @@ class QuoteFlowStore {
       unit: 'units',
       tax_rate: 18,
       is_active: true,
+      hsn_code: '998717',
+      classification_type: 'SAC',
+      category: 'Maintenance & Repair',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1271,6 +1423,9 @@ class QuoteFlowStore {
       unit: 'licenses',
       tax_rate: 18,
       is_active: true,
+      hsn_code: '998315',
+      classification_type: 'SAC',
+      category: 'Cloud & Hosting',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1284,6 +1439,9 @@ class QuoteFlowStore {
       unit: 'year',
       tax_rate: 18,
       is_active: true,
+      hsn_code: '998719',
+      classification_type: 'SAC',
+      category: 'Maintenance & Repair',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1732,8 +1890,16 @@ class QuoteFlowStore {
           } else if (!data.invoice_footer) {
             data.invoice_footer = `Thank you for partnering with ${compName}.`;
           }
-          const localSettings = this.loadOrgSettingsFromFile()[data.id] || {};
-          const localPayment = this.loadPaymentSettingsFromFile()[data.id] || {};
+          const allOrgSettings = this.loadOrgSettingsFromFile();
+          const allPaymentSettings = this.loadPaymentSettingsFromFile();
+          const localSettings = {
+            ...(allOrgSettings[orgId] || {}),
+            ...(allOrgSettings[data.id] || {}),
+          };
+          const localPayment = {
+            ...(allPaymentSettings[orgId] || {}),
+            ...(allPaymentSettings[data.id] || {}),
+          };
           let remotePayment: any = {};
           try {
             const { data: paySettingTmpl } = await supabase
@@ -1754,23 +1920,23 @@ class QuoteFlowStore {
             require_full_payment_for_invoice:
               localSettings.require_full_payment_for_invoice !== undefined
                 ? localSettings.require_full_payment_for_invoice
-                : ((data as any).require_full_payment_for_invoice ?? true),
+                : (effectivePayment.require_full_payment_for_invoice ?? (data as any).require_full_payment_for_invoice ?? true),
             invoice_prefix:
               localSettings.invoice_prefix !== undefined
                 ? localSettings.invoice_prefix
-                : (data as any).invoice_prefix ?? 'INV',
+                : (effectivePayment.invoice_prefix ?? (data as any).invoice_prefix ?? 'INV'),
             invoice_start_number:
               localSettings.invoice_start_number !== undefined
                 ? localSettings.invoice_start_number
-                : (data as any).invoice_start_number ?? 1,
+                : (effectivePayment.invoice_start_number ?? (data as any).invoice_start_number ?? 1),
             current_invoice_counter:
               localSettings.current_invoice_counter !== undefined
                 ? localSettings.current_invoice_counter
-                : (data as any).current_invoice_counter ?? 0,
+                : (effectivePayment.current_invoice_counter ?? (data as any).current_invoice_counter ?? 0),
             mode:
               localSettings.mode !== undefined
                 ? localSettings.mode
-                : ((data as any).mode || 'live'),
+                : (effectivePayment.mode || (data as any).mode || 'live'),
             current_test_invoice_counter:
               localSettings.current_test_invoice_counter !== undefined
                 ? localSettings.current_test_invoice_counter
@@ -1786,24 +1952,36 @@ class QuoteFlowStore {
             default_show_bank_details: effectivePayment.default_show_bank_details ?? (data as any).default_show_bank_details ?? true,
             default_show_upi_details: effectivePayment.default_show_upi_details ?? (data as any).default_show_upi_details ?? true,
             default_show_crypto_details: effectivePayment.default_show_crypto_details ?? (data as any).default_show_crypto_details ?? false,
+            default_show_cash_details: effectivePayment.default_show_cash_details ?? (data as any).default_show_cash_details ?? true,
+            default_cash_instructions: effectivePayment.default_cash_instructions ?? (data as any).default_cash_instructions ?? '',
             default_tax_mode: localSettings.default_tax_mode ?? effectivePayment.default_tax_mode ?? (data as any).default_tax_mode ?? 'exclusive',
-            default_tax_rate: localSettings.default_tax_rate ?? (data as any).default_tax_rate ?? 18,
+            default_tax_rate: localSettings.default_tax_rate ?? effectivePayment.default_tax_rate ?? (data as any).default_tax_rate ?? 18,
             gst_registered: localSettings.gst_registered ?? effectivePayment.gst_registered ?? (data as any).gst_registered ?? false,
             gstin: localSettings.gstin ?? effectivePayment.gstin ?? (data as any).gstin ?? (data as any).gst_vat_number ?? '',
             business_state: localSettings.business_state ?? effectivePayment.business_state ?? (data as any).business_state ?? (data as any).state ?? '',
             state_code: localSettings.state_code ?? effectivePayment.state_code ?? (data as any).state_code ?? '',
             default_gst_rate: localSettings.default_gst_rate ?? effectivePayment.default_gst_rate ?? (data as any).default_gst_rate ?? 18,
             hsn_sac_enabled: localSettings.hsn_sac_enabled ?? effectivePayment.hsn_sac_enabled ?? (data as any).hsn_sac_enabled ?? true,
-            country: localSettings.country || data.country || 'India',
-            tax_system: localSettings.tax_system || (data as any).tax_system || 'GST',
-            goods_classification_label: localSettings.goods_classification_label || (data as any).goods_classification_label || 'HSN Code',
-            service_classification_label: localSettings.service_classification_label || (data as any).service_classification_label || 'SAC Code',
+            country: localSettings.country || effectivePayment.country || data.country || 'India',
+            tax_system: localSettings.tax_system || effectivePayment.tax_system || (data as any).tax_system || 'GST',
+            tax_id_label: localSettings.tax_id_label || effectivePayment.tax_id_label || (data as any).tax_id_label || '',
+            goods_classification_label: localSettings.goods_classification_label || effectivePayment.goods_classification_label || (data as any).goods_classification_label || 'HSN Code',
+            service_classification_label: localSettings.service_classification_label || effectivePayment.service_classification_label || (data as any).service_classification_label || 'SAC Code',
             default_terms: localSettings.default_terms !== undefined ? localSettings.default_terms : (data as any).default_terms,
-            brand_color: localSettings.brand_color || (data as any).brand_color || '#4f46e5',
+            brand_color: localSettings.brand_color || effectivePayment.brand_color || (data as any).brand_color || '#4f46e5',
             name: localSettings.name || data.name,
-            default_currency: (localSettings.default_currency || data.default_currency || 'INR') as any,
+            default_currency: (localSettings.default_currency || effectivePayment.default_currency || data.default_currency || 'INR') as any,
+            business_country: localSettings.business_country || effectivePayment.business_country || (data as any).business_country || null,
+            business_country_name: localSettings.business_country_name || effectivePayment.business_country_name || (data as any).business_country_name || null,
+            billing_region: localSettings.billing_region || effectivePayment.billing_region || (data as any).billing_region || null,
+            billing_currency: localSettings.billing_currency || effectivePayment.billing_currency || (data as any).billing_currency || null,
+            payment_provider: localSettings.payment_provider || effectivePayment.payment_provider || (data as any).payment_provider || null,
+            country_locked: localSettings.country_locked ?? effectivePayment.country_locked ?? (data as any).country_locked ?? false,
+            country_pending_change: localSettings.country_pending_change ?? effectivePayment.country_pending_change ?? (data as any).country_pending_change ?? null,
+            document_language: localSettings.document_language || effectivePayment.document_language || (data as any).document_language || null,
           } as Organization;
           this.organizations.set(data.id, fullOrg);
+          this.organizations.set(orgId, fullOrg);
           this.orgCacheExpiry.set(data.id, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
           this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
           return fullOrg;
@@ -1854,6 +2032,8 @@ class QuoteFlowStore {
         default_show_bank_details: localPayment.default_show_bank_details ?? cached.default_show_bank_details ?? true,
         default_show_upi_details: localPayment.default_show_upi_details ?? cached.default_show_upi_details ?? true,
         default_show_crypto_details: localPayment.default_show_crypto_details ?? cached.default_show_crypto_details ?? false,
+        default_show_cash_details: localPayment.default_show_cash_details ?? cached.default_show_cash_details ?? true,
+        default_cash_instructions: localPayment.default_cash_instructions ?? cached.default_cash_instructions ?? '',
         default_tax_mode: localSettings.default_tax_mode ?? localPayment.default_tax_mode ?? cached.default_tax_mode ?? 'exclusive',
         default_tax_rate: localSettings.default_tax_rate ?? cached.default_tax_rate ?? 18,
         gst_registered: localSettings.gst_registered ?? localPayment.gst_registered ?? cached.gst_registered ?? false,
@@ -1864,12 +2044,21 @@ class QuoteFlowStore {
         hsn_sac_enabled: localSettings.hsn_sac_enabled ?? localPayment.hsn_sac_enabled ?? cached.hsn_sac_enabled ?? true,
         country: localSettings.country || cached.country || 'India',
         tax_system: localSettings.tax_system || cached.tax_system || 'GST',
+        tax_id_label: localSettings.tax_id_label || cached.tax_id_label || '',
         goods_classification_label: localSettings.goods_classification_label || cached.goods_classification_label || 'HSN Code',
         service_classification_label: localSettings.service_classification_label || cached.service_classification_label || 'SAC Code',
         default_terms: localSettings.default_terms !== undefined ? localSettings.default_terms : cached.default_terms,
         brand_color: localSettings.brand_color || cached.brand_color || '#4f46e5',
         name: localSettings.name || cached.name,
         default_currency: (localSettings.default_currency || cached.default_currency || 'INR') as any,
+        business_country: localSettings.business_country || (cached as any).business_country || null,
+        business_country_name: localSettings.business_country_name || (cached as any).business_country_name || null,
+        billing_region: localSettings.billing_region || (cached as any).billing_region || null,
+        billing_currency: localSettings.billing_currency || (cached as any).billing_currency || null,
+        payment_provider: localSettings.payment_provider || (cached as any).payment_provider || null,
+        country_locked: localSettings.country_locked ?? (cached as any).country_locked ?? false,
+        country_pending_change: localSettings.country_pending_change ?? (cached as any).country_pending_change ?? null,
+        document_language: localSettings.document_language ?? localPayment.document_language ?? (cached as any).document_language ?? null,
       } as Organization;
       this.organizations.set(orgId, resolvedFallback);
       this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
@@ -1905,6 +2094,14 @@ class QuoteFlowStore {
         }
       } catch (err) {
         console.warn('Could not fetch organizations from Supabase:', err);
+      }
+    }
+
+    const allOrgSettings = this.loadOrgSettingsFromFile();
+    for (const [id, item] of map.entries()) {
+      const fileSet = allOrgSettings[id];
+      if (fileSet) {
+        map.set(id, { ...item, ...fileSet });
       }
     }
 
@@ -1967,12 +2164,19 @@ class QuoteFlowStore {
       ...data,
       logo_url: logoUrl,
       invoice_footer: cleanFooter,
+      default_tax_mode: data.default_tax_mode ?? org.default_tax_mode ?? 'exclusive',
       updated_at: new Date().toISOString(),
     };
     this.organizations.set(orgId, updated);
     this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
     this.saveOrgSettingsToFile(orgId, updated);
     this.savePaymentSettingsToFile(orgId, updated);
+    if (org.id && org.id !== orgId) {
+      this.organizations.set(org.id, updated);
+      this.orgCacheExpiry.set(org.id, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
+      this.saveOrgSettingsToFile(org.id, updated);
+      this.savePaymentSettingsToFile(org.id, updated);
+    }
 
     try {
       const supabase = createAdminClient();
@@ -2004,15 +2208,16 @@ class QuoteFlowStore {
           updated_at: new Date().toISOString(),
         };
 
+        const targetDbId = org.id || orgId;
         let { data: saved, error } = await supabase
           .from('organizations')
           .update(dbPayload)
-          .eq('id', orgId)
+          .eq('id', targetDbId)
           .select()
           .maybeSingle();
 
         if (!saved && !error) {
-          const insertPayload = { ...dbPayload, id: orgId };
+          const insertPayload = { ...dbPayload, id: targetDbId };
           const insertRes = await supabase
             .from('organizations')
             .insert(insertPayload)
@@ -2022,7 +2227,7 @@ class QuoteFlowStore {
           error = insertRes.error;
         }
 
-        // Sync payment settings to Supabase templates table
+        // Sync payment & tax settings to Supabase templates table
         const paymentPayload = {
           default_bank_details: updated.default_bank_details,
           default_upi_details: updated.default_upi_details,
@@ -2031,20 +2236,43 @@ class QuoteFlowStore {
           default_show_bank_details: updated.default_show_bank_details,
           default_show_upi_details: updated.default_show_upi_details,
           default_show_crypto_details: updated.default_show_crypto_details,
+          default_show_cash_details: updated.default_show_cash_details,
+          default_cash_instructions: updated.default_cash_instructions,
           default_tax_mode: updated.default_tax_mode,
+          default_tax_rate: updated.default_tax_rate,
+          default_currency: updated.default_currency,
+          country: updated.country,
+          tax_system: updated.tax_system,
+          tax_id_label: updated.tax_id_label,
+          goods_classification_label: updated.goods_classification_label,
+          service_classification_label: updated.service_classification_label,
           gst_registered: updated.gst_registered,
           gstin: updated.gstin,
           business_state: updated.business_state,
           state_code: updated.state_code,
           default_gst_rate: updated.default_gst_rate,
           hsn_sac_enabled: updated.hsn_sac_enabled,
+          require_full_payment_for_invoice: updated.require_full_payment_for_invoice,
+          invoice_prefix: updated.invoice_prefix,
+          invoice_start_number: updated.invoice_start_number,
+          current_invoice_counter: updated.current_invoice_counter,
+          mode: updated.mode,
+          brand_color: updated.brand_color,
+          business_country: updated.business_country,
+          business_country_name: updated.business_country_name,
+          billing_region: updated.billing_region,
+          billing_currency: updated.billing_currency,
+          payment_provider: updated.payment_provider,
+          country_locked: updated.country_locked,
+          country_pending_change: updated.country_pending_change,
+          document_language: updated.document_language,
         };
 
         try {
           const { data: existingTmpl } = await supabase
             .from('templates')
             .select('id')
-            .eq('organization_id', orgId)
+            .eq('organization_id', targetDbId)
             .eq('name', 'SETTINGS:PAYMENT')
             .maybeSingle();
 
@@ -2058,7 +2286,7 @@ class QuoteFlowStore {
               .eq('id', existingTmpl.id);
           } else {
             await supabase.from('templates').insert({
-              organization_id: orgId,
+              organization_id: targetDbId,
               name: 'SETTINGS:PAYMENT',
               layout_style: JSON.stringify(paymentPayload),
               accent_color: 'SETTINGS',
@@ -2074,12 +2302,29 @@ class QuoteFlowStore {
         } else if (saved) {
           const localSettings = this.loadOrgSettingsFromFile()[orgId] || {};
           const localPayment = this.loadPaymentSettingsFromFile()[orgId] || {};
-          const fullSaved = {
+          const fullSaved: Organization = {
+            ...updated,
             ...saved,
+            default_tax_mode: updated.default_tax_mode ?? localSettings.default_tax_mode ?? localPayment.default_tax_mode ?? 'exclusive',
+            default_tax_rate: updated.default_tax_rate ?? saved.default_tax_rate ?? localSettings.default_tax_rate ?? 18,
+            default_currency: (updated.default_currency || saved.default_currency || localSettings.default_currency || 'INR') as any,
+            country: updated.country || saved.country || localSettings.country || 'India',
+            tax_system: updated.tax_system ?? localSettings.tax_system ?? 'GST',
+            tax_id_label: updated.tax_id_label ?? localSettings.tax_id_label ?? '',
+            goods_classification_label: updated.goods_classification_label ?? localSettings.goods_classification_label ?? 'HSN Code',
+            service_classification_label: updated.service_classification_label ?? localSettings.service_classification_label ?? 'SAC Code',
+            gst_registered: updated.gst_registered ?? localSettings.gst_registered ?? localPayment.gst_registered ?? false,
+            gstin: updated.gstin ?? localSettings.gstin ?? localPayment.gstin ?? saved.gst_vat_number ?? '',
+            business_state: updated.business_state ?? localSettings.business_state ?? localPayment.business_state ?? saved.state ?? '',
+            state_code: updated.state_code ?? localSettings.state_code ?? localPayment.state_code ?? '',
+            default_gst_rate: updated.default_gst_rate ?? localSettings.default_gst_rate ?? localPayment.default_gst_rate ?? 18,
+            hsn_sac_enabled: updated.hsn_sac_enabled ?? localSettings.hsn_sac_enabled ?? localPayment.hsn_sac_enabled ?? true,
             require_full_payment_for_invoice:
-              localSettings.require_full_payment_for_invoice !== undefined
-                ? localSettings.require_full_payment_for_invoice
-                : ((saved as any).require_full_payment_for_invoice ?? true),
+              updated.require_full_payment_for_invoice !== undefined
+                ? updated.require_full_payment_for_invoice
+                : (localSettings.require_full_payment_for_invoice !== undefined
+                    ? localSettings.require_full_payment_for_invoice
+                    : ((saved as any).require_full_payment_for_invoice ?? true)),
             invoice_prefix: updated.invoice_prefix ?? localSettings.invoice_prefix ?? 'INV',
             invoice_start_number: updated.invoice_start_number ?? localSettings.invoice_start_number ?? 1,
             current_invoice_counter: updated.current_invoice_counter ?? localSettings.current_invoice_counter ?? 0,
@@ -2088,13 +2333,26 @@ class QuoteFlowStore {
             current_test_quotation_counter: updated.current_test_quotation_counter ?? localSettings.current_test_quotation_counter ?? (saved as any).current_test_quotation_counter ?? 0,
             default_bank_details: updated.default_bank_details ?? localPayment.default_bank_details ?? (saved as any).default_bank_details ?? null,
             default_upi_details: updated.default_upi_details ?? localPayment.default_upi_details ?? (saved as any).default_upi_details ?? null,
+            default_payment_link: updated.default_payment_link ?? localPayment.default_payment_link ?? (saved as any).default_payment_link ?? null,
+            default_payment_link_label: updated.default_payment_link_label ?? localPayment.default_payment_link_label ?? (saved as any).default_payment_link_label ?? null,
             default_crypto_details: updated.default_crypto_details ?? localPayment.default_crypto_details ?? (saved as any).default_crypto_details ?? null,
             default_payment_display_mode: updated.default_payment_display_mode ?? localPayment.default_payment_display_mode ?? (saved as any).default_payment_display_mode ?? 'BOTH',
             default_show_bank_details: updated.default_show_bank_details ?? localPayment.default_show_bank_details ?? (saved as any).default_show_bank_details ?? true,
             default_show_upi_details: updated.default_show_upi_details ?? localPayment.default_show_upi_details ?? (saved as any).default_show_upi_details ?? true,
+            default_show_payment_link: updated.default_show_payment_link ?? localPayment.default_show_payment_link ?? (saved as any).default_show_payment_link ?? false,
             default_show_crypto_details: updated.default_show_crypto_details ?? localPayment.default_show_crypto_details ?? (saved as any).default_show_crypto_details ?? false,
-          } as Organization;
+            default_show_cash_details: updated.default_show_cash_details ?? localPayment.default_show_cash_details ?? (saved as any).default_show_cash_details ?? true,
+            default_cash_instructions: updated.default_cash_instructions ?? localPayment.default_cash_instructions ?? (saved as any).default_cash_instructions ?? '',
+            document_language: updated.document_language ?? localSettings.document_language ?? localPayment.document_language ?? null,
+          };
           this.organizations.set(orgId, fullSaved);
+          this.orgCacheExpiry.set(orgId, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
+          if (saved.id && saved.id !== orgId) {
+            this.organizations.set(saved.id, fullSaved);
+            this.orgCacheExpiry.set(saved.id, Date.now() + QuoteFlowStore.ORG_CACHE_TTL_MS);
+            this.saveOrgSettingsToFile(saved.id, fullSaved);
+            this.savePaymentSettingsToFile(saved.id, fullSaved);
+          }
           return fullSaved;
         }
       // Permanent Cloud Persistence: Save in Supabase notifications table
@@ -2106,10 +2364,15 @@ class QuoteFlowStore {
           message: JSON.stringify({
             brand_color: updated.brand_color,
             mode: updated.mode,
+            default_tax_mode: updated.default_tax_mode,
+            default_currency: updated.default_currency,
+            country: updated.country,
+            default_tax_rate: updated.default_tax_rate,
             invoice_prefix: updated.invoice_prefix,
             invoice_start_number: updated.invoice_start_number,
             current_invoice_counter: updated.current_invoice_counter,
             require_full_payment_for_invoice: updated.require_full_payment_for_invoice,
+            document_language: updated.document_language,
           }),
           type: 'ORG_SETTINGS',
           is_read: true,
@@ -2184,9 +2447,36 @@ class QuoteFlowStore {
     const orgCount = (org?.current_quotation_counter || 0) + 1;
     nextCount = Math.max(nextCount, orgCount);
 
+    // Also check existing live quotations in memory
+    for (const q of this.quotations.values()) {
+      if (q.organization_id && q.organization_id !== orgId) continue;
+      if (q.environment === 'test') continue;
+      const match = q.quotation_number?.match(/(\d+)$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (val >= nextCount) {
+          nextCount = val + 1;
+        }
+      }
+    }
+
+    // Also check deleted quotations to never reuse a deleted quote number
+    this.loadDeletedQuotationsFromFile();
+    for (const d of this.deletedQuotations.values()) {
+      if (d.organization_id && d.organization_id !== orgId) continue;
+      const match = d.quotation_number?.match(/(\d+)$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (val >= nextCount) {
+          nextCount = val + 1;
+        }
+      }
+    }
+
     if (org) {
       org.current_quotation_counter = nextCount;
       this.organizations.set(orgId, org);
+      this.saveOrgSettingsToFile(orgId, { current_quotation_counter: nextCount });
       try {
         const supabase = createAdminClient();
         if (supabase) {
@@ -2519,19 +2809,7 @@ class QuoteFlowStore {
           query = query.eq('organization_id', orgId);
         }
 
-        let { data, error } = await query.maybeSingle();
-
-        if (!data && orgId) {
-          const fallbackRes = await supabase
-            .from('customers')
-            .select('*')
-            .eq('id', id)
-            .maybeSingle();
-          if (fallbackRes.data) {
-            data = fallbackRes.data;
-            error = null;
-          }
-        }
+        const { data, error } = await query.maybeSingle();
 
         if (!error && data) {
           const normalized = this.normalizeCustomer(data);
@@ -2622,9 +2900,12 @@ class QuoteFlowStore {
     return newCustomer;
   }
 
-  public async updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
+  public async updateCustomer(id: string, data: Partial<Customer>, orgId?: string): Promise<Customer> {
     const existing = this.customers.get(id);
-    const org = await this.getOrganization(existing?.organization_id || DEFAULT_ORG_ID);
+    if (orgId && existing && existing.organization_id && existing.organization_id !== orgId) {
+      throw new Error('Unauthorized to update customer from another organization');
+    }
+    const org = await this.getOrganization(existing?.organization_id || orgId || DEFAULT_ORG_ID);
     const countryCode = data.phone_country_code || existing?.phone_country_code || (data.phone ? splitPhoneNumber(data.phone).countryCode : getDefaultCountryCode(data.country || org?.country));
     const cleanPhone = data.phone !== undefined
       ? (data.phone && data.phone.trim() ? cleanPhoneNumber(data.phone, countryCode) : undefined)
@@ -2680,10 +2961,15 @@ class QuoteFlowStore {
         }
         if (data.notes !== undefined) updatePayload.notes = data.notes;
 
-        const { data: updatedRow, error } = await supabase
+        let query = supabase
           .from('customers')
           .update(updatePayload)
-          .eq('id', id)
+          .eq('id', id);
+        if (orgId) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        const { data: updatedRow, error } = await query
           .select()
           .single();
 
@@ -2703,14 +2989,23 @@ class QuoteFlowStore {
   }
 
   public async deleteCustomer(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    const existing = this.customers.get(id);
+    if (existing && existing.organization_id && orgId && existing.organization_id !== orgId) {
+      throw new Error('Unauthorized to delete customer from another organization');
+    }
+
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        // Cascade delete quotations belonging to this customer
-        const { data: quotes } = await supabase
+        // Cascade delete quotations belonging to this customer within this organization
+        let quotesQuery = supabase
           .from('quotations')
           .select('id')
           .eq('customer_id', id);
+        if (orgId) {
+          quotesQuery = quotesQuery.eq('organization_id', orgId);
+        }
+        const { data: quotes } = await quotesQuery;
 
         if (quotes && quotes.length > 0) {
           for (const q of quotes) {
@@ -2718,10 +3013,15 @@ class QuoteFlowStore {
           }
         }
 
-        const { error } = await supabase
+        let deleteQuery = supabase
           .from('customers')
           .delete()
           .eq('id', id);
+        if (orgId) {
+          deleteQuery = deleteQuery.eq('organization_id', orgId);
+        }
+
+        const { error } = await deleteQuery;
 
         if (error) {
           console.error('Supabase customer delete error:', error);
@@ -2749,7 +3049,124 @@ class QuoteFlowStore {
   }
 
   // --- PRODUCTS ---
+  private getProductsFilePath(): string {
+    if (isCloudflareWorker) return '';
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'products.json');
+  }
+
+  private loadProductsFromFile() {
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getProductsFilePath();
+      if (p && fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          for (const item of list) {
+            if (item && item.id) {
+              const normalized = this.normalizeProduct(item);
+              this.products.set(normalized.id, normalized);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  private saveProductsToFile() {
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getProductsFilePath();
+      if (p) {
+        const list = Array.from(this.products.values());
+        fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf-8');
+      }
+    } catch {}
+  }
+
+  private encodeProductMetadata(
+    description?: string | null,
+    meta?: {
+      hsn_code?: string | null;
+      classification_type?: string | null;
+      category?: string | null;
+    }
+  ): string | null {
+    const raw = (description || '').trim();
+    const cleanDesc = raw.replace(/\s*<!--qf_meta:[\s\S]*?-->/g, '').trim();
+
+    const payload: Record<string, string> = {};
+    if (meta?.hsn_code) payload.hsn = String(meta.hsn_code).trim();
+    if (meta?.classification_type) payload.type = String(meta.classification_type).trim();
+    if (meta?.category) payload.cat = String(meta.category).trim();
+
+    if (Object.keys(payload).length === 0) {
+      return cleanDesc || null;
+    }
+
+    const metaTag = `<!--qf_meta:${JSON.stringify(payload)}-->`;
+    return cleanDesc ? `${cleanDesc}\n${metaTag}` : metaTag;
+  }
+
+  private decodeProductMetadata(rawDesc?: string | null): {
+    description: string | null;
+    hsn_code?: string | null;
+    classification_type?: string | null;
+    category?: string | null;
+  } {
+    if (!rawDesc) {
+      return { description: null, hsn_code: null, classification_type: null, category: null };
+    }
+
+    const match = rawDesc.match(/<!--qf_meta:([\s\S]*?)-->/);
+    let hsn_code: string | null = null;
+    let classification_type: string | null = null;
+    let category: string | null = null;
+
+    if (match && match[1]) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        if (parsed.hsn) hsn_code = String(parsed.hsn);
+        if (parsed.type) classification_type = String(parsed.type);
+        if (parsed.cat) category = String(parsed.cat);
+      } catch (e) {}
+    }
+
+    const cleanDesc = rawDesc.replace(/\s*<!--qf_meta:[\s\S]*?-->/g, '').trim();
+    return {
+      description: cleanDesc || null,
+      hsn_code,
+      classification_type,
+      category,
+    };
+  }
+
+  public normalizeProduct(p: any): Product {
+    const meta = this.decodeProductMetadata(p?.description);
+    return {
+      id: p.id,
+      organization_id: p.organization_id || DEFAULT_ORG_ID,
+      name: p.name || 'Unnamed Item',
+      sku: p.sku || null,
+      description: meta.description !== undefined ? meta.description : (p.description || null),
+      unit_price: typeof p.unit_price === 'number' ? p.unit_price : (parseFloat(p.unit_price) || 0),
+      unit: p.unit || 'unit',
+      tax_rate: typeof p.tax_rate === 'number' ? p.tax_rate : (parseFloat(p.tax_rate) || 0),
+      is_active: p.is_active !== undefined ? Boolean(p.is_active) : true,
+      hsn_code: p.hsn_code || meta.hsn_code || null,
+      classification_type: p.classification_type || meta.classification_type || null,
+      category: p.category || meta.category || null,
+      created_at: p.created_at || new Date().toISOString(),
+      updated_at: p.updated_at || new Date().toISOString(),
+    };
+  }
+
   public async getProducts(orgId: string = DEFAULT_ORG_ID): Promise<Product[]> {
+    this.loadProductsFromFile();
     try {
       const supabase = createAdminClient();
       if (supabase) {
@@ -2760,10 +3177,20 @@ class QuoteFlowStore {
           .order('name', { ascending: true });
 
         if (!error && data) {
+          const list: Product[] = [];
           for (const p of data) {
-            this.products.set(p.id, p as Product);
+            const normalized = this.normalizeProduct(p);
+            this.products.set(normalized.id, normalized);
+            list.push(normalized);
           }
-          return data as Product[];
+          // Merge with any in-memory/file products for this orgId that might not be synced yet
+          const inMemoryList = Array.from(this.products.values()).filter((p) => p.organization_id === orgId);
+          for (const item of inMemoryList) {
+            if (!list.some((p) => p.id === item.id)) {
+              list.push(this.normalizeProduct(item));
+            }
+          }
+          return list.sort((a, b) => a.name.localeCompare(b.name));
         }
       }
     } catch (err) {
@@ -2772,11 +3199,41 @@ class QuoteFlowStore {
 
     return Array.from(this.products.values())
       .filter((p) => p.organization_id === orgId)
+      .map((p) => this.normalizeProduct(p))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  public async getProduct(id: string, orgId?: string): Promise<Product | null> {
+    this.loadProductsFromFile();
+    const cached = this.products.get(id);
+    if (cached) {
+      if (!orgId || cached.organization_id === orgId) {
+        return this.normalizeProduct(cached);
+      }
+      return null;
+    }
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        let query = supabase.from('products').select('*').eq('id', id);
+        if (orgId) query = query.eq('organization_id', orgId);
+        const { data, error } = await query.maybeSingle();
+        if (!error && data) {
+          const normalized = this.normalizeProduct(data);
+          this.products.set(normalized.id, normalized);
+          return normalized;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch single product from Supabase:', err);
+    }
+
+    return null;
+  }
+
   public async createProduct(data: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Promise<Product> {
-    const id = crypto.randomUUID();
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();
     const newProd: Product = {
       ...data,
@@ -2785,33 +3242,44 @@ class QuoteFlowStore {
       updated_at: now,
     };
     this.products.set(id, newProd);
+    this.saveProductsToFile();
+
+    const fullDescription = this.encodeProductMetadata(data.description, {
+      hsn_code: data.hsn_code,
+      classification_type: data.classification_type,
+      category: data.category,
+    });
 
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        const insertPayload: Record<string, any> = {
+          id,
+          organization_id: data.organization_id || DEFAULT_ORG_ID,
+          name: data.name,
+          sku: data.sku || null,
+          description: fullDescription,
+          unit_price: data.unit_price,
+          unit: data.unit || 'unit',
+          tax_rate: data.tax_rate || 0,
+          is_active: data.is_active !== undefined ? data.is_active : true,
+          created_at: now,
+          updated_at: now,
+        };
+
         const { data: saved, error } = await supabase
           .from('products')
-          .insert({
-            id,
-            organization_id: data.organization_id || DEFAULT_ORG_ID,
-            name: data.name,
-            sku: data.sku || null,
-            description: data.description || null,
-            unit_price: data.unit_price,
-            unit: data.unit || 'unit',
-            tax_rate: data.tax_rate || 0,
-            is_active: data.is_active !== undefined ? data.is_active : true,
-            created_at: now,
-            updated_at: now,
-          })
+          .insert(insertPayload)
           .select()
           .single();
 
         if (error) {
           console.error('Supabase product create error:', error);
         } else if (saved) {
-          this.products.set(id, saved as Product);
-          return saved as Product;
+          const normalized = this.normalizeProduct({ ...saved, ...newProd });
+          this.products.set(id, normalized);
+          this.saveProductsToFile();
+          return normalized;
         }
       }
     } catch (err) {
@@ -2821,48 +3289,124 @@ class QuoteFlowStore {
     return newProd;
   }
 
-  public async updateProduct(id: string, data: Partial<Product>): Promise<Product> {
+  public async createProductsBulk(
+    items: Array<Omit<Product, 'id' | 'created_at' | 'updated_at'>>
+  ): Promise<Product[]> {
+    const created: Product[] = [];
+    const now = new Date().toISOString();
+    for (const item of items) {
+      const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const prod: Product = {
+        ...item,
+        id,
+        created_at: now,
+        updated_at: now,
+      };
+      this.products.set(id, prod);
+      created.push(prod);
+    }
+    this.saveProductsToFile();
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase && created.length > 0) {
+        const rows = created.map((p) => ({
+          id: p.id,
+          organization_id: p.organization_id || DEFAULT_ORG_ID,
+          name: p.name,
+          sku: p.sku || null,
+          description: this.encodeProductMetadata(p.description, {
+            hsn_code: p.hsn_code,
+            classification_type: p.classification_type,
+            category: p.category,
+          }),
+          unit_price: p.unit_price,
+          unit: p.unit || 'unit',
+          tax_rate: p.tax_rate || 0,
+          is_active: p.is_active !== undefined ? p.is_active : true,
+          created_at: now,
+          updated_at: now,
+        }));
+        const { data: inserted, error } = await supabase.from('products').insert(rows).select();
+        if (error) {
+          console.error('Supabase bulk products insert error:', error);
+        } else if (inserted && Array.isArray(inserted)) {
+          for (const row of inserted) {
+            const normalized = this.normalizeProduct(row);
+            this.products.set(normalized.id, normalized);
+          }
+          this.saveProductsToFile();
+        }
+      }
+    } catch (err) {
+      console.warn('Could not sync bulk products to Supabase:', err);
+    }
+
+    return created;
+  }
+
+  public async updateProduct(id: string, data: Partial<Product>, orgId?: string): Promise<Product> {
     const existing = this.products.get(id);
+    if (orgId && existing && existing.organization_id && existing.organization_id !== orgId) {
+      throw new Error('Unauthorized to update product from another organization');
+    }
     const now = new Date().toISOString();
     const updated: Product = {
       ...(existing || {}),
       ...data,
       id,
-      organization_id: (existing?.organization_id || data.organization_id || DEFAULT_ORG_ID) as string,
+      organization_id: (existing?.organization_id || orgId || data.organization_id || DEFAULT_ORG_ID) as string,
       name: (data.name !== undefined ? data.name : existing?.name) || 'Product',
       unit_price: data.unit_price !== undefined ? data.unit_price : (existing?.unit_price || 0),
       unit: (data.unit !== undefined ? data.unit : existing?.unit) || 'unit',
       tax_rate: data.tax_rate !== undefined ? data.tax_rate : (existing?.tax_rate || 0),
       is_active: data.is_active !== undefined ? data.is_active : (existing?.is_active ?? true),
+      hsn_code: data.hsn_code !== undefined ? data.hsn_code : (existing?.hsn_code || null),
+      classification_type: data.classification_type !== undefined ? data.classification_type : (existing?.classification_type || null),
+      category: data.category !== undefined ? data.category : (existing?.category || null),
       updated_at: now,
       created_at: existing?.created_at || now,
     };
     this.products.set(id, updated);
+    this.saveProductsToFile();
 
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        const { data: saved, error } = await supabase
+        const fullDescription = this.encodeProductMetadata(updated.description, {
+          hsn_code: updated.hsn_code,
+          classification_type: updated.classification_type,
+          category: updated.category,
+        });
+
+        let query = supabase
           .from('products')
           .update({
             name: updated.name,
             sku: updated.sku || null,
-            description: updated.description || null,
+            description: fullDescription,
             unit_price: updated.unit_price,
             unit: updated.unit,
             tax_rate: updated.tax_rate,
             is_active: updated.is_active,
             updated_at: now,
           })
-          .eq('id', id)
+          .eq('id', id);
+        if (orgId) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        const { data: saved, error } = await query
           .select()
           .maybeSingle();
 
         if (error) {
           console.error('Supabase product update error:', error);
         } else if (saved) {
-          this.products.set(id, saved as Product);
-          return saved as Product;
+          const normalized = this.normalizeProduct({ ...saved, ...updated });
+          this.products.set(id, normalized);
+          this.saveProductsToFile();
+          return normalized;
         }
       }
     } catch (err) {
@@ -2873,13 +3417,23 @@ class QuoteFlowStore {
   }
 
   public async deleteProduct(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    const existing = this.products.get(id);
+    if (existing && existing.organization_id && orgId && existing.organization_id !== orgId) {
+      throw new Error('Unauthorized to delete product from another organization');
+    }
+
     try {
       const supabase = createAdminClient();
       if (supabase) {
-        const { error } = await supabase
+        let query = supabase
           .from('products')
           .delete()
           .eq('id', id);
+        if (orgId) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        const { error } = await query;
 
         if (error) {
           console.error('Supabase product delete error:', error);
@@ -2890,6 +3444,7 @@ class QuoteFlowStore {
     }
 
     this.products.delete(id);
+    this.saveProductsToFile();
     return true;
   }
 
@@ -2898,6 +3453,10 @@ class QuoteFlowStore {
     orgId: string = DEFAULT_ORG_ID,
     filters?: { status?: string; search?: string; customerId?: string; environment?: string }
   ): Promise<Quotation[]> {
+    this.loadDeletedQuotationsFromFile();
+    const deletedIds = new Set(Array.from(this.deletedQuotations.values()).map((d) => d.quotation_id));
+    const deletedNumbers = new Set(Array.from(this.deletedQuotations.values()).map((d) => d.quotation_number));
+
     try {
       const supabase = createAdminClient();
       if (supabase) {
@@ -2911,13 +3470,18 @@ class QuoteFlowStore {
           query = query.eq('customer_id', filters.customerId);
         }
 
-        const { data, error } = await query;
-        if (!error && data) {
+        const { data: rawSupabaseData, error } = await query;
+        if (!error && rawSupabaseData) {
+          // Strictly exclude deleted quotations at the query layer
+          const data = rawSupabaseData.filter(
+            (q: any) => !q.deleted_at && !deletedIds.has(q.id) && !deletedNumbers.has(q.quotation_number)
+          );
+
           // Synchronize memory cache with Supabase quotations for this org
           const remoteIds = new Set(data.map((q) => q.id));
           for (const [id, q] of this.quotations.entries()) {
             if (id === DEMO_PORTAL_QUOTE_ID) continue;
-            if (q.organization_id === orgId && !remoteIds.has(id)) {
+            if (q.organization_id === orgId && (!remoteIds.has(id) || deletedIds.has(id) || deletedNumbers.has(q.quotation_number) || q.deleted_at)) {
               this.quotations.delete(id);
               this.quotationItems.delete(id);
             }
@@ -2931,13 +3495,17 @@ class QuoteFlowStore {
           const inProgressMap: Record<string, { in_progress_at: string; estimated_days?: number; estimated_completion_date?: string }> = {};
           const chatEventsByQuote: Record<string, { messages: Array<{ senderRole: string; createdAt: string }>; lastReadAt: string | null }> = {};
           const pinConfigMap: Record<string, any> = {};
-          try {
-            const { data: orgEvents } = await supabase
-              .from('quotation_events')
-              .select('quotation_id, actor_type, event_type, metadata, created_at')
-              .eq('organization_id', orgId)
-              .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG', 'PIN_CONFIG', 'IN_PROGRESS', 'EXTEND_TIME'])
-              .order('created_at', { ascending: true });
+          if (data.length > 0) {
+            try {
+              await this.loadInvoicesFromSupabase(orgId);
+              const quoteIds = Array.from(remoteIds);
+              const { data: orgEvents } = await supabase
+                .from('quotation_events')
+                .select('quotation_id, actor_type, event_type, metadata, created_at')
+                .eq('organization_id', orgId)
+                .in('quotation_id', quoteIds)
+                .in('event_type', ['MARKED_PAID', 'ADVANCE_PAID', 'MARKED_UNPAID', 'CHAT_MESSAGE', 'CHAT_READ', 'COMPLETED', 'PAYMENT_CONFIG', 'PIN_CONFIG', 'IN_PROGRESS', 'EXTEND_TIME'])
+                .order('created_at', { ascending: true });
 
             if (orgEvents) {
               for (const pe of orgEvents) {
@@ -2980,6 +3548,7 @@ class QuoteFlowStore {
               }
             }
           } catch {}
+        }
 
           const expiredToUpdate: string[] = [];
 
@@ -3024,11 +3593,58 @@ class QuoteFlowStore {
                 ).length
               : 0;
 
-            const finalIsPaid = completedInfo && completedInfo.unpaid ? false : payDetails.is_paid;
+            const hasRecordedPayment = Boolean(
+              payDetails.is_paid ||
+              (payDetails.paid_amount !== undefined && payDetails.paid_amount > 0) ||
+              payDetails.payment_status === 'PAID' ||
+              payDetails.payment_status === 'PARTIALLY_PAID'
+            );
+            const finalIsPaid = hasRecordedPayment
+              ? payDetails.is_paid
+              : (completedInfo && completedInfo.unpaid ? false : payDetails.is_paid);
+            const finalPaidAmount = hasRecordedPayment
+              ? payDetails.paid_amount
+              : (completedInfo && completedInfo.unpaid ? 0 : payDetails.paid_amount);
+            const finalBalance = hasRecordedPayment
+              ? payDetails.balance_amount
+              : (completedInfo && completedInfo.unpaid ? Number(q.grand_total) : payDetails.balance_amount);
+            const finalAdvancePercentage = hasRecordedPayment
+              ? payDetails.advance_percentage
+              : (completedInfo && completedInfo.unpaid ? 0 : payDetails.advance_percentage);
+            const finalPaymentStatus = hasRecordedPayment
+              ? payDetails.payment_status
+              : (completedInfo && completedInfo.unpaid ? 'UNPAID' : payDetails.payment_status);
+            const finalPaymentConfirmed = hasRecordedPayment
+              ? payDetails.payment_confirmed_by_company
+              : (completedInfo && completedInfo.unpaid ? false : payDetails.payment_confirmed_by_company);
+            const finalPaymentConfirmedAt = hasRecordedPayment
+              ? payDetails.payment_confirmed_at
+              : (completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_at);
+            const finalPaymentConfirmedBy = hasRecordedPayment
+              ? payDetails.payment_confirmed_by
+              : (completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_by);
+            const finalCompletedUnpaid = Boolean(
+              (completedInfo?.unpaid || existing?.completed_unpaid) && !finalIsPaid && (!finalPaidAmount || finalPaidAmount === 0)
+            );
 
             const existingIssuedInvoice = Array.from(this.invoices.values()).find(
               (inv) => inv.quotation_id === q.id && inv.status !== 'DRAFT' && inv.status !== 'CANCELLED' && inv.status !== 'VOIDED'
             );
+
+            const latestConfigEvt = quoteEvents.find((e: any) => e.event_type === 'PAYMENT_CONFIG');
+            const cfgMeta = latestConfigEvt?.metadata || {};
+
+            const isAdvanceEnabledResolved = cfgMeta.enable_advance !== undefined
+              ? Boolean(cfgMeta.enable_advance)
+              : (existing?.enable_advance !== undefined
+                ? Boolean(existing.enable_advance)
+                : ((q as any).payment_terms_type === 'FULL' || (existing as any)?.payment_terms_type === 'FULL'
+                  ? false
+                  : Boolean(finalAdvancePercentage && finalAdvancePercentage > 0)));
+
+            const safeAdvancePercentage = !isAdvanceEnabledResolved
+              ? null
+              : (finalAdvancePercentage && finalAdvancePercentage > 0 ? finalAdvancePercentage : null);
 
             const merged: Quotation = {
               ...(existing || {}),
@@ -3036,24 +3652,41 @@ class QuoteFlowStore {
               environment: (q.environment || existing?.environment || 'live') as 'test' | 'live',
               status: currentStatus,
               expired_at: expiredAt,
+              enable_advance: isAdvanceEnabledResolved,
+              advance_percentage: safeAdvancePercentage,
+              payment_terms_type: !isAdvanceEnabledResolved
+                ? 'FULL'
+                : (cfgMeta.payment_terms_type || (q as any).payment_terms_type || existing?.payment_terms_type || 'ADVANCE_SPLIT'),
+              tax_mode: (q as any).tax_mode || cfgMeta.tax_mode || existing?.tax_mode,
+              tax_name: (q as any).tax_name || cfgMeta.tax_name || existing?.tax_name,
+              taxable_subtotal: (q as any).taxable_subtotal ?? cfgMeta.taxable_subtotal ?? existing?.taxable_subtotal,
+              place_of_supply: (q as any).place_of_supply || cfgMeta.place_of_supply || existing?.place_of_supply,
+              supplier_state: (q as any).supplier_state || cfgMeta.supplier_state || existing?.supplier_state,
+              customer_gstin: (q as any).customer_gstin || cfgMeta.customer_gstin || existing?.customer_gstin,
+              cgst_rate: (q as any).cgst_rate ?? cfgMeta.cgst_rate ?? existing?.cgst_rate,
+              cgst_amount: (q as any).cgst_amount ?? cfgMeta.cgst_amount ?? existing?.cgst_amount,
+              sgst_rate: (q as any).sgst_rate ?? cfgMeta.sgst_rate ?? existing?.sgst_rate,
+              sgst_amount: (q as any).sgst_amount ?? cfgMeta.sgst_amount ?? existing?.sgst_amount,
+              igst_rate: (q as any).igst_rate ?? cfgMeta.igst_rate ?? existing?.igst_rate,
+              igst_amount: (q as any).igst_amount ?? cfgMeta.igst_amount ?? existing?.igst_amount,
+              tax_breakdown: (q as any).tax_breakdown || cfgMeta.tax_breakdown || existing?.tax_breakdown,
               is_paid: finalIsPaid,
               paid_at: payDetails.paid_at,
               payment_method: payDetails.payment_method,
               payment_notes: payDetails.payment_notes,
               advance_payment_notes: payDetails.advance_payment_notes,
               final_payment_notes: payDetails.final_payment_notes,
-              paid_amount: completedInfo && completedInfo.unpaid ? 0 : payDetails.paid_amount,
-              balance_amount: completedInfo && completedInfo.unpaid ? Number(q.grand_total) : payDetails.balance_amount,
-              advance_percentage: completedInfo && completedInfo.unpaid ? 0 : payDetails.advance_percentage,
-              payment_status: completedInfo && completedInfo.unpaid ? 'UNPAID' : payDetails.payment_status,
-              payment_confirmed_by_company: completedInfo && completedInfo.unpaid ? false : payDetails.payment_confirmed_by_company,
-              payment_confirmed_at: completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_at,
-              payment_confirmed_by: completedInfo && completedInfo.unpaid ? null : payDetails.payment_confirmed_by,
+              paid_amount: finalPaidAmount,
+              balance_amount: finalBalance,
+              payment_status: finalPaymentStatus,
+              payment_confirmed_by_company: finalPaymentConfirmed,
+              payment_confirmed_at: finalPaymentConfirmedAt,
+              payment_confirmed_by: finalPaymentConfirmedBy,
               in_progress_at: inProgressInfo?.in_progress_at || (q as any).in_progress_at || existing?.in_progress_at || null,
               estimated_days: inProgressInfo?.estimated_days ?? (q as any).estimated_days ?? existing?.estimated_days ?? null,
               estimated_completion_date: inProgressInfo?.estimated_completion_date || (q as any).estimated_completion_date || existing?.estimated_completion_date || null,
               completed_at: completedInfo?.completed_at || existing?.completed_at || null,
-              completed_unpaid: Boolean(completedInfo?.unpaid || existing?.completed_unpaid),
+              completed_unpaid: finalCompletedUnpaid,
               chat_count: chatCount,
               unread_chat_count: unreadChatCount,
               has_unread_chat: unreadChatCount > 0,
@@ -3144,7 +3777,12 @@ class QuoteFlowStore {
     }
 
     let list = Array.from(this.quotations.values()).filter(
-      (q) => q.organization_id === orgId && q.id !== DEMO_PORTAL_QUOTE_ID
+      (q) =>
+        q.organization_id === orgId &&
+        q.id !== DEMO_PORTAL_QUOTE_ID &&
+        !q.deleted_at &&
+        !deletedIds.has(q.id) &&
+        !deletedNumbers.has(q.quotation_number)
     );
 
     if (filters?.status && filters.status !== 'ALL') {
@@ -3191,8 +3829,10 @@ class QuoteFlowStore {
       .map((quote) => ({
         ...quote,
         organization: fallbackOrg,
-        customer: this.customers.get(quote.customer_id),
-        items: this.quotationItems.get(quote.id) || [],
+        customer: this.customers.get(quote.customer_id) || quote.customer,
+        items: (this.quotationItems.get(quote.id) && this.quotationItems.get(quote.id)!.length > 0)
+          ? this.quotationItems.get(quote.id)
+          : (quote.items || []),
       }))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
@@ -3201,13 +3841,19 @@ class QuoteFlowStore {
     if (id === DEMO_PORTAL_QUOTE_ID) {
       return this.getDemoQuotation();
     }
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     try {
       const supabase = createAdminClient();
       if (supabase) {
         let query = supabase
           .from('quotations')
-          .select('*, customer:customers(*), items:quotation_items(*)')
-          .eq('id', id);
+          .select('*, customer:customers(*), items:quotation_items(*)');
+
+        if (isUuid) {
+          query = query.eq('id', id);
+        } else {
+          query = query.eq('quotation_number', id);
+        }
 
         if (orgId && orgId !== DEFAULT_ORG_ID) {
           query = query.eq('organization_id', orgId);
@@ -3216,13 +3862,48 @@ class QuoteFlowStore {
         let { data, error } = await query.maybeSingle();
 
         if (!data && orgId) {
-          const fallbackRes = await supabase
+          let fallbackQuery = supabase
             .from('quotations')
-            .select('*, customer:customers(*), items:quotation_items(*)')
-            .eq('id', id)
-            .maybeSingle();
+            .select('*, customer:customers(*), items:quotation_items(*)');
+          if (isUuid) {
+            fallbackQuery = fallbackQuery.eq('id', id);
+          } else {
+            fallbackQuery = fallbackQuery.eq('quotation_number', id);
+          }
+          const fallbackRes = await fallbackQuery.maybeSingle();
           if (fallbackRes.data) {
             data = fallbackRes.data;
+            error = null;
+          }
+        }
+
+        if (!data && isUuid) {
+          // If id was a UUID format that might be stored under quotation_number
+          const numRes = await supabase
+            .from('quotations')
+            .select('*, customer:customers(*), items:quotation_items(*)')
+            .eq('quotation_number', id)
+            .maybeSingle();
+          if (numRes.data) {
+            data = numRes.data;
+            error = null;
+          }
+        }
+
+        if (!data && !isUuid) {
+          // If id was a base quotation number like "Q-000037", check if a revised version exists
+          let revQuery = supabase
+            .from('quotations')
+            .select('*, customer:customers(*), items:quotation_items(*)')
+            .ilike('quotation_number', `${id}-REV%`)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          if (orgId && orgId !== DEFAULT_ORG_ID) {
+            revQuery = revQuery.eq('organization_id', orgId);
+          }
+          const revRes = await revQuery.maybeSingle();
+          if (revRes.data) {
+            data = revRes.data;
             error = null;
           }
         }
@@ -3279,6 +3960,10 @@ class QuoteFlowStore {
             this.views.set(data.id, viewsData as QuotationView[]);
           }
 
+          if (this.invoices.size === 0) {
+            await this.loadInvoicesFromSupabase(orgId);
+          }
+
           const payDetails = this.resolvePaymentDetails(
             data.id,
             Number(data.grand_total) || 0,
@@ -3301,11 +3986,18 @@ class QuoteFlowStore {
             (e: any) => e.event_type === 'PIN_CONFIG' || e.event_type === 'PORTAL_PIN_CONFIG'
           );
 
+          const hasRecordedPayment = Boolean(
+            payDetails.is_paid ||
+            (payDetails.paid_amount !== undefined && payDetails.paid_amount > 0) ||
+            payDetails.payment_status === 'PAID' ||
+            payDetails.payment_status === 'PARTIALLY_PAID'
+          );
+
           let isPaid = payDetails.is_paid;
 
           if (latestCompletedEvent || persistedQuote?.status === 'COMPLETED') {
             currentStatus = 'COMPLETED';
-            if (latestCompletedEvent?.metadata?.unpaid || persistedQuote?.completed_unpaid) {
+            if ((latestCompletedEvent?.metadata?.unpaid || persistedQuote?.completed_unpaid) && !hasRecordedPayment) {
               isPaid = false;
             }
           } else if (
@@ -3330,10 +4022,40 @@ class QuoteFlowStore {
 
           const chatState = this.computeChatStatsFromEvents(eventsData || []);
 
+          const finalIsPaid = hasRecordedPayment ? payDetails.is_paid : isPaid;
+          const finalPaidAmount = hasRecordedPayment ? payDetails.paid_amount : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount);
+          const finalBalance = hasRecordedPayment ? payDetails.balance_amount : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount);
+          const finalAdvancePercentage = hasRecordedPayment ? payDetails.advance_percentage : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage);
+          const finalPaymentStatus = hasRecordedPayment ? payDetails.payment_status : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 'UNPAID' : payDetails.payment_status);
+          const finalPaymentConfirmed = hasRecordedPayment ? payDetails.payment_confirmed_by_company : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? false : payDetails.payment_confirmed_by_company);
+          const finalPaymentConfirmedAt = hasRecordedPayment ? payDetails.payment_confirmed_at : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_at);
+          const finalPaymentConfirmedBy = hasRecordedPayment ? payDetails.payment_confirmed_by : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_by);
+          const finalCompletedUnpaid = Boolean((latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid) && !finalIsPaid && (!finalPaidAmount || finalPaidAmount === 0));
+
+          const latestPaymentConfig = eventsData?.find((e: any) => e.event_type === 'PAYMENT_CONFIG');
+          const isAdvanceEnabledResolved = persistedQuote?.enable_advance !== undefined
+            ? Boolean(persistedQuote.enable_advance)
+            : (latestPaymentConfig?.metadata?.enable_advance !== undefined
+              ? Boolean(latestPaymentConfig.metadata.enable_advance)
+              : (existing?.enable_advance !== undefined
+                ? Boolean(existing.enable_advance)
+                : ((data as any).payment_terms_type === 'FULL' || (existing as any)?.payment_terms_type === 'FULL'
+                  ? false
+                  : Boolean(finalAdvancePercentage && finalAdvancePercentage > 0))));
+
+          const safeAdvancePercentage = !isAdvanceEnabledResolved
+            ? null
+            : (finalAdvancePercentage && finalAdvancePercentage > 0 ? finalAdvancePercentage : null);
+
           const merged: Quotation = {
             ...(existing || {}),
             ...(persistedQuote || {}),
             ...data,
+            enable_advance: isAdvanceEnabledResolved,
+            advance_percentage: safeAdvancePercentage,
+            payment_terms_type: !isAdvanceEnabledResolved
+              ? 'FULL'
+              : (persistedQuote?.payment_terms_type || latestPaymentConfig?.metadata?.payment_terms_type || existing?.payment_terms_type || 'ADVANCE_SPLIT'),
             status: currentStatus,
             in_progress_at: latestInProgressEvent
               ? (latestInProgressEvent.metadata?.in_progress_at || latestInProgressEvent.created_at)
@@ -3343,38 +4065,56 @@ class QuoteFlowStore {
                   ? latestInProgressEvent.metadata.new_total_days
                   : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
                       ? latestInProgressEvent.metadata.estimated_days
-                      : persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || 7))
-              : (persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || null),
-            estimated_completion_date: latestInProgressEvent
-              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
-              : (persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
+                      : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null)))
+              : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null),
+            estimated_completion_date: (() => {
+              const explicit = latestInProgressEvent
+                ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
+                : (persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null);
+              if (explicit) return explicit;
+              const days = latestInProgressEvent
+                ? (typeof latestInProgressEvent.metadata?.new_total_days === 'number'
+                    ? latestInProgressEvent.metadata.new_total_days
+                    : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
+                        ? latestInProgressEvent.metadata.estimated_days
+                        : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null)))
+                : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null);
+              if (typeof days === 'number' && days > 0) {
+                const base = latestInProgressEvent?.created_at ? new Date(latestInProgressEvent.created_at).getTime() : Date.now();
+                return new Date(base + days * 86400000).toISOString();
+              }
+              return null;
+            })(),
             estimated_time_text: latestInProgressEvent?.metadata?.notes || persistedQuote?.estimated_time_text || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
             payment_records: payDetails.payment_records || persistedQuote?.payment_records || filePayment?.payment_records || existing?.payment_records || [],
             expired_at: expiredAt,
-            is_paid: isPaid,
+            is_paid: finalIsPaid,
             paid_at: payDetails.paid_at,
             payment_method: payDetails.payment_method,
             payment_notes: payDetails.payment_notes,
             advance_payment_notes: payDetails.advance_payment_notes,
             final_payment_notes: payDetails.final_payment_notes,
-            paid_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount,
-            balance_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount,
-            advance_percentage: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage,
-            payment_status: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 'UNPAID' : payDetails.payment_status,
-            payment_confirmed_by_company: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? false : payDetails.payment_confirmed_by_company,
-            payment_confirmed_at: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_at,
-            payment_confirmed_by: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_by,
+            paid_amount: finalPaidAmount,
+            balance_amount: finalBalance,
+            payment_status: finalPaymentStatus,
+            payment_confirmed_by_company: finalPaymentConfirmed,
+            payment_confirmed_at: finalPaymentConfirmedAt,
+            payment_confirmed_by: finalPaymentConfirmedBy,
             completed_at: latestCompletedEvent ? (latestCompletedEvent.metadata?.completed_at || latestCompletedEvent.created_at) : existing?.completed_at || null,
-            completed_unpaid: Boolean(latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid),
+            completed_unpaid: finalCompletedUnpaid,
             chat_count: chatState.chatCount,
             unread_chat_count: chatState.unreadChatCount,
             has_unread_chat: chatState.unreadChatCount > 0,
             payment_display_mode: payDetails.payment_display_mode,
             show_bank_details: payDetails.show_bank_details,
             show_upi_details: payDetails.show_upi_details,
+            show_payment_link: payDetails.show_payment_link,
             show_crypto_details: payDetails.show_crypto_details,
             bank_details: payDetails.bank_details,
             upi_details: payDetails.upi_details,
+            payment_link: payDetails.payment_link,
+            payment_link_label: payDetails.payment_link_label,
+            crypto_details: payDetails.crypto_details,
             payment_terms_instructions: payDetails.payment_terms_instructions || (data as any).payment_terms_instructions || existing?.payment_terms_instructions || '',
             accepted_payment_methods: payDetails.accepted_payment_methods || (data as any).accepted_payment_methods || existing?.accepted_payment_methods || null,
             has_issued_invoice: Boolean(
@@ -3410,6 +4150,9 @@ class QuoteFlowStore {
             ),
           };
           this.quotations.set(data.id, merged);
+          if (data.quotation_number) {
+            this.quotations.set(data.quotation_number, merged);
+          }
           if (data.customer) {
             this.customers.set(data.customer.id, data.customer as Customer);
           }
@@ -3465,7 +4208,12 @@ class QuoteFlowStore {
       console.warn('Error fetching quotation from Supabase:', err);
     }
 
-    const quote = this.quotations.get(id);
+    let quote = this.quotations.get(id);
+    if (!quote) {
+      quote = Array.from(this.quotations.values()).find(
+        (q) => q.quotation_number === id || q.id === id || q.quotation_number?.startsWith(`${id}-REV`)
+      );
+    }
     if (!quote) return null;
     if (orgId && orgId !== DEFAULT_ORG_ID && quote.organization_id && quote.organization_id !== orgId) return null;
 
@@ -3513,7 +4261,8 @@ class QuoteFlowStore {
         const { data, error } = await supabase
           .from('quotations')
           .select('*, customer:customers(*), items:quotation_items(*)')
-          .or(`public_token.eq.${cleanToken},public_token_hash.eq.${hashed}`)
+          .or(`public_token.eq.${cleanToken},public_token_hash.eq.${hashed},public_token.ilike.${cleanToken}`)
+          .limit(1)
           .maybeSingle();
 
         if (!error && data) {
@@ -3579,11 +4328,18 @@ class QuoteFlowStore {
             (e: any) => e.event_type === 'IN_PROGRESS' || e.event_type === 'EXTEND_TIME'
           );
 
+          const hasRecordedPayment = Boolean(
+            payDetails.is_paid ||
+            (payDetails.paid_amount !== undefined && payDetails.paid_amount > 0) ||
+            payDetails.payment_status === 'PAID' ||
+            payDetails.payment_status === 'PARTIALLY_PAID'
+          );
+
           let isPaid = payDetails.is_paid;
 
           if (latestCompletedEvent || persistedQuote?.status === 'COMPLETED') {
             currentStatus = 'COMPLETED';
-            if (latestCompletedEvent?.metadata?.unpaid || persistedQuote?.completed_unpaid) {
+            if ((latestCompletedEvent?.metadata?.unpaid || persistedQuote?.completed_unpaid) && !hasRecordedPayment) {
               isPaid = false;
             }
           } else if (
@@ -3608,10 +4364,40 @@ class QuoteFlowStore {
 
           const chatState = this.computeChatStatsFromEvents(eventsData || []);
 
+          const finalIsPaid = hasRecordedPayment ? payDetails.is_paid : isPaid;
+          const finalPaidAmount = hasRecordedPayment ? payDetails.paid_amount : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount);
+          const finalBalance = hasRecordedPayment ? payDetails.balance_amount : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount);
+          const finalAdvancePercentage = hasRecordedPayment ? payDetails.advance_percentage : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage);
+          const finalPaymentStatus = hasRecordedPayment ? payDetails.payment_status : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 'UNPAID' : payDetails.payment_status);
+          const finalPaymentConfirmed = hasRecordedPayment ? payDetails.payment_confirmed_by_company : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? false : payDetails.payment_confirmed_by_company);
+          const finalPaymentConfirmedAt = hasRecordedPayment ? payDetails.payment_confirmed_at : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_at);
+          const finalPaymentConfirmedBy = hasRecordedPayment ? payDetails.payment_confirmed_by : (latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_by);
+          const finalCompletedUnpaid = Boolean((latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid) && !finalIsPaid && (!finalPaidAmount || finalPaidAmount === 0));
+
+          const latestPaymentConfig = eventsData?.find((e: any) => e.event_type === 'PAYMENT_CONFIG');
+          const isAdvanceEnabledResolved = persistedQuote?.enable_advance !== undefined
+            ? Boolean(persistedQuote.enable_advance)
+            : (latestPaymentConfig?.metadata?.enable_advance !== undefined
+              ? Boolean(latestPaymentConfig.metadata.enable_advance)
+              : (existing?.enable_advance !== undefined
+                ? Boolean(existing.enable_advance)
+                : ((data as any).payment_terms_type === 'FULL' || (existing as any)?.payment_terms_type === 'FULL'
+                  ? false
+                  : Boolean(finalAdvancePercentage && finalAdvancePercentage > 0))));
+
+          const safeAdvancePercentage = !isAdvanceEnabledResolved
+            ? null
+            : (finalAdvancePercentage && finalAdvancePercentage > 0 ? finalAdvancePercentage : null);
+
           const merged: Quotation = {
             ...(existing || {}),
             ...(persistedQuote || {}),
             ...data,
+            enable_advance: isAdvanceEnabledResolved,
+            advance_percentage: safeAdvancePercentage,
+            payment_terms_type: !isAdvanceEnabledResolved
+              ? 'FULL'
+              : (persistedQuote?.payment_terms_type || latestPaymentConfig?.metadata?.payment_terms_type || existing?.payment_terms_type || 'ADVANCE_SPLIT'),
             status: currentStatus,
             in_progress_at: latestInProgressEvent
               ? (latestInProgressEvent.metadata?.in_progress_at || latestInProgressEvent.created_at)
@@ -3621,38 +4407,55 @@ class QuoteFlowStore {
                   ? latestInProgressEvent.metadata.new_total_days
                   : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
                       ? latestInProgressEvent.metadata.estimated_days
-                      : persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || 7))
-              : (persistedQuote?.estimated_days || filePayment?.estimated_days || existing?.estimated_days || null),
-            estimated_completion_date: latestInProgressEvent
-              ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
-              : (persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null),
+                      : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null)))
+              : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null),
+            estimated_completion_date: (() => {
+              const explicit = latestInProgressEvent
+                ? (latestInProgressEvent.metadata?.new_estimated_completion_date || latestInProgressEvent.metadata?.estimated_completion_date || persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null)
+                : (persistedQuote?.estimated_completion_date || filePayment?.estimated_completion_date || existing?.estimated_completion_date || null);
+              if (explicit) return explicit;
+              const days = latestInProgressEvent
+                ? (typeof latestInProgressEvent.metadata?.new_total_days === 'number'
+                    ? latestInProgressEvent.metadata.new_total_days
+                    : (typeof latestInProgressEvent.metadata?.estimated_days === 'number'
+                        ? latestInProgressEvent.metadata.estimated_days
+                        : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null)))
+                : (persistedQuote?.estimated_days ?? filePayment?.estimated_days ?? existing?.estimated_days ?? null);
+              if (typeof days === 'number' && days > 0) {
+                const base = latestInProgressEvent?.created_at ? new Date(latestInProgressEvent.created_at).getTime() : Date.now();
+                return new Date(base + days * 86400000).toISOString();
+              }
+              return null;
+            })(),
             estimated_time_text: latestInProgressEvent?.metadata?.notes || persistedQuote?.estimated_time_text || filePayment?.estimated_time_text || existing?.estimated_time_text || null,
             payment_records: payDetails.payment_records || persistedQuote?.payment_records || filePayment?.payment_records || existing?.payment_records || [],
             expired_at: expiredAt,
-            is_paid: isPaid,
+            is_paid: finalIsPaid,
             paid_at: payDetails.paid_at,
             payment_method: payDetails.payment_method,
             payment_notes: payDetails.payment_notes,
             advance_payment_notes: payDetails.advance_payment_notes,
             final_payment_notes: payDetails.final_payment_notes,
-            paid_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.paid_amount,
-            balance_amount: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? Number(data.grand_total) : payDetails.balance_amount,
-            advance_percentage: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 0 : payDetails.advance_percentage,
-            payment_status: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? 'UNPAID' : payDetails.payment_status,
-            payment_confirmed_by_company: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? false : payDetails.payment_confirmed_by_company,
-            payment_confirmed_at: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_at,
-            payment_confirmed_by: latestCompletedEvent && latestCompletedEvent.metadata?.unpaid ? null : payDetails.payment_confirmed_by,
+            paid_amount: finalPaidAmount,
+            balance_amount: finalBalance,
+            payment_status: finalPaymentStatus,
+            payment_confirmed_by_company: finalPaymentConfirmed,
+            payment_confirmed_at: finalPaymentConfirmedAt,
+            payment_confirmed_by: finalPaymentConfirmedBy,
             completed_at: latestCompletedEvent ? (latestCompletedEvent.metadata?.completed_at || latestCompletedEvent.created_at) : existing?.completed_at || null,
-            completed_unpaid: Boolean(latestCompletedEvent?.metadata?.unpaid || existing?.completed_unpaid),
+            completed_unpaid: finalCompletedUnpaid,
             chat_count: chatState.chatCount,
             unread_chat_count: chatState.unreadChatCount,
             has_unread_chat: chatState.unreadChatCount > 0,
             payment_display_mode: payDetails.payment_display_mode,
             show_bank_details: payDetails.show_bank_details,
             show_upi_details: payDetails.show_upi_details,
+            show_payment_link: payDetails.show_payment_link,
             show_crypto_details: payDetails.show_crypto_details,
             bank_details: payDetails.bank_details,
             upi_details: payDetails.upi_details,
+            payment_link: payDetails.payment_link,
+            payment_link_label: payDetails.payment_link_label,
             crypto_details: payDetails.crypto_details,
             payment_terms_instructions: payDetails.payment_terms_instructions || (data as any).payment_terms_instructions || existing?.payment_terms_instructions || '',
             accepted_payment_methods: payDetails.accepted_payment_methods || (data as any).accepted_payment_methods || existing?.accepted_payment_methods || null,
@@ -3670,6 +4473,9 @@ class QuoteFlowStore {
           };
 
           this.quotations.set(data.id, merged);
+          if (data.quotation_number) {
+            this.quotations.set(data.quotation_number, merged);
+          }
           if (data.customer) {
             this.customers.set(data.customer.id, data.customer as Customer);
           }
@@ -3697,7 +4503,13 @@ class QuoteFlowStore {
             try {
               if (row.layout_style) {
                 const parsed = JSON.parse(row.layout_style) as Quotation;
-                if (parsed && (parsed.public_token === cleanToken || parsed.public_token_hash === hashed || parsed.public_token === token)) {
+                if (
+                  parsed &&
+                  (parsed.public_token === cleanToken ||
+                    parsed.public_token_hash === hashed ||
+                    parsed.public_token === token ||
+                    (parsed.public_token && parsed.public_token.toLowerCase() === cleanToken.toLowerCase()))
+                ) {
                   this.quotations.set(parsed.id, parsed);
                   if (parsed.items) this.quotationItems.set(parsed.id, parsed.items);
                   const org = (await this.getOrganization(parsed.organization_id)) || this.organizations.get(parsed.organization_id);
@@ -3724,7 +4536,11 @@ class QuoteFlowStore {
 
     // Lookup by raw token or hash
     const quote = Array.from(this.quotations.values()).find(
-      (q) => q.public_token === cleanToken || q.public_token_hash === hashed || q.public_token === token
+      (q) =>
+        q.public_token === cleanToken ||
+        q.public_token_hash === hashed ||
+        q.public_token === token ||
+        (Boolean(q.public_token) && q.public_token.toLowerCase() === cleanToken.toLowerCase())
     );
 
     if (!quote) return null;
@@ -3761,24 +4577,32 @@ class QuoteFlowStore {
     payment_display_mode?: PaymentDisplayMode;
     show_bank_details?: boolean;
     show_upi_details?: boolean;
+    show_payment_link?: boolean;
     show_cash_details?: boolean;
     show_crypto_details?: boolean;
     cash_instructions?: string | null;
     bank_details?: BankAccountDetails | null;
     upi_details?: UpiPaymentDetails | null;
+    payment_link?: string | null;
+    payment_link_label?: string | null;
     crypto_details?: CryptoPaymentDetails | null;
     pin_protection_enabled?: boolean;
     pin?: string | null;
     pin_hash?: string | null;
     tax_mode?: any;
     tax_name?: string | null;
+    country?: string | null;
+    supplier_state?: string | null;
     place_of_supply?: string | null;
     customer_gstin?: string | null;
   }): Promise<Quotation> {
     const orgId = data.organization_id || DEFAULT_ORG_ID;
     const org = await this.getOrganization(orgId);
     const customerId = data.customer_id || 'b0000000-0000-0000-0000-000000000001';
-    const customer = this.customers.get(customerId);
+    let customer = this.customers.get(customerId);
+    if (!customer && customerId) {
+      customer = (await this.getCustomerById(customerId, orgId)) || undefined;
+    }
     const env: 'test' | 'live' = org?.mode === 'test' ? 'test' : 'live';
 
     const effectiveTaxMode = data.tax_mode || org?.default_tax_mode || 'exclusive';
@@ -3790,19 +4614,43 @@ class QuoteFlowStore {
       org?.business_state ||
       org?.state ||
       null;
-    const effectiveSupplierState = org?.business_state || org?.state || null;
+    const effectiveSupplierState = data.supplier_state || org?.business_state || org?.state || null;
+
+    const isIndia = Boolean(
+      (data.country || org?.country || '').toLowerCase() === 'india' ||
+      (data.country || org?.country || '').toUpperCase() === 'IN' ||
+      org?.billing_region === 'INDIA' ||
+      data.currency === 'INR' ||
+      org?.default_currency === 'INR'
+    );
+    const isUAE = Boolean(
+      (data.country || org?.country || '').toLowerCase().includes('emirates') ||
+      (data.country || org?.country || '').toUpperCase() === 'AE' ||
+      (data.country || org?.country || '').toLowerCase() === 'uae' ||
+      data.currency === 'AED' ||
+      org?.default_currency === 'AED'
+    );
+    const resolvedCountry = data.country || org?.country || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US'));
+    const resolvedTaxName = !isIndia
+      ? (data.tax_name && !data.tax_name.toUpperCase().includes('GST')
+          ? data.tax_name
+          : (isUAE ? 'VAT' : (org?.tax_system && !org?.tax_system.toUpperCase().includes('GST') ? org.tax_system : 'Tax')))
+      : (data.tax_name || org?.tax_system || 'GST');
 
     // Recalculate totals server-side
     const calculation = calculateQuotationTotals({
       items: data.items,
+      currency: data.currency,
       discount_type: data.discount_type || 'PERCENTAGE',
       discount_value: data.discount_value || 0,
       tax_rate: data.tax_rate || 0,
       tax_mode: effectiveTaxMode,
-      country: org?.country || 'India',
+      country: resolvedCountry,
+      is_india_gst: isIndia,
       supplier_state: effectiveSupplierState,
       place_of_supply: effectivePlaceOfSupply,
-      tax_name: data.tax_name || org?.tax_system || 'GST',
+      tax_name: resolvedTaxName,
+      gst_registered: isIndia ? (org?.gst_registered ?? true) : false,
     });
 
     const quotationNumber = await this.generateNextQuotationNumber(orgId, env);
@@ -3813,11 +4661,14 @@ class QuoteFlowStore {
     const paymentDisplayMode = data.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
     const showBank = data.show_bank_details !== undefined ? data.show_bank_details : (org?.default_show_bank_details ?? true);
     const showUpi = data.show_upi_details !== undefined ? data.show_upi_details : (org?.default_show_upi_details ?? true);
+    const showPaymentLink = data.show_payment_link !== undefined ? data.show_payment_link : (org?.default_show_payment_link ?? false);
     const showCash = data.show_cash_details !== undefined ? data.show_cash_details : (org?.default_show_cash_details ?? true);
     const showCrypto = data.show_crypto_details !== undefined ? data.show_crypto_details : (org?.default_show_crypto_details ?? false);
     const cashInstructions = data.cash_instructions !== undefined ? data.cash_instructions : (org?.default_cash_instructions || '');
     const bankDetails = data.bank_details !== undefined ? data.bank_details : (org?.default_bank_details || null);
     const upiDetails = data.upi_details !== undefined ? data.upi_details : (org?.default_upi_details || null);
+    const paymentLink = data.payment_link !== undefined ? data.payment_link : (org?.default_payment_link || null);
+    const paymentLinkLabel = data.payment_link_label !== undefined ? data.payment_link_label : (org?.default_payment_link_label || null);
     const cryptoDetails = data.crypto_details !== undefined ? data.crypto_details : (org?.default_crypto_details || null);
 
     const pinProtectionEnabled = Boolean(data.pin_protection_enabled);
@@ -3858,23 +4709,38 @@ class QuoteFlowStore {
       tax_breakdown: calculation.tax_breakdown,
       grand_total: calculation.grand_total,
       notes: data.notes !== undefined ? data.notes : '',
-      terms_conditions: data.terms_conditions !== undefined ? data.terms_conditions : (org?.default_terms || ''),
+      terms_conditions: harmonizeTermsAndConditions(
+        data.enable_advance === false ? 0 : (data.advance_percentage !== undefined ? data.advance_percentage : (data.enable_advance ? 50 : 0)),
+        data.terms_conditions !== undefined ? data.terms_conditions : (org?.default_terms || '')
+      ),
       public_token: publicToken,
       public_token_hash: publicTokenHash,
       is_token_revoked: false,
       view_count: 0,
       attachments: data.attachments || [],
-      advance_percentage: data.advance_percentage !== undefined ? data.advance_percentage : 50,
+      enable_advance: data.enable_advance !== undefined
+        ? Boolean(data.enable_advance)
+        : Boolean(data.advance_percentage !== null && data.advance_percentage !== undefined && data.advance_percentage > 0 && data.payment_terms_type !== 'FULL'),
+      advance_percentage: data.enable_advance === false
+        ? null
+        : (data.advance_percentage !== undefined ? data.advance_percentage : (data.enable_advance ? 50 : null)),
+      payment_terms_type: data.enable_advance === false ? 'FULL' : (data.payment_terms_type || 'FULL'),
       accepted_payment_methods: data.accepted_payment_methods || ['Bank Transfer', 'Online / Card', 'Cheque'],
-      payment_terms_instructions: data.payment_terms_instructions || '',
+      payment_terms_instructions: harmonizePaymentTerms(
+        data.enable_advance === false ? 0 : (data.advance_percentage !== undefined ? data.advance_percentage : (data.enable_advance ? 50 : 0)),
+        data.payment_terms_instructions || ''
+      ),
       payment_display_mode: paymentDisplayMode,
       show_bank_details: showBank,
       show_upi_details: showUpi,
+      show_payment_link: showPaymentLink,
       show_cash_details: showCash,
       show_crypto_details: showCrypto,
       cash_instructions: cashInstructions,
       bank_details: bankDetails,
       upi_details: upiDetails,
+      payment_link: paymentLink,
+      payment_link_label: paymentLinkLabel,
       crypto_details: cryptoDetails,
       pin_protection_enabled: pinProtectionEnabled,
       pin: pin,
@@ -3892,15 +4758,20 @@ class QuoteFlowStore {
       payment_display_mode: paymentDisplayMode,
       show_bank_details: showBank,
       show_upi_details: showUpi,
+      show_payment_link: showPaymentLink,
       show_cash_details: showCash,
       show_crypto_details: showCrypto,
       cash_instructions: cashInstructions,
       bank_details: bankDetails,
       upi_details: upiDetails,
+      payment_link: paymentLink,
+      payment_link_label: paymentLinkLabel,
       crypto_details: cryptoDetails,
-      payment_terms_instructions: data.payment_terms_instructions || '',
+      payment_terms_instructions: newQuotation.payment_terms_instructions || '',
       accepted_payment_methods: data.accepted_payment_methods || null,
-      advance_percentage: data.advance_percentage !== undefined ? data.advance_percentage : 50,
+      enable_advance: newQuotation.enable_advance,
+      advance_percentage: newQuotation.advance_percentage,
+      payment_terms_type: newQuotation.payment_terms_type,
     });
 
     // Save items with classification and tax breakdowns
@@ -3931,6 +4802,8 @@ class QuoteFlowStore {
         igst_rate: orig.igst_rate,
         igst_amount: orig.igst_amount,
         tax_category: orig.tax_category || null,
+        is_optional: orig.is_optional ?? item.is_optional ?? false,
+        is_selected: orig.is_selected ?? item.is_selected ?? true,
       };
     });
     this.quotationItems.set(id, savedItems);
@@ -4052,6 +4925,8 @@ class QuoteFlowStore {
           actor_name: 'Business User',
           event_type: 'PAYMENT_CONFIG',
           metadata: {
+            enable_advance: newQuotation.enable_advance,
+            payment_terms_type: newQuotation.payment_terms_type,
             payment_display_mode: newQuotation.payment_display_mode,
             show_bank_details: newQuotation.show_bank_details,
             show_upi_details: newQuotation.show_upi_details,
@@ -4062,6 +4937,19 @@ class QuoteFlowStore {
             payment_terms_instructions: newQuotation.payment_terms_instructions,
             accepted_payment_methods: newQuotation.accepted_payment_methods,
             advance_percentage: newQuotation.advance_percentage,
+            tax_mode: newQuotation.tax_mode,
+            tax_name: newQuotation.tax_name,
+            taxable_subtotal: newQuotation.taxable_subtotal,
+            place_of_supply: newQuotation.place_of_supply,
+            supplier_state: newQuotation.supplier_state,
+            customer_gstin: newQuotation.customer_gstin,
+            cgst_rate: newQuotation.cgst_rate,
+            cgst_amount: newQuotation.cgst_amount,
+            sgst_rate: newQuotation.sgst_rate,
+            sgst_amount: newQuotation.sgst_amount,
+            igst_rate: newQuotation.igst_rate,
+            igst_amount: newQuotation.igst_amount,
+            tax_breakdown: newQuotation.tax_breakdown,
           },
         });
 
@@ -4087,28 +4975,134 @@ class QuoteFlowStore {
     return {
       ...newQuotation,
       items: savedItems,
-      customer: this.customers.get(customerId),
+      customer: customer || this.customers.get(customerId) || null,
       organization: org || undefined,
     };
   }
 
+  private getDeletedQuotationsFilePath(): string {
+    if (isCloudflareWorker) return '';
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'deleted-quotations.json');
+  }
+
+  private loadDeletedQuotationsFromFile(): void {
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getDeletedQuotationsFilePath();
+      if (p && fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            this.deletedQuotations.set(item.id, item);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  private saveDeletedQuotationsToFile(): void {
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getDeletedQuotationsFilePath();
+      const records = Array.from(this.deletedQuotations.values());
+      if (p) fs.writeFileSync(p, JSON.stringify(records, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async getDeletedQuotations(orgId: string = DEFAULT_ORG_ID): Promise<DeletedQuotationRecord[]> {
+    this.loadDeletedQuotationsFromFile();
+    return Array.from(this.deletedQuotations.values()).filter(
+      (d) => d.organization_id === orgId
+    );
+  }
+
   public async deleteQuotation(id: string, orgId: string = DEFAULT_ORG_ID): Promise<boolean> {
+    this.loadDeletedQuotationsFromFile();
+    const existingQuote =
+      this.quotations.get(id) ||
+      Array.from(this.quotations.values()).find((q) => q.id === id || q.quotation_number === id);
+
+    const targetId = existingQuote ? existingQuote.id : id;
+    const targetNumber = existingQuote ? existingQuote.quotation_number : undefined;
+
+    if (existingQuote) {
+      if (existingQuote.organization_id && orgId && existingQuote.organization_id !== orgId) {
+        throw new Error('Unauthorized to delete quotation from another organization');
+      }
+
+      // 1. Commercial accounting & audit protection: Prevent deletion of committed/approved/completed orders
+      const isLockedStatus = ['APPROVED', 'IN_PROGRESS', 'PAYMENT_COMPLETED', 'COMPLETED'].includes(existingQuote.status);
+      const hasIssuedInvoiceFlag = Boolean(existingQuote.has_issued_invoice || existingQuote.issued_invoice_id || existingQuote.invoice_number);
+      const hasPayments = Boolean(existingQuote.is_paid || (existingQuote.paid_amount && existingQuote.paid_amount > 0));
+
+      // 2. Also check if any commercial tax invoice exists for this quotation
+      await this.loadInvoicesFromSupabase(orgId);
+      const linkedInvoice = Array.from(this.invoices.values()).find(
+        (inv) =>
+          (inv.quotation_id === targetId || (targetNumber && inv.quotation_id === targetNumber)) &&
+          !inv.deleted_at &&
+          inv.status !== 'DRAFT'
+      );
+
+      if (isLockedStatus || hasIssuedInvoiceFlag || hasPayments || linkedInvoice) {
+        const invInfo = linkedInvoice?.invoice_number || existingQuote.invoice_number;
+        const reason = isLockedStatus
+          ? `Quotation status is "${existingQuote.status.replace('_', ' ')}"`
+          : linkedInvoice || hasIssuedInvoiceFlag
+          ? `A commercial tax invoice (${invInfo || 'Tax Invoice'}) has already been issued`
+          : 'Payments have been recorded against this quotation';
+
+        throw new Error(
+          `Cannot delete quotation ${existingQuote.quotation_number}. ${reason}. In accordance with statutory accounting and GST compliance standards, completed, approved, or invoiced orders are protected against deletion. To rescind this order, void the tax invoice and mark the quotation as cancelled instead.`
+        );
+      }
+
+      existingQuote.deleted_at = new Date().toISOString();
+      const customer = existingQuote.customer || this.customers.get(existingQuote.customer_id);
+      const deletedRecord: DeletedQuotationRecord = {
+        id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        quotation_id: targetId,
+        quotation_number: existingQuote.quotation_number,
+        customer_name: customer?.name || (existingQuote as any).customer_name || 'Customer',
+        grand_total: existingQuote.grand_total || 0,
+        currency: existingQuote.currency || 'USD',
+        deleted_at: new Date().toISOString(),
+        organization_id: orgId || existingQuote.organization_id || DEFAULT_ORG_ID,
+      };
+      this.deletedQuotations.set(deletedRecord.id, deletedRecord);
+      this.saveDeletedQuotationsToFile();
+    }
+
     try {
       const supabase = createAdminClient();
       if (supabase) {
+        // Try soft delete update first
+        try {
+          await supabase
+            .from('quotations')
+            .update({ deleted_at: new Date().toISOString() })
+            .or(`id.eq.${targetId},quotation_number.eq.${targetNumber || targetId}`)
+            .eq('organization_id', orgId);
+        } catch {}
+
         // Clean up child tables first to satisfy foreign key constraints
         await Promise.allSettled([
-          supabase.from('quotation_items').delete().eq('quotation_id', id),
-          supabase.from('signatures').delete().eq('quotation_id', id),
-          supabase.from('quotation_views').delete().eq('quotation_id', id),
-          supabase.from('quotation_events').delete().eq('quotation_id', id),
-          supabase.from('templates').delete().eq('name', `QUOTE:${id}`),
+          supabase.from('quotation_items').delete().eq('quotation_id', targetId),
+          supabase.from('signatures').delete().eq('quotation_id', targetId),
+          supabase.from('quotation_views').delete().eq('quotation_id', targetId),
+          supabase.from('quotation_events').delete().eq('quotation_id', targetId),
+          supabase.from('templates').delete().eq('name', `QUOTE:${targetId}`),
         ]);
 
         const { error } = await supabase
           .from('quotations')
           .delete()
-          .eq('id', id)
+          .or(`id.eq.${targetId},quotation_number.eq.${targetNumber || targetId}`)
           .eq('organization_id', orgId);
 
         if (error) {
@@ -4120,12 +5114,194 @@ class QuoteFlowStore {
     }
 
     this.quotations.delete(id);
+    this.quotations.delete(targetId);
+    if (targetNumber) {
+      for (const [k, v] of this.quotations.entries()) {
+        if (v.quotation_number === targetNumber) {
+          this.quotations.delete(k);
+        }
+      }
+    }
     this.quotationItems.delete(id);
+    this.quotationItems.delete(targetId);
     this.signatures.delete(id);
+    this.signatures.delete(targetId);
     this.views.delete(id);
+    this.views.delete(targetId);
     this.events.delete(id);
+    this.events.delete(targetId);
+
+    // Auto-resolve any AI recommendations associated with this quotation immediately
+    await this.resolveRecommendationsForQuote(targetId, orgId, 'source_deleted');
+    if (targetNumber) {
+      await this.resolveRecommendationsForQuote(targetNumber, orgId, 'source_deleted');
+    }
 
     return true;
+  }
+
+  // --- AI RECOMMENDATIONS PERSISTENCE & LIFECYCLE ---
+  private getRecommendationsFilePath(): string {
+    if (isCloudflareWorker) return '';
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'recommendations.json');
+  }
+
+  private loadRecommendationsFromFile(): void {
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getRecommendationsFilePath();
+      if (p && fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            const id = item.id || item.recommendation_id;
+            if (id) {
+              this.recommendations.set(id, { ...item, id });
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  private saveRecommendationsToFile(): void {
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getRecommendationsFilePath();
+      const records = Array.from(this.recommendations.values());
+      if (p) fs.writeFileSync(p, JSON.stringify(records, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async getRecommendations(orgId: string = DEFAULT_ORG_ID): Promise<PersistentRecommendationRecord[]> {
+    this.loadRecommendationsFromFile();
+    return Array.from(this.recommendations.values()).filter(
+      (r) => r.organization_id === orgId
+    );
+  }
+
+  public async getRecommendationByKey(orgId: string, key: string): Promise<PersistentRecommendationRecord | null> {
+    this.loadRecommendationsFromFile();
+    for (const r of this.recommendations.values()) {
+      if (r.organization_id === orgId && r.recommendation_key === key) {
+        return r;
+      }
+    }
+    return null;
+  }
+
+  public async saveRecommendation(rec: PersistentRecommendationRecord): Promise<PersistentRecommendationRecord> {
+    this.loadRecommendationsFromFile();
+    const effectiveId = rec.id || (rec as any).recommendation_id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const normalized: PersistentRecommendationRecord = {
+      ...rec,
+      id: effectiveId,
+      updated_at: rec.updated_at || new Date().toISOString(),
+      created_at: rec.created_at || new Date().toISOString(),
+    };
+    this.recommendations.set(effectiveId, normalized);
+    this.saveRecommendationsToFile();
+    return normalized;
+  }
+
+  public async updateRecommendationState(
+    idOrKey: string,
+    orgId: string,
+    updates: Partial<PersistentRecommendationRecord>
+  ): Promise<PersistentRecommendationRecord | null> {
+    this.loadRecommendationsFromFile();
+    let target = this.recommendations.get(idOrKey);
+    if (!target) {
+      for (const r of this.recommendations.values()) {
+        if (r.organization_id === orgId && (r.recommendation_key === idOrKey || r.id === idOrKey)) {
+          target = r;
+          break;
+        }
+      }
+    }
+    if (!target) return null;
+
+    const updated: PersistentRecommendationRecord = {
+      ...target,
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    this.recommendations.set(updated.id, updated);
+    this.saveRecommendationsToFile();
+    return updated;
+  }
+
+  public async resolveRecommendationsForQuote(
+    quoteIdOrNumber: string,
+    orgId: string = DEFAULT_ORG_ID,
+    reason: RecommendationResolvedReason = 'source_deleted'
+  ): Promise<number> {
+    this.loadRecommendationsFromFile();
+    let count = 0;
+    const now = new Date().toISOString();
+    for (const r of this.recommendations.values()) {
+      if (
+        r.organization_id === orgId &&
+        r.status !== 'resolved' &&
+        (r.quote_id === quoteIdOrNumber ||
+          r.quote_number === quoteIdOrNumber ||
+          r.recommendation_key.includes(quoteIdOrNumber))
+      ) {
+        r.status = 'resolved';
+        r.resolved_at = now;
+        r.resolved_reason = reason;
+        r.updated_at = now;
+        this.recommendations.set(r.id, r);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.saveRecommendationsToFile();
+    }
+    return count;
+  }
+
+  public async resolveRecommendationsForInvoice(
+    invoiceIdOrNumber: string,
+    orgId: string = DEFAULT_ORG_ID,
+    reason: RecommendationResolvedReason = 'source_deleted'
+  ): Promise<number> {
+    this.loadRecommendationsFromFile();
+    let count = 0;
+    const now = new Date().toISOString();
+    for (const r of this.recommendations.values()) {
+      if (
+        r.organization_id === orgId &&
+        r.status !== 'resolved' &&
+        (r.invoice_id === invoiceIdOrNumber ||
+          r.invoice_number === invoiceIdOrNumber ||
+          r.recommendation_key.includes(invoiceIdOrNumber))
+      ) {
+        r.status = 'resolved';
+        r.resolved_at = now;
+        r.resolved_reason = reason;
+        r.updated_at = now;
+        this.recommendations.set(r.id, r);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.saveRecommendationsToFile();
+    }
+    return count;
+  }
+
+  public async getRecentAiActions(orgId: string = DEFAULT_ORG_ID, limit: number = 10): Promise<PersistentRecommendationRecord[]> {
+    this.loadRecommendationsFromFile();
+    const actions = Array.from(this.recommendations.values())
+      .filter((r) => r.organization_id === orgId && (r.action_taken || r.status === 'actioned' || r.status === 'dismissed' || r.status === 'ignored' || r.status === 'snoozed'))
+      .sort((a, b) => new Date(b.action_taken_at || b.updated_at).getTime() - new Date(a.action_taken_at || a.updated_at).getTime());
+    return actions.slice(0, limit);
   }
 
   public async updateQuotation(
@@ -4150,17 +5326,22 @@ class QuoteFlowStore {
       payment_display_mode?: PaymentDisplayMode;
       show_bank_details?: boolean;
       show_upi_details?: boolean;
+      show_payment_link?: boolean;
       show_cash_details?: boolean;
       show_crypto_details?: boolean;
       cash_instructions?: string | null;
       bank_details?: BankAccountDetails | null;
       upi_details?: UpiPaymentDetails | null;
+      payment_link?: string | null;
+      payment_link_label?: string | null;
       crypto_details?: CryptoPaymentDetails | null;
       pin_protection_enabled?: boolean;
       pin?: string | null;
       pin_hash?: string | null;
       tax_mode?: any;
       tax_name?: string | null;
+      country?: string | null;
+      supplier_state?: string | null;
       place_of_supply?: string | null;
       customer_gstin?: string | null;
     },
@@ -4176,12 +5357,13 @@ class QuoteFlowStore {
       throw new Error('Unauthorized to modify quotation from another organization');
     }
 
-    if (existing.status === 'COMPLETED') {
-      throw new Error('Completed quotation is locked and cannot be edited.');
-    }
+    const isOnlyPinUpdate = (data.pin !== undefined || data.pin_protection_enabled !== undefined || data.pin_hash !== undefined) &&
+      !data.items && !data.title && !data.currency && data.discount_value === undefined && data.tax_rate === undefined && !data.customer_id;
 
-    if (existing.status === 'APPROVED') {
-      throw new Error('Approved quotation is immutable. Please create a revision.');
+    if (!isOnlyPinUpdate) {
+      if (existing.status === 'COMPLETED' || existing.status === 'PAYMENT_COMPLETED') {
+        throw new Error('Completed quotation is locked and cannot be edited.');
+      }
     }
 
     const org = await this.getOrganization(existing.organization_id);
@@ -4196,16 +5378,43 @@ class QuoteFlowStore {
     let newItems = this.quotationItems.get(id) || [];
 
     if (data.items) {
+      const currency = data.currency || existing.currency || org?.default_currency || 'INR';
+      const isIndia = Boolean(
+        (data.country || org?.country || '').toLowerCase() === 'india' ||
+        (data.country || org?.country || '').toUpperCase() === 'IN' ||
+        org?.billing_region === 'INDIA' ||
+        currency === 'INR' ||
+        org?.default_currency === 'INR'
+      );
+      const isUAE = Boolean(
+        (data.country || org?.country || '').toLowerCase().includes('emirates') ||
+        (data.country || org?.country || '').toUpperCase() === 'AE' ||
+        (data.country || org?.country || '').toLowerCase() === 'uae' ||
+        currency === 'AED' ||
+        org?.default_currency === 'AED'
+      );
+      const resolvedCountry = data.country || org?.country || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US'));
+      const resolvedTaxName = !isIndia
+        ? (data.tax_name && !data.tax_name.toUpperCase().includes('GST')
+            ? data.tax_name
+            : (existing.tax_name && !existing.tax_name.toUpperCase().includes('GST')
+                ? existing.tax_name
+                : (isUAE ? 'VAT' : (org?.tax_system && !org?.tax_system.toUpperCase().includes('GST') ? org.tax_system : 'Tax'))))
+        : (data.tax_name || existing.tax_name || org?.tax_system || 'GST');
+
       calculation = calculateQuotationTotals({
         items: data.items,
+        currency,
         discount_type: data.discount_type || existing.discount_type,
         discount_value: data.discount_value !== undefined ? data.discount_value : existing.discount_value,
         tax_rate: data.tax_rate !== undefined ? data.tax_rate : existing.tax_rate,
         tax_mode: effectiveTaxMode,
-        country: org?.country || 'India',
+        country: resolvedCountry,
+        is_india_gst: isIndia,
         supplier_state: effectiveSupplierState,
         place_of_supply: effectivePlaceOfSupply,
-        tax_name: data.tax_name || existing.tax_name || org?.tax_system || 'GST',
+        tax_name: resolvedTaxName,
+        gst_registered: isIndia ? (org?.gst_registered ?? true) : false,
       });
 
       newItems = calculation.items.map((item: any, idx: number) => {
@@ -4236,6 +5445,8 @@ class QuoteFlowStore {
           igst_rate: orig.igst_rate,
           igst_amount: orig.igst_amount,
           tax_category: orig.tax_category || null,
+          is_optional: orig.is_optional ?? item.is_optional ?? false,
+          is_selected: orig.is_selected ?? item.is_selected ?? true,
         };
       });
       this.quotationItems.set(id, newItems);
@@ -4247,8 +5458,67 @@ class QuoteFlowStore {
       ? data.pin_hash
       : (data.pin ? this.hashPin(data.pin) : existing.pin_hash);
 
+    // Revision tracking: if quote content has changes, update quotation_number to include -REV1, -REV2, etc.
+    let nextQuotationNumber = existing.quotation_number;
+    let nextRevisionNumber = existing.revision_number || 1;
+
+    // Check if items or core quotation fields were modified
+    const isItemsModified = Boolean(
+      data.items &&
+      (data.items.length !== (existing.items?.length || 0) ||
+       (calculation && calculation.grand_total !== existing.grand_total) ||
+       data.items.some((it: any, idx: number) => {
+         const ext = existing.items?.[idx];
+         if (!ext) return true;
+         return (
+           it.description !== ext.description ||
+           Number(it.quantity) !== Number(ext.quantity) ||
+           Number(it.unit_price) !== Number(ext.unit_price) ||
+           it.unit !== ext.unit ||
+           Number(it.discount_value) !== Number(ext.discount_value) ||
+           Number(it.tax_rate) !== Number(ext.tax_rate)
+         );
+       }))
+    );
+
+    const isCoreFieldModified = Boolean(
+      (data.title !== undefined && data.title !== existing.title) ||
+      (data.discount_value !== undefined && data.discount_value !== existing.discount_value) ||
+      (data.tax_rate !== undefined && data.tax_rate !== existing.tax_rate) ||
+      (data.tax_mode !== undefined && data.tax_mode !== existing.tax_mode) ||
+      (data.valid_until !== undefined && data.valid_until !== existing.valid_until) ||
+      (data.customer_id !== undefined && data.customer_id !== existing.customer_id) ||
+      (data.currency !== undefined && data.currency !== existing.currency) ||
+      (data.notes !== undefined && data.notes !== existing.notes) ||
+      (data.terms_conditions !== undefined && data.terms_conditions !== existing.terms_conditions)
+    );
+
+    if (!isOnlyPinUpdate) {
+      // Extract base number without previous -REV or -V suffix
+      const baseNumber = existing.quotation_number.replace(/[-_](REV|V|rev|v)[-_]?\d+$/i, '');
+      const revMatch = existing.quotation_number.match(/[-_](REV|V|rev|v)[-_]?(\d+)$/i);
+      let currentRevCount = 0;
+      if (revMatch) {
+        currentRevCount = parseInt(revMatch[2], 10);
+      } else if (existing.revision_number && existing.revision_number > 1) {
+        currentRevCount = existing.revision_number - 1;
+      }
+      const nextRevCount = currentRevCount + 1;
+      const revStr = `REV${String(nextRevCount).padStart(2, '0')}`;
+      nextQuotationNumber = `${baseNumber}-${revStr}`;
+      nextRevisionNumber = nextRevCount + 1;
+    }
+
+    // When edited on unapproved, approved, or in-process stages, make customer approve again:
+    const shouldRequireReApproval = !isOnlyPinUpdate;
+    const resolvedStatus = shouldRequireReApproval
+      ? (data.status === 'DRAFT' && existing.status === 'DRAFT' ? 'DRAFT' : 'SENT')
+      : (data.status || existing.status);
+
     const updated: Quotation = {
       ...existing,
+      quotation_number: (data as any).quotation_number || nextQuotationNumber,
+      revision_number: (data as any).revision_number || nextRevisionNumber,
       customer_id: data.customer_id || existing.customer_id,
       title: data.title || existing.title,
       issue_date: data.issue_date || existing.issue_date,
@@ -4274,28 +5544,58 @@ class QuoteFlowStore {
       tax_breakdown: calculation ? calculation.tax_breakdown : existing.tax_breakdown,
       grand_total: calculation ? calculation.grand_total : existing.grand_total,
       notes: data.notes !== undefined ? data.notes : existing.notes,
-      terms_conditions: data.terms_conditions !== undefined ? data.terms_conditions : existing.terms_conditions,
+      enable_advance: data.enable_advance !== undefined ? data.enable_advance : existing.enable_advance,
+      advance_percentage: data.enable_advance === false
+        ? null
+        : (data.advance_percentage !== undefined ? data.advance_percentage : existing.advance_percentage),
+      payment_terms_type: data.enable_advance === false ? 'FULL' : (data.payment_terms_type || existing.payment_terms_type || 'FULL'),
+      terms_conditions: data.terms_conditions !== undefined
+        ? harmonizeTermsAndConditions(data.enable_advance === false ? 0 : (data.advance_percentage ?? existing.advance_percentage), data.terms_conditions)
+        : (data.advance_percentage !== undefined || data.enable_advance !== undefined
+          ? harmonizeTermsAndConditions(data.enable_advance === false ? 0 : (data.advance_percentage ?? existing.advance_percentage), existing.terms_conditions)
+          : existing.terms_conditions),
       attachments: data.attachments !== undefined ? data.attachments : existing.attachments,
-      advance_percentage: data.advance_percentage !== undefined ? data.advance_percentage : existing.advance_percentage,
       accepted_payment_methods: data.accepted_payment_methods !== undefined ? data.accepted_payment_methods : existing.accepted_payment_methods,
-      payment_terms_instructions: data.payment_terms_instructions !== undefined ? data.payment_terms_instructions : existing.payment_terms_instructions,
+      payment_terms_instructions: data.payment_terms_instructions !== undefined
+        ? harmonizePaymentTerms(data.enable_advance === false ? 0 : (data.advance_percentage ?? existing.advance_percentage), data.payment_terms_instructions)
+        : (data.advance_percentage !== undefined || data.enable_advance !== undefined
+          ? harmonizePaymentTerms(data.enable_advance === false ? 0 : (data.advance_percentage ?? existing.advance_percentage), existing.payment_terms_instructions)
+          : existing.payment_terms_instructions),
       payment_display_mode: data.payment_display_mode !== undefined ? data.payment_display_mode : existing.payment_display_mode,
       show_bank_details: data.show_bank_details !== undefined ? data.show_bank_details : existing.show_bank_details,
       show_upi_details: data.show_upi_details !== undefined ? data.show_upi_details : existing.show_upi_details,
+      show_payment_link: data.show_payment_link !== undefined ? data.show_payment_link : (existing as any).show_payment_link,
       show_cash_details: data.show_cash_details !== undefined ? data.show_cash_details : existing.show_cash_details,
       show_crypto_details: data.show_crypto_details !== undefined ? data.show_crypto_details : existing.show_crypto_details,
       cash_instructions: data.cash_instructions !== undefined ? data.cash_instructions : existing.cash_instructions,
       bank_details: data.bank_details !== undefined ? data.bank_details : existing.bank_details,
       upi_details: data.upi_details !== undefined ? data.upi_details : existing.upi_details,
+      payment_link: data.payment_link !== undefined ? data.payment_link : (existing as any).payment_link,
+      payment_link_label: data.payment_link_label !== undefined ? data.payment_link_label : (existing as any).payment_link_label,
       crypto_details: data.crypto_details !== undefined ? data.crypto_details : existing.crypto_details,
       pin_protection_enabled: nextPinEnabled,
       pin: nextPinEnabled ? nextPin : null,
       pin_hash: nextPinEnabled ? nextPinHash : null,
-      status: data.status || existing.status,
+      status: resolvedStatus,
+      approved_at: shouldRequireReApproval ? null : existing.approved_at,
+      signature: shouldRequireReApproval ? null : existing.signature,
+      approved_document_hash: shouldRequireReApproval ? null : existing.approved_document_hash,
+      rejected_at: shouldRequireReApproval ? null : existing.rejected_at,
+      rejection_reason: shouldRequireReApproval ? null : existing.rejection_reason,
+      rejection_comments: shouldRequireReApproval ? null : existing.rejection_comments,
+      completed_at: shouldRequireReApproval ? null : existing.completed_at,
+      completed_unpaid: shouldRequireReApproval ? false : (existing.completed_unpaid || false),
+      in_progress_at: shouldRequireReApproval ? null : existing.in_progress_at,
       updated_at: new Date().toISOString(),
     };
 
     this.quotations.set(id, updated);
+    if (updated.quotation_number) {
+      this.quotations.set(updated.quotation_number, updated);
+    }
+    if (existing.quotation_number && existing.quotation_number !== updated.quotation_number) {
+      this.quotations.set(existing.quotation_number, updated);
+    }
     this.savePaymentToFile(id, {
       is_paid: Boolean(updated.is_paid),
       paid_at: updated.paid_at,
@@ -4311,15 +5611,29 @@ class QuoteFlowStore {
       payment_display_mode: updated.payment_display_mode,
       show_bank_details: updated.show_bank_details,
       show_upi_details: updated.show_upi_details,
+      show_payment_link: updated.show_payment_link,
       show_cash_details: updated.show_cash_details,
       show_crypto_details: updated.show_crypto_details,
       cash_instructions: updated.cash_instructions,
       bank_details: updated.bank_details,
       upi_details: updated.upi_details,
+      payment_link: updated.payment_link,
+      payment_link_label: updated.payment_link_label,
       crypto_details: updated.crypto_details,
       payment_terms_instructions: updated.payment_terms_instructions,
       accepted_payment_methods: updated.accepted_payment_methods,
     });
+
+    if (shouldRequireReApproval) {
+      this.logEvent(existing.organization_id, id, 'USER', 'REVISED_FOR_REAPPROVAL', {
+        previous_number: existing.quotation_number,
+        new_number: updated.quotation_number,
+        previous_status: existing.status,
+        new_status: updated.status,
+        revision_number: updated.revision_number,
+        note: 'Quotation edited. Revision incremented and customer re-approval required.',
+      });
+    }
 
     try {
       const supabase = createAdminClient();
@@ -4327,6 +5641,8 @@ class QuoteFlowStore {
         await supabase
           .from('quotations')
           .update({
+            quotation_number: updated.quotation_number,
+            revision_number: updated.revision_number,
             customer_id: updated.customer_id,
             title: updated.title,
             issue_date: updated.issue_date,
@@ -4341,7 +5657,7 @@ class QuoteFlowStore {
             grand_total: updated.grand_total,
             notes: updated.notes,
             terms_conditions: updated.terms_conditions,
-            status: updated.status,
+            status: ['IN_PROGRESS', 'COMPLETED'].includes(updated.status) ? 'APPROVED' : updated.status,
             updated_at: updated.updated_at,
           })
           .eq('id', id);
@@ -4378,6 +5694,8 @@ class QuoteFlowStore {
           actor_name: 'Business User',
           event_type: 'PAYMENT_CONFIG',
           metadata: {
+            enable_advance: updated.enable_advance,
+            payment_terms_type: updated.payment_terms_type,
             payment_display_mode: updated.payment_display_mode,
             show_bank_details: updated.show_bank_details,
             show_upi_details: updated.show_upi_details,
@@ -4388,6 +5706,19 @@ class QuoteFlowStore {
             payment_terms_instructions: updated.payment_terms_instructions,
             accepted_payment_methods: updated.accepted_payment_methods,
             advance_percentage: updated.advance_percentage,
+            tax_mode: updated.tax_mode,
+            tax_name: updated.tax_name,
+            taxable_subtotal: updated.taxable_subtotal,
+            place_of_supply: updated.place_of_supply,
+            supplier_state: updated.supplier_state,
+            customer_gstin: updated.customer_gstin,
+            cgst_rate: updated.cgst_rate,
+            cgst_amount: updated.cgst_amount,
+            sgst_rate: updated.sgst_rate,
+            sgst_amount: updated.sgst_amount,
+            igst_rate: updated.igst_rate,
+            igst_amount: updated.igst_amount,
+            tax_breakdown: updated.tax_breakdown,
           },
         });
 
@@ -4415,12 +5746,21 @@ class QuoteFlowStore {
     this.logEvent(existing.organization_id, id, 'USER', 'EDITED', {
       status: updated.status,
       grand_total: updated.grand_total,
+      quotation_number: updated.quotation_number,
+      revision_number: updated.revision_number,
+      prior_quotation_number: existing.quotation_number !== updated.quotation_number ? existing.quotation_number : undefined,
     });
+
+    let customer = this.customers.get(updated.customer_id);
+    if (!customer && updated.customer_id) {
+      customer = (await this.getCustomerById(updated.customer_id, existing.organization_id)) || undefined;
+    }
 
     return {
       ...updated,
       items: newItems,
-      customer: this.customers.get(updated.customer_id),
+      customer: customer || null,
+      organization: org || undefined,
     };
   }
 
@@ -4429,8 +5769,20 @@ class QuoteFlowStore {
     const parent = await this.getQuotationById(quotationId);
     if (!parent) throw new Error('Quotation not found');
 
-    const nextRevisionNum = (parent.revision_number || 1) + 1;
-    const newId = `quote_rev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const baseNumber = parent.quotation_number.replace(/[-_](REV|V|rev|v)[-_]?\d+$/i, '');
+    const revMatch = parent.quotation_number.match(/[-_](REV|V|rev|v)[-_]?(\d+)$/i);
+    let currentRevCount = 0;
+    if (revMatch) {
+      currentRevCount = parseInt(revMatch[2], 10);
+    } else if (parent.revision_number && parent.revision_number > 1) {
+      currentRevCount = parent.revision_number - 1;
+    }
+    const nextRevCount = currentRevCount + 1;
+    const nextRevisionNum = nextRevCount + 1;
+    const revStr = `REV${String(nextRevCount).padStart(2, '0')}`;
+    const nextQuotationNumber = `${baseNumber}-${revStr}`;
+
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `quote_rev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const publicToken = generateSecureToken();
 
     const revisionQuotation: Quotation = {
@@ -4438,7 +5790,7 @@ class QuoteFlowStore {
       id: newId,
       revision_number: nextRevisionNum,
       original_quotation_id: parent.original_quotation_id || parent.id,
-      quotation_number: `${parent.quotation_number}-V${nextRevisionNum}`,
+      quotation_number: nextQuotationNumber,
       status: 'DRAFT',
       public_token: publicToken,
       public_token_hash: hashToken(publicToken),
@@ -4457,6 +5809,7 @@ class QuoteFlowStore {
     };
 
     this.quotations.set(newId, revisionQuotation);
+    this.quotations.set(nextQuotationNumber, revisionQuotation);
 
     // Clone items
     const clonedItems: QuotationItem[] = (parent.items || []).map((item, idx) => ({
@@ -4468,8 +5821,15 @@ class QuoteFlowStore {
 
     this.logEvent(parent.organization_id, newId, 'USER', 'REVISED', {
       parent_quotation_number: parent.quotation_number,
-      revision_number: nextRevisionNum,
+      revision_number: nextRevCount,
+      new_quotation_number: nextQuotationNumber,
     });
+
+    try {
+      await this.persistQuotationToSupabase(revisionQuotation);
+    } catch (err) {
+      console.warn('Failed to persist revision quotation to Supabase:', err);
+    }
 
     return {
       ...revisionQuotation,
@@ -4565,7 +5925,7 @@ class QuoteFlowStore {
         await supabase
           .from('quotations')
           .update({
-            status: quote.status,
+            status: ['IN_PROGRESS', 'COMPLETED'].includes(quote.status) ? 'APPROVED' : quote.status,
             view_count: quote.view_count,
             first_viewed_at: quote.first_viewed_at,
             last_viewed_at: quote.last_viewed_at,
@@ -4944,6 +6304,7 @@ class QuoteFlowStore {
     user_agent?: string;
     /** IANA timezone resolved from signer IP, e.g. "Asia/Kolkata". signed_at is always UTC. */
     signer_timezone?: string;
+    selected_optional_item_ids?: string[];
   }): Promise<Quotation> {
     const quote = await this.getQuotationByPublicToken(params.token);
     if (!quote) throw new Error('Quotation not found');
@@ -4969,19 +6330,72 @@ class QuoteFlowStore {
       throw new Error('This quotation has been cancelled by the business.');
     }
 
+    const rawQuote = this.quotations.get(quote.id) || quote;
+
+    // If client selected specific optional add-on items, apply selections and recalculate totals
+    if (params.selected_optional_item_ids !== undefined) {
+      const currentItems = this.quotationItems.get(quote.id) || quote.items || [];
+      const updatedItems = currentItems.map((it) => {
+        if (it.is_optional) {
+          const isSelected =
+            params.selected_optional_item_ids!.includes(it.id) ||
+            params.selected_optional_item_ids!.includes(it.description);
+          return {
+            ...it,
+            is_selected: isSelected,
+          };
+        }
+        return it;
+      });
+      this.quotationItems.set(quote.id, updatedItems);
+
+      const recalc = calculateQuotationTotals({
+        items: updatedItems,
+        currency: quote.currency,
+        discount_type: quote.discount_type,
+        discount_value: quote.discount_value,
+        tax_rate: quote.tax_rate,
+        tax_mode: quote.tax_mode,
+        supplier_state: quote.supplier_state,
+        place_of_supply: quote.place_of_supply,
+        tax_name: quote.tax_name,
+        country: quote.organization?.business_country || quote.organization?.country,
+      });
+
+      rawQuote.subtotal = recalc.subtotal;
+      rawQuote.discount_amount = recalc.discount_amount;
+      rawQuote.taxable_subtotal = recalc.taxable_amount;
+      rawQuote.tax_amount = recalc.tax_amount;
+      rawQuote.cgst_amount = recalc.cgst_amount;
+      rawQuote.sgst_amount = recalc.sgst_amount;
+      rawQuote.igst_amount = recalc.igst_amount;
+      rawQuote.grand_total = recalc.grand_total;
+      rawQuote.tax_breakdown = recalc.tax_breakdown;
+
+      if (rawQuote.milestones && rawQuote.milestones.length > 0) {
+        rawQuote.milestones = rawQuote.milestones.map((m) => ({
+          ...m,
+          amount: roundCurrency((rawQuote.grand_total * (m.percentage || 0)) / 100),
+        }));
+      }
+    }
+
     const now = new Date().toISOString();
     const effectiveSignerEmail = params.signer_email || quote.customer?.email || `${params.signer_name.toLowerCase().replace(/[^a-z0-9]/g, '')}@client.portal`;
 
-    // Compute immutable document hash
+    // Compute immutable document hash with approved totals
+    const finalItems = (this.quotationItems.get(quote.id) || rawQuote.items || []).filter(
+      (it) => !(it.is_optional && it.is_selected === false)
+    );
     const documentHash = generateDocumentHash({
       quotation_id: quote.id,
       quotation_number: quote.quotation_number,
       customer_id: quote.customer_id,
-      grand_total: quote.grand_total,
-      currency: quote.currency,
-      issue_date: quote.issue_date,
-      valid_until: quote.valid_until,
-      items: (quote.items || []).map((i) => ({
+      grand_total: rawQuote.grand_total,
+      currency: rawQuote.currency,
+      issue_date: rawQuote.issue_date,
+      valid_until: rawQuote.valid_until,
+      items: finalItems.map((i) => ({
         description: i.description,
         quantity: i.quantity,
         unit_price: i.unit_price,
@@ -5012,7 +6426,6 @@ class QuoteFlowStore {
     this.signatures.set(quote.id, sig);
 
     // 2. Update Quotation Status
-    const rawQuote = this.quotations.get(quote.id) || quote;
     rawQuote.status = 'APPROVED';
     rawQuote.approved_at = now;
     rawQuote.approved_document_hash = documentHash;
@@ -5093,6 +6506,11 @@ class QuoteFlowStore {
     } catch (err) {
       console.error('Failed to sync approval to Supabase:', err);
     }
+
+    try {
+      await this.resolveRecommendationsForQuote(quote.id, quote.organization_id, 'source_approved');
+      await this.resolveRecommendationsForQuote(quote.quotation_number, quote.organization_id, 'source_approved');
+    } catch {}
 
     return {
       ...rawQuote,
@@ -5200,6 +6618,11 @@ class QuoteFlowStore {
       approved_by: approverName,
     });
 
+    try {
+      await this.resolveRecommendationsForQuote(quote.id, quote.organization_id, 'source_approved');
+      await this.resolveRecommendationsForQuote(quote.quotation_number, quote.organization_id, 'source_approved');
+    } catch {}
+
     return {
       ...rawQuote,
       signature: sig,
@@ -5207,6 +6630,23 @@ class QuoteFlowStore {
       customer: quote.customer,
       organization: quote.organization,
     };
+  }
+
+  public async getQuotationSignature(quotationId: string): Promise<QuotationSignature | null> {
+    const sig = this.signatures.get(quotationId);
+    if (sig) return sig;
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        const { data } = await supabase
+          .from('quotation_signatures')
+          .select('*')
+          .eq('quotation_id', quotationId)
+          .single();
+        if (data) return data as QuotationSignature;
+      }
+    } catch {}
+    return null;
   }
 
   // --- PAYMENT WORKFLOW (PAID / UNPAID STATUS TRACKING & ADVANCE PAYMENTS) ---
@@ -5231,9 +6671,16 @@ class QuoteFlowStore {
   ): Promise<Quotation> {
     let quote = this.quotations.get(id);
     if (!quote) {
+      quote = Array.from(this.quotations.values()).find(
+        (q) => q.quotation_number === id || q.id === id || q.quotation_number?.startsWith(`${id}-REV`)
+      );
+    }
+    if (!quote) {
       quote = (await this.getQuotationById(id, orgId || DEFAULT_ORG_ID)) || undefined;
     }
     if (!quote) throw new Error('Quotation not found');
+
+    const quoteId = quote.id;
 
     if (orgId && quote.organization_id !== orgId) {
       throw new Error('Unauthorized to modify quotation from another organization');
@@ -5321,11 +6768,14 @@ class QuoteFlowStore {
     if (paymentData.payment_records !== undefined) {
       quote.payment_records = paymentData.payment_records;
     }
+    if (quote.status === 'COMPLETED') {
+      quote.completed_unpaid = !isPaid && (!paidAmount || paidAmount === 0);
+    }
     quote.updated_at = now;
 
     if (confirmed) {
       // Automatically purge payment proof screenshots upon company confirmation
-      const qEvents = this.events.get(id) || [];
+      const qEvents = this.events.get(quoteId) || this.events.get(id) || [];
       let updatedLocal = false;
       for (const ev of qEvents) {
         if (ev.event_type === 'CHAT_MESSAGE' && ev.metadata?.attachment) {
@@ -5342,7 +6792,8 @@ class QuoteFlowStore {
         }
       }
       if (updatedLocal) {
-        this.events.set(id, qEvents);
+        this.events.set(quoteId, qEvents);
+        if (id !== quoteId) this.events.set(id, qEvents);
       }
 
       try {
@@ -5351,7 +6802,7 @@ class QuoteFlowStore {
           const { data: dbEvents } = await supabase
             .from('quotation_events')
             .select('*')
-            .eq('quotation_id', id)
+            .eq('quotation_id', quoteId)
             .eq('event_type', 'CHAT_MESSAGE');
 
           if (dbEvents && dbEvents.length > 0) {
@@ -5396,7 +6847,9 @@ class QuoteFlowStore {
     }
 
     // Synchronize any existing invoice linked to this quotation
-    const existingInvoice = Array.from(this.invoices.values()).find((inv) => inv.quotation_id === id);
+    const existingInvoice = Array.from(this.invoices.values()).find(
+      (inv) => inv.quotation_id === quoteId || inv.quotation_id === id
+    );
     if (existingInvoice) {
       existingInvoice.is_paid = quote.is_paid;
       existingInvoice.status = quote.is_paid ? 'PAID' : (quote.paid_amount && quote.paid_amount > 0 ? 'ISSUED' : existingInvoice.status);
@@ -5419,10 +6872,12 @@ class QuoteFlowStore {
       this.persistInvoiceToSupabase(existingInvoice).catch(() => {});
     }
 
-    this.quotations.set(id, quote);
+    this.quotations.set(quoteId, quote);
+    if (id !== quoteId) this.quotations.set(id, quote);
+    if (quote.quotation_number) this.quotations.set(quote.quotation_number, quote);
 
     // Save to local file storage for rock-solid persistence
-    this.savePaymentToFile(id, {
+    const filePayload = {
       is_paid: quote.is_paid,
       paid_at: quote.paid_at,
       payment_method: quote.payment_method,
@@ -5436,12 +6891,17 @@ class QuoteFlowStore {
       payment_confirmed_by_company: quote.payment_confirmed_by_company,
       payment_confirmed_at: quote.payment_confirmed_at,
       payment_records: quote.payment_records,
-    });
+      completed_unpaid: quote.completed_unpaid,
+    };
+    this.savePaymentToFile(quoteId, filePayload);
+    if (id !== quoteId) {
+      this.savePaymentToFile(id, filePayload);
+    }
 
     // Audit Log Event
     this.logEvent(
       quote.organization_id,
-      id,
+      quoteId,
       'USER',
       quote.is_paid
         ? 'MARKED_PAID'
@@ -5461,6 +6921,7 @@ class QuoteFlowStore {
         advance_payment_notes: quote.advance_payment_notes,
         final_payment_notes: quote.final_payment_notes,
         status: quote.status,
+        completed_unpaid: quote.completed_unpaid,
         payment_records: quote.payment_records,
       }
     );
@@ -5474,7 +6935,7 @@ class QuoteFlowStore {
           .from('quotation_events')
           .insert({
             organization_id: quote.organization_id,
-            quotation_id: id,
+            quotation_id: quoteId,
             actor_type: 'USER',
             actor_name: 'Business User',
             event_type: quote.is_paid
@@ -5495,6 +6956,7 @@ class QuoteFlowStore {
               advance_payment_notes: quote.advance_payment_notes,
               final_payment_notes: quote.final_payment_notes,
               status: quote.status,
+              completed_unpaid: quote.completed_unpaid,
               payment_records: quote.payment_records || [],
             },
             created_at: now,
@@ -5506,7 +6968,7 @@ class QuoteFlowStore {
           .update({
             updated_at: now,
           })
-          .eq('id', id);
+          .eq('id', quoteId);
 
         await this.persistQuotationToSupabase(quote);
       }
@@ -5516,11 +6978,11 @@ class QuoteFlowStore {
 
     return {
       ...quote,
-      items: this.quotationItems.get(id) || quote.items || [],
+      items: this.quotationItems.get(quoteId) || quote.items || [],
       customer: this.customers.get(quote.customer_id) || quote.customer,
       organization: this.organizations.get(quote.organization_id) || quote.organization,
-      signature: this.signatures.get(id) || quote.signature || null,
-      events: this.events.get(id) || quote.events || [],
+      signature: this.signatures.get(quoteId) || quote.signature || null,
+      events: this.events.get(quoteId) || quote.events || [],
     };
   }
 
@@ -5569,9 +7031,16 @@ class QuoteFlowStore {
   ): Promise<Quotation> {
     let quote = this.quotations.get(id);
     if (!quote) {
+      quote = Array.from(this.quotations.values()).find(
+        (q) => q.quotation_number === id || q.id === id || q.quotation_number?.startsWith(`${id}-REV`)
+      );
+    }
+    if (!quote) {
       quote = (await this.getQuotationById(id, orgId || DEFAULT_ORG_ID)) || undefined;
     }
     if (!quote) throw new Error('Quotation not found');
+
+    const quoteId = quote.id;
 
     if (orgId && quote.organization_id !== orgId) {
       throw new Error('Unauthorized to modify quotation from another organization');
@@ -5592,7 +7061,9 @@ class QuoteFlowStore {
         quote.paid_at = now;
       }
       // Synchronize existing invoice if one was already issued by business
-      const existingInvoice = Array.from(this.invoices.values()).find((inv) => inv.quotation_id === id);
+      const existingInvoice = Array.from(this.invoices.values()).find(
+        (inv) => inv.quotation_id === quoteId || inv.quotation_id === id
+      );
       if (existingInvoice) {
         existingInvoice.is_paid = true;
         existingInvoice.status = 'PAID';
@@ -5604,15 +7075,20 @@ class QuoteFlowStore {
     }
     quote.updated_at = now;
 
-    this.quotations.set(id, quote);
-    this.savePaymentToFile(id, {
+    this.quotations.set(quoteId, quote);
+    if (id !== quoteId) this.quotations.set(id, quote);
+    if (quote.quotation_number) this.quotations.set(quote.quotation_number, quote);
+
+    const filePayload = {
       status: 'COMPLETED',
       completed_at: now,
       completed_unpaid: isUnpaid,
-    });
+    };
+    this.savePaymentToFile(quoteId, filePayload);
+    if (id !== quoteId) this.savePaymentToFile(id, filePayload);
 
     // Audit Log Event
-    this.logEvent(quote.organization_id, id, 'USER', 'COMPLETED', {
+    this.logEvent(quote.organization_id, quoteId, 'USER', 'COMPLETED', {
       completed_by: user,
       completed_at: now,
       unpaid: isUnpaid,
@@ -5627,7 +7103,7 @@ class QuoteFlowStore {
           .from('quotation_events')
           .insert({
             organization_id: quote.organization_id,
-            quotation_id: id,
+            quotation_id: quoteId,
             actor_type: 'USER',
             actor_name: user,
             event_type: 'COMPLETED',
@@ -5646,7 +7122,7 @@ class QuoteFlowStore {
           .update({
             updated_at: now,
           })
-          .eq('id', id);
+          .eq('id', quoteId);
 
         await this.persistQuotationToSupabase(quote);
       }
@@ -5656,11 +7132,11 @@ class QuoteFlowStore {
 
     return {
       ...quote,
-      items: this.quotationItems.get(id) || quote.items || [],
+      items: this.quotationItems.get(quoteId) || quote.items || [],
       customer: this.customers.get(quote.customer_id) || quote.customer,
       organization: this.organizations.get(quote.organization_id) || quote.organization,
-      signature: this.signatures.get(id) || quote.signature || null,
-      events: this.events.get(id) || quote.events || [],
+      signature: this.signatures.get(quoteId) || quote.signature || null,
+      events: this.events.get(quoteId) || quote.events || [],
     };
   }
 
@@ -5670,35 +7146,59 @@ class QuoteFlowStore {
     user: string = 'Business User',
     options?: { estimatedDays?: number; estimatedCompletionDate?: string; notes?: string }
   ): Promise<Quotation> {
-    const quote = (await this.getQuotationById(id, orgId)) || this.quotations.get(id);
+    let quote = this.quotations.get(id);
+    if (!quote) {
+      quote = Array.from(this.quotations.values()).find(
+        (q) => q.quotation_number === id || q.id === id || q.quotation_number?.startsWith(`${id}-REV`)
+      );
+    }
+    if (!quote) {
+      quote = (await this.getQuotationById(id, orgId)) || undefined;
+    }
     if (!quote) throw new Error('Quotation not found');
 
+    const quoteId = quote.id;
+
     const now = new Date().toISOString();
-    const estDays = options?.estimatedDays !== undefined && options?.estimatedDays !== null ? Number(options.estimatedDays) : 7;
+    const estDays =
+      options?.estimatedDays === null
+        ? null
+        : options?.estimatedDays !== undefined
+        ? Number(options.estimatedDays)
+        : null;
+
     let estDate = options?.estimatedCompletionDate;
-    if (!estDate && estDays > 0) {
+    if (!estDate && typeof estDays === 'number') {
       const d = new Date();
-      d.setDate(d.getDate() + estDays);
-      estDate = d.toISOString().split('T')[0];
+      if (estDays > 0) {
+        d.setDate(d.getDate() + estDays);
+      }
+      estDate = d.toISOString();
     }
 
     quote.status = 'IN_PROGRESS';
     quote.in_progress_at = now;
     quote.estimated_days = estDays;
     quote.estimated_completion_date = estDate || null;
+    quote.estimated_time_text = options?.notes || null;
     quote.updated_at = now;
 
-    this.quotations.set(id, quote);
-    this.savePaymentToFile(id, {
+    this.quotations.set(quoteId, quote);
+    if (id !== quoteId) this.quotations.set(id, quote);
+    if (quote.quotation_number) this.quotations.set(quote.quotation_number, quote);
+
+    const filePayload = {
       status: 'IN_PROGRESS',
       in_progress_at: now,
       estimated_days: estDays,
       estimated_completion_date: estDate || null,
       estimated_time_text: options?.notes || null,
-    });
+    };
+    this.savePaymentToFile(quoteId, filePayload);
+    if (id !== quoteId) this.savePaymentToFile(id, filePayload);
 
     // Audit Log Event
-    this.logEvent(quote.organization_id, id, 'USER', 'IN_PROGRESS', {
+    this.logEvent(quote.organization_id, quoteId, 'USER', 'IN_PROGRESS', {
       in_progress_by: user,
       in_progress_at: now,
       estimated_days: estDays,
@@ -5711,7 +7211,7 @@ class QuoteFlowStore {
       if (supabase) {
         await supabase.from('quotation_events').insert({
           organization_id: quote.organization_id,
-          quotation_id: id,
+          quotation_id: quoteId,
           actor_type: 'USER',
           actor_name: user,
           event_type: 'IN_PROGRESS',
@@ -5727,7 +7227,7 @@ class QuoteFlowStore {
         await supabase
           .from('quotations')
           .update({ updated_at: now })
-          .eq('id', id);
+          .eq('id', quoteId);
 
         await this.persistQuotationToSupabase(quote);
       }
@@ -5737,11 +7237,11 @@ class QuoteFlowStore {
 
     return {
       ...quote,
-      items: this.quotationItems.get(id) || quote.items || [],
+      items: this.quotationItems.get(quoteId) || quote.items || [],
       customer: this.customers.get(quote.customer_id) || quote.customer,
       organization: this.organizations.get(quote.organization_id) || quote.organization,
-      signature: this.signatures.get(id) || quote.signature || null,
-      events: this.events.get(id) || quote.events || [],
+      signature: this.signatures.get(quoteId) || quote.signature || null,
+      events: this.events.get(quoteId) || quote.events || [],
     };
   }
 
@@ -5751,8 +7251,18 @@ class QuoteFlowStore {
     user: string = 'Business User',
     options: { additionalDays: number; newEstimatedCompletionDate?: string; notes?: string }
   ): Promise<Quotation> {
-    const quote = (await this.getQuotationById(id, orgId)) || this.quotations.get(id);
+    let quote = this.quotations.get(id);
+    if (!quote) {
+      quote = Array.from(this.quotations.values()).find(
+        (q) => q.quotation_number === id || q.id === id || q.quotation_number?.startsWith(`${id}-REV`)
+      );
+    }
+    if (!quote) {
+      quote = (await this.getQuotationById(id, orgId)) || undefined;
+    }
     if (!quote) throw new Error('Quotation not found');
+
+    const quoteId = quote.id;
 
     const now = new Date().toISOString();
     const currentDays = quote.estimated_days || 7;
@@ -5769,15 +7279,21 @@ class QuoteFlowStore {
     quote.estimated_days = newTotalDays;
     quote.estimated_completion_date = targetDate;
     quote.updated_at = now;
-    this.quotations.set(id, quote);
-    this.savePaymentToFile(id, {
+
+    this.quotations.set(quoteId, quote);
+    if (id !== quoteId) this.quotations.set(id, quote);
+    if (quote.quotation_number) this.quotations.set(quote.quotation_number, quote);
+
+    const filePayload = {
       status: 'IN_PROGRESS',
       estimated_days: newTotalDays,
       estimated_completion_date: targetDate,
       estimated_time_text: options?.notes || quote.estimated_time_text || null,
-    });
+    };
+    this.savePaymentToFile(quoteId, filePayload);
+    if (id !== quoteId) this.savePaymentToFile(id, filePayload);
 
-    this.logEvent(quote.organization_id, id, 'USER', 'EXTEND_TIME', {
+    this.logEvent(quote.organization_id, quoteId, 'USER', 'EXTEND_TIME', {
       extended_by: user,
       additional_days: additional,
       new_total_days: newTotalDays,
@@ -5791,7 +7307,7 @@ class QuoteFlowStore {
       if (supabase) {
         await supabase.from('quotation_events').insert({
           organization_id: quote.organization_id,
-          quotation_id: id,
+          quotation_id: quoteId,
           actor_type: 'USER',
           actor_name: user,
           event_type: 'EXTEND_TIME',
@@ -5808,13 +7324,20 @@ class QuoteFlowStore {
         await supabase
           .from('quotations')
           .update({ updated_at: now })
-          .eq('id', id);
+          .eq('id', quoteId);
 
         await this.persistQuotationToSupabase(quote);
       }
     } catch {}
 
-    return quote;
+    return {
+      ...quote,
+      items: this.quotationItems.get(quoteId) || quote.items || [],
+      customer: this.customers.get(quote.customer_id) || quote.customer,
+      organization: this.organizations.get(quote.organization_id) || quote.organization,
+      signature: this.signatures.get(quoteId) || quote.signature || null,
+      events: this.events.get(quoteId) || quote.events || [],
+    };
   }
 
   // --- MULTI-QUOTE CUSTOMER PORTAL RESOLVER ---
@@ -5911,7 +7434,27 @@ class QuoteFlowStore {
       }
     }
 
-    let list = Array.from(this.invoices.values()).filter((inv) => inv.organization_id === orgId);
+    this.loadDeletedQuotationsFromFile();
+    const deletedQuoteIds = new Set(Array.from(this.deletedQuotations.values()).map((d) => d.quotation_id));
+    const deletedQuoteNumbers = new Set(Array.from(this.deletedQuotations.values()).map((d) => d.quotation_number));
+
+    let list = Array.from(this.invoices.values()).filter((inv) => {
+      if (inv.organization_id !== orgId) return false;
+      if (inv.deleted_at) return false;
+
+      // Commercial Tax Invoices (ISSUED, PAID, PARTIALLY_PAID, OVERDUE, VOIDED, CANCELLED)
+      // are independent legal and tax accounting records. They must NEVER be hidden or removed
+      // if their parent quotation was deleted. Only unissued DRAFT invoices may be suppressed.
+      if (
+        inv.status === 'DRAFT' &&
+        inv.quotation_id &&
+        (deletedQuoteIds.has(inv.quotation_id) || deletedQuoteNumbers.has(inv.quotation_id))
+      ) {
+        return false;
+      }
+
+      return true;
+    });
 
     if (filters?.environment && filters.environment !== 'ALL') {
       list = list.filter((inv) => (inv.environment || 'live') === filters.environment);
@@ -5966,6 +7509,34 @@ class QuoteFlowStore {
   public async getInvoiceById(id: string, orgId?: string): Promise<Invoice | null> {
     let inv = this.invoices.get(id);
 
+    // 1. Direct indexed Supabase lookup by name: INVOICE:${id} (instant & most reliable)
+    if (!inv) {
+      try {
+        const supabase = createAdminClient();
+        if (supabase) {
+          const { data: row } = await supabase
+            .from('templates')
+            .select('*')
+            .eq('name', `INVOICE:${id}`)
+            .maybeSingle();
+
+          if (row?.layout_style) {
+            const parsed = JSON.parse(row.layout_style) as Invoice;
+            if (parsed && parsed.id) {
+              inv = parsed;
+              this.invoices.set(parsed.id, parsed);
+              if (parsed.items) {
+                this.invoiceItems.set(parsed.id, parsed.items);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Direct lookup for invoice in templates failed:', err);
+      }
+    }
+
+    // 2. Fallback to table search
     if (!inv) {
       if (orgId && orgId !== DEFAULT_ORG_ID) {
         await this.loadInvoicesFromSupabase(orgId);
@@ -5977,6 +7548,7 @@ class QuoteFlowStore {
       }
     }
 
+    // 3. Fallback to local file storage
     if (!inv) {
       const saved = this.loadInvoicesFromFile();
       for (const s of saved) {
@@ -5987,13 +7559,29 @@ class QuoteFlowStore {
     }
 
     if (!inv) return null;
-    if (orgId && orgId !== DEFAULT_ORG_ID && inv.organization_id && inv.organization_id !== orgId) return null;
+
+    // Cross-tenant isolation check
+    if (orgId && inv.organization_id && inv.organization_id !== orgId) {
+      return null;
+    }
+
+    // Asynchronously resolve customer and organization if not attached
+    const resolvedCustomer =
+      inv.customer ||
+      (inv.customer_id ? await this.getCustomerById(inv.customer_id, inv.organization_id || orgId) : undefined) ||
+      (inv.customer_id ? this.customers.get(inv.customer_id) : undefined);
+
+    const resolvedOrg =
+      inv.organization ||
+      (inv.organization_id ? await this.getOrganization(inv.organization_id) : undefined) ||
+      (orgId ? await this.getOrganization(orgId) : undefined) ||
+      (inv.organization_id ? this.organizations.get(inv.organization_id) : undefined);
 
     return {
       ...inv,
       environment: (inv.environment || 'live') as 'test' | 'live',
-      customer: inv.customer || this.customers.get(inv.customer_id),
-      organization: inv.organization || (await this.getOrganization(inv.organization_id)) || this.organizations.get(inv.organization_id),
+      customer: resolvedCustomer,
+      organization: resolvedOrg,
       items: inv.items || this.invoiceItems.get(inv.id) || [],
     };
   }
@@ -6030,13 +7618,28 @@ class QuoteFlowStore {
     }
 
     if (!inv) return null;
-    if (orgId && orgId !== DEFAULT_ORG_ID && inv.organization_id && inv.organization_id !== orgId) return null;
+
+    // Cross-tenant isolation check
+    if (orgId && inv.organization_id && inv.organization_id !== orgId) {
+      return null;
+    }
+
+    const resolvedCustomer =
+      inv.customer ||
+      (inv.customer_id ? await this.getCustomerById(inv.customer_id, inv.organization_id || orgId) : undefined) ||
+      (inv.customer_id ? this.customers.get(inv.customer_id) : undefined);
+
+    const resolvedOrg =
+      inv.organization ||
+      (inv.organization_id ? await this.getOrganization(inv.organization_id) : undefined) ||
+      (orgId ? await this.getOrganization(orgId) : undefined) ||
+      (inv.organization_id ? this.organizations.get(inv.organization_id) : undefined);
 
     return {
       ...inv,
       environment: (inv.environment || 'live') as 'test' | 'live',
-      customer: inv.customer || this.customers.get(inv.customer_id),
-      organization: inv.organization || (await this.getOrganization(inv.organization_id)) || this.organizations.get(inv.organization_id),
+      customer: resolvedCustomer,
+      organization: resolvedOrg,
       items: inv.items || this.invoiceItems.get(inv.id) || [],
     };
   }
@@ -6155,11 +7758,11 @@ class QuoteFlowStore {
       tax_amount: quotation.tax_amount,
       grand_total: quotation.grand_total,
       notes: buildInvoiceNotesWithPaymentRefs(
-        quotation.notes !== undefined ? quotation.notes : DEFAULT_INVOICE_NOTES,
+        DEFAULT_INVOICE_NOTES,
         quotation.advance_payment_notes,
         quotation.final_payment_notes
       ),
-      terms_conditions: quotation.terms_conditions !== undefined ? quotation.terms_conditions : DEFAULT_INVOICE_TERMS,
+      terms_conditions: DEFAULT_INVOICE_TERMS,
       payment_terms: 'Net 30 Days',
       items: invoiceItems,
       attachments: (quotation.attachments || []) as any,
@@ -6284,16 +7887,42 @@ class QuoteFlowStore {
       }
     }
 
+    const invCurrency = data.currency || org?.default_currency || 'INR';
+    const isIndia = Boolean(
+      (org?.business_country || '').toUpperCase() === 'IN' ||
+      (org?.country || '').toLowerCase() === 'india' ||
+      (org?.country || '').toUpperCase() === 'IN' ||
+      org?.billing_region === 'INDIA' ||
+      invCurrency === 'INR' ||
+      org?.default_currency === 'INR'
+    );
+    const isUAE = Boolean(
+      (org?.business_country || '').toUpperCase() === 'AE' ||
+      (org?.country || '').toLowerCase().includes('emirates') ||
+      (org?.country || '').toLowerCase() === 'uae' ||
+      invCurrency === 'AED' ||
+      org?.default_currency === 'AED'
+    );
+    const resolvedCountry = org?.country || org?.business_country || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US'));
+    const resolvedTaxName = !isIndia
+      ? (data.tax_name && !data.tax_name.toUpperCase().includes('GST')
+          ? data.tax_name
+          : (isUAE ? 'VAT' : (org?.tax_label && !org?.tax_label.toUpperCase().includes('GST') ? org.tax_label : 'Tax')))
+      : (data.tax_name || org?.tax_label || 'GST');
+
     const calculated = calculateQuotationTotals({
       items: data.items,
+      currency: invCurrency,
       discount_type: data.discount_type || 'PERCENTAGE',
       discount_value: data.discount_value || 0,
       tax_rate: data.tax_rate || 0,
       tax_mode: data.tax_mode || org?.default_tax_mode || 'exclusive',
-      tax_name: data.tax_name || 'GST',
+      country: resolvedCountry,
+      is_india_gst: isIndia,
+      tax_name: resolvedTaxName,
       business_state: org?.business_state || '',
       place_of_supply: data.place_of_supply || customer?.place_of_supply || customer?.billing_state || '',
-      gst_registered: org?.gst_registered,
+      gst_registered: isIndia ? (org?.gst_registered ?? true) : false,
     });
 
     const invoiceItems: InvoiceItem[] = (data.items || []).map((item, idx) => ({
@@ -6419,7 +8048,7 @@ class QuoteFlowStore {
     this.invoiceItems.set(invId, invoiceItems);
     this.saveInvoicesToFile();
 
-    if (data.quotation_id) {
+    if (data.quotation_id && status !== 'DRAFT') {
       const q = this.quotations.get(data.quotation_id);
       if (q) {
         q.has_issued_invoice = true;
@@ -6487,16 +8116,44 @@ class QuoteFlowStore {
     ) {
       const org = await this.getOrganization(orgId);
       const customer = this.customers.get(inv.customer_id) || (await this.getCustomerById(inv.customer_id, orgId));
+      const invCurrency = data.currency || inv.currency || org?.default_currency || 'INR';
+      const isIndia = Boolean(
+        (org?.business_country || '').toUpperCase() === 'IN' ||
+        (org?.country || '').toLowerCase() === 'india' ||
+        (org?.country || '').toUpperCase() === 'IN' ||
+        org?.billing_region === 'INDIA' ||
+        invCurrency === 'INR' ||
+        org?.default_currency === 'INR'
+      );
+      const isUAE = Boolean(
+        (org?.business_country || '').toUpperCase() === 'AE' ||
+        (org?.country || '').toLowerCase().includes('emirates') ||
+        (org?.country || '').toLowerCase() === 'uae' ||
+        invCurrency === 'AED' ||
+        org?.default_currency === 'AED'
+      );
+      const resolvedCountry = org?.country || org?.business_country || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US'));
+      const resolvedTaxName = !isIndia
+        ? (data.tax_name && !data.tax_name.toUpperCase().includes('GST')
+            ? data.tax_name
+            : (inv.tax_name && !inv.tax_name.toUpperCase().includes('GST')
+                ? inv.tax_name
+                : (isUAE ? 'VAT' : (org?.tax_label && !org?.tax_label.toUpperCase().includes('GST') ? org.tax_label : 'Tax'))))
+        : (data.tax_name || inv.tax_name || org?.tax_label || 'GST');
+
       const calculated = calculateQuotationTotals({
         items: data.items || inv.items || [],
+        currency: invCurrency,
         discount_type: data.discount_type || inv.discount_type || 'PERCENTAGE',
         discount_value: data.discount_value !== undefined ? data.discount_value : (inv.discount_value || 0),
         tax_rate: data.tax_rate !== undefined ? data.tax_rate : (inv.tax_rate || 0),
         tax_mode: data.tax_mode || inv.tax_mode || org?.default_tax_mode || 'exclusive',
-        tax_name: data.tax_name || inv.tax_name || 'GST',
+        country: resolvedCountry,
+        is_india_gst: isIndia,
+        tax_name: resolvedTaxName,
         business_state: org?.business_state || '',
         place_of_supply: data.place_of_supply !== undefined ? (data.place_of_supply || '') : (inv.place_of_supply || customer?.place_of_supply || customer?.billing_state || ''),
-        gst_registered: org?.gst_registered,
+        gst_registered: isIndia ? (org?.gst_registered ?? true) : false,
       });
 
       updated.subtotal = calculated.subtotal;
@@ -6565,12 +8222,16 @@ class QuoteFlowStore {
     const inv = await this.getInvoiceById(id, orgId);
     if (!inv) throw new Error('Invoice not found');
 
+    const prevStatus = inv.status;
     const now = new Date().toISOString();
     const isPaid = status === 'PAID';
 
     inv.status = status;
     inv.is_paid = isPaid;
     inv.paid_at = isPaid ? (inv.paid_at || now) : null;
+    if (prevStatus === 'DRAFT' && (status === 'ISSUED' || status === 'PAID')) {
+      inv.issue_date = inv.issue_date || now.split('T')[0];
+    }
     if (isPaid) {
       inv.paid_amount = Number(inv.grand_total) || 0;
       inv.balance_amount = 0;
@@ -6596,19 +8257,39 @@ class QuoteFlowStore {
     );
     inv.updated_at = now;
 
+    const wasDraftIssued = prevStatus === 'DRAFT' && status === 'ISSUED';
     const auditItem: InvoiceAuditEvent = {
       id: `inv_audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       user_name: actor?.name || 'Admin User',
       user_role: actor?.role || 'ADMIN',
-      action: 'STATUS_CHANGED',
-      details: `Invoice status changed to ${status}${isPaid ? ' (Payment recorded)' : ''}`,
+      action: wasDraftIssued ? 'ISSUED' : 'STATUS_CHANGED',
+      details: wasDraftIssued
+        ? 'Draft invoice officially issued as Tax Invoice'
+        : `Invoice status changed to ${status}${isPaid ? ' (Payment recorded)' : ''}`,
       timestamp: now,
     };
     inv.audit_history = [auditItem, ...(inv.audit_history || [])];
 
+    if (inv.quotation_id && (status === 'ISSUED' || status === 'PAID')) {
+      const q = this.quotations.get(inv.quotation_id);
+      if (q) {
+        q.has_issued_invoice = true;
+        q.issued_invoice_id = inv.id;
+        q.invoice_number = inv.invoice_number;
+        this.quotations.set(inv.quotation_id, q);
+      }
+    }
+
     this.invoices.set(id, inv);
     this.saveInvoicesToFile();
     await this.persistInvoiceToSupabase(inv);
+
+    if (isPaid) {
+      try {
+        await this.resolveRecommendationsForInvoice(inv.id, orgId, 'source_paid');
+        await this.resolveRecommendationsForInvoice(inv.invoice_number, orgId, 'source_paid');
+      } catch {}
+    }
 
     return inv;
   }
@@ -6618,6 +8299,11 @@ class QuoteFlowStore {
     orgId: string = DEFAULT_ORG_ID,
     actorRole: string = 'ADMIN'
   ): Promise<boolean> {
+    const existingAny = this.invoices.get(id);
+    if (existingAny && existingAny.organization_id && existingAny.organization_id !== orgId) {
+      throw new Error('Unauthorized to delete invoice from another organization');
+    }
+
     const inv = await this.getInvoiceById(id, orgId);
     if (!inv) return false;
 
@@ -6625,17 +8311,22 @@ class QuoteFlowStore {
       throw new Error('Unauthorized to delete invoice from another organization');
     }
 
-    if (actorRole === 'STAFF') {
+    if (inv.status !== 'DRAFT' && actorRole === 'STAFF') {
       throw new Error('Unauthorized: Staff members cannot delete invoices.');
     }
 
-    if (inv.environment === 'live') {
-      throw new Error('Live invoices cannot be permanently deleted. You can cancel or void the invoice instead.');
+    if (inv.environment === 'live' && inv.status !== 'DRAFT') {
+      throw new Error('Issued live invoices cannot be permanently deleted. Only draft or test invoices can be deleted; you can cancel or void the invoice instead.');
     }
 
     this.invoices.delete(id);
     this.invoiceItems.delete(id);
     this.saveInvoicesToFile();
+
+    try {
+      await this.resolveRecommendationsForInvoice(inv.id, orgId, 'source_deleted');
+      await this.resolveRecommendationsForInvoice(inv.invoice_number, orgId, 'source_deleted');
+    } catch {}
 
     try {
       const supabase = createAdminClient();
@@ -6720,6 +8411,11 @@ class QuoteFlowStore {
     } catch (err) {
       console.warn('Could not record to invoice_audit_logs:', err);
     }
+
+    try {
+      await this.resolveRecommendationsForInvoice(inv.id, orgId, 'source_deleted');
+      await this.resolveRecommendationsForInvoice(inv.invoice_number, orgId, 'source_deleted');
+    } catch {}
 
     return inv;
   }
@@ -7200,26 +8896,45 @@ class QuoteFlowStore {
   }
 
   // --- AUDIT LOG EVENT HELPER ---
-  private logEvent(
+  public async logEvent(
     orgId: string,
     quotationId: string,
     actorType: 'USER' | 'CUSTOMER' | 'SYSTEM',
     eventType: string,
     metadata: Record<string, any>
-  ) {
+  ): Promise<QuotationEvent> {
     const list = this.events.get(quotationId) || [];
     const event: QuotationEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       organization_id: orgId,
       quotation_id: quotationId,
       actor_type: actorType,
-      actor_name: actorType === 'CUSTOMER' ? 'Customer' : 'Business User',
+      actor_name: actorType === 'CUSTOMER' ? 'Customer' : (actorType === 'SYSTEM' ? 'System' : 'Business User'),
       event_type: eventType,
       metadata,
       created_at: new Date().toISOString(),
     };
     list.push(event);
     this.events.set(quotationId, list);
+
+    try {
+      const supabase = createAdminClient();
+      if (supabase) {
+        await supabase.from('quotation_events').insert({
+          organization_id: orgId,
+          quotation_id: quotationId,
+          actor_type: actorType,
+          actor_name: event.actor_name,
+          event_type: eventType,
+          metadata,
+          created_at: event.created_at,
+        });
+      }
+    } catch {
+      // Non-blocking audit sync
+    }
+
+    return event;
   }
 
   // --- ANALYTICS ---
@@ -7295,6 +9010,7 @@ class QuoteFlowStore {
   // ==============================================================================
 
   private getSubscriptionsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -7303,38 +9019,50 @@ class QuoteFlowStore {
   }
 
   private loadSubscriptionsFromFile(): Record<string, BusinessSubscription> {
+    if (this.cachedSubscriptions !== null) {
+      return this.cachedSubscriptions;
+    }
+    if (isCloudflareWorker) {
+      this.cachedSubscriptions = {};
+      return {};
+    }
     try {
       const p = this.getSubscriptionsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || {};
+        this.cachedSubscriptions = JSON.parse(raw) || {};
+        return this.cachedSubscriptions!;
       }
     } catch {}
+    this.cachedSubscriptions = {};
     return {};
   }
 
   private saveSubscriptionsToFile(data: Record<string, BusinessSubscription>): void {
+    this.cachedSubscriptions = data;
+    if (isCloudflareWorker) return;
     try {
-      fs.writeFileSync(this.getSubscriptionsFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+      const p = this.getSubscriptionsFilePath();
+      if (p) fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
     } catch {}
   }
 
   public hydrateSubscriptionPlan(sub: BusinessSubscription): BusinessSubscription {
     if (!sub) return sub;
     if (!sub.plan) {
-      if (sub.amount === 9900 || sub.plan_id?.includes('99') || sub.promo_id) {
+      if (sub.amount === 14900 || sub.amount === 9900 || sub.plan_id?.includes('149') || sub.plan_id?.includes('99') || sub.promo_id) {
         sub.plan = {
-          id: sub.plan_id || 'plan_promo_99',
-          name: 'QuoteFlow Special Offer',
-          slug: 'promo_99',
-          description: 'Promotional subscription at ₹99/month for 3 billing cycles',
-          amount: 9900,
+          id: sub.plan_id || 'plan_standard_149',
+          name: 'QuoteFlow Pro',
+          slug: 'monthly_149',
+          description: 'QuoteFlow Pro recurring monthly subscription at ₹149/month',
+          amount: 14900,
           currency: 'INR',
           billing_interval: 'month',
           billing_interval_count: 1,
           trial_days: 0,
           is_active: true,
-          is_public: false,
+          is_public: true,
           razorpay_plan_id: sub.razorpay_plan_id || null,
           created_at: sub.created_at,
           updated_at: sub.updated_at,
@@ -7361,12 +9089,12 @@ class QuoteFlowStore {
           id: sub.plan_id || 'plan_free_trial',
           name: 'QuoteFlow Free Trial',
           slug: 'free_trial',
-          description: 'Full-access 30-day free trial',
+          description: 'Full-access 14-day free trial',
           amount: 0,
           currency: 'INR',
           billing_interval: 'month',
           billing_interval_count: 1,
-          trial_days: 30,
+          trial_days: 14,
           is_active: true,
           is_public: true,
           razorpay_plan_id: null,
@@ -7551,6 +9279,7 @@ class QuoteFlowStore {
   }
 
   private getReminderLogsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -7559,9 +9288,10 @@ class QuoteFlowStore {
   }
 
   private loadReminderLogsFromFile(): Record<string, string[]> {
+    if (isCloudflareWorker) return this.cachedReminderLogs;
     try {
       const p = this.getReminderLogsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         return JSON.parse(raw) || {};
       }
@@ -7570,9 +9300,11 @@ class QuoteFlowStore {
   }
 
   private saveReminderLogsToFile(logs: Record<string, string[]>): void {
+    this.cachedReminderLogs = logs;
+    if (isCloudflareWorker) return;
     try {
       const p = this.getReminderLogsFilePath();
-      fs.writeFileSync(p, JSON.stringify(logs, null, 2), 'utf-8');
+      if (p) fs.writeFileSync(p, JSON.stringify(logs, null, 2), 'utf-8');
     } catch {}
   }
 
@@ -7604,11 +9336,12 @@ class QuoteFlowStore {
 
   public async getOrganizationMembersMap(): Promise<Map<string, Array<{ email: string; role: 'owner' | 'staff'; name?: string }>>> {
     const map = new Map<string, Array<{ email: string; role: 'owner' | 'staff'; name?: string }>>();
+    if (isCloudflareWorker) return map;
 
     // 1. Load team invitations from data/invitations.json
     try {
       const invPath = path.join(process.cwd(), 'data', 'invitations.json');
-      if (fs.existsSync(invPath)) {
+      if (invPath && fs.existsSync(invPath)) {
         const invs = JSON.parse(fs.readFileSync(invPath, 'utf-8')) || {};
         for (const inv of Object.values(invs) as any[]) {
           if (inv && inv.organizationId && inv.email) {
@@ -7626,7 +9359,7 @@ class QuoteFlowStore {
     // 2. Load developer support staff from admin-config.json
     try {
       const cfgPath = path.join(process.cwd(), 'data', 'admin-config.json');
-      if (fs.existsSync(cfgPath)) {
+      if (cfgPath && fs.existsSync(cfgPath)) {
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) || {};
         const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
         if (Array.isArray(cfg.staffMembers)) {
@@ -7692,6 +9425,10 @@ class QuoteFlowStore {
     status?: string;
     search?: string;
     plan?: string;
+    country?: string;
+    region?: string;
+    gateway?: string;
+    currency?: string;
     page?: number;
     limit?: number;
   }): Promise<{ subscribers: BusinessSubscription[]; total: number }> {
@@ -7845,6 +9582,26 @@ class QuoteFlowStore {
         sub.organization = org;
       }
 
+      // Resolve country & billing region
+      const rawCountry = org.business_country || org.country || 'India';
+      const countryMeta = findCountry(rawCountry);
+      const isIndia = countryMeta.code === 'IN' || rawCountry.toLowerCase() === 'india';
+
+      if (!org.business_country) {
+        org.business_country = countryMeta.code;
+        org.business_country_name = countryMeta.name;
+        org.billing_region = isIndia ? 'INDIA' : 'INTERNATIONAL';
+        org.billing_currency = isIndia ? 'INR' : 'USD';
+        org.payment_provider = isIndia ? 'RAZORPAY' : 'NOWPAYMENTS';
+      }
+
+      sub.billing_region = org.billing_region || (isIndia ? 'INDIA' : 'INTERNATIONAL');
+      sub.billing_country = org.business_country || countryMeta.code;
+      sub.billing_currency = org.billing_currency || (isIndia ? 'INR' : 'USD');
+      if (!sub.provider) {
+        sub.provider = isIndia ? 'razorpay' : 'nowpayments';
+      }
+
       // Check if synthetic or test account
       const isTestOrg =
         org.mode === 'test' ||
@@ -7861,13 +9618,13 @@ class QuoteFlowStore {
     const pozoneSub = subMap.get(POZONE_ORG_ID);
     if (pozoneSub) {
       pozoneSub.status = 'active';
-      pozoneSub.amount = 9900;
+      pozoneSub.amount = 14900;
       pozoneSub.plan = {
         id: 'e0000000-0000-0000-0000-000000000002',
         name: 'QuoteFlow Pro',
-        slug: 'monthly_99',
-        description: 'QuoteFlow Pro ₹99/month subscription',
-        amount: 9900,
+        slug: 'monthly_149',
+        description: 'QuoteFlow Pro ₹149/month subscription',
+        amount: 14900,
         currency: 'INR',
         billing_interval: 'month',
         billing_interval_count: 1,
@@ -7964,7 +9721,33 @@ class QuoteFlowStore {
       }
     }
 
-    // 6. Apply Search Query (across name, email, phone, country, business_id, role)
+    // 5b. Country & Regional & Gateway & Currency Filters
+    if (filters?.country && filters.country !== 'all') {
+      const c = filters.country.toUpperCase();
+      all = all.filter((s) => (s.billing_country || '').toUpperCase() === c || (s.organization?.country || '').toUpperCase() === c);
+    }
+    if (filters?.region && filters.region !== 'all') {
+      const reg = filters.region.toUpperCase();
+      all = all.filter((s) => (s.billing_region || '').toUpperCase() === reg);
+    }
+    if (filters?.gateway && filters.gateway !== 'all') {
+      const gw = filters.gateway.toLowerCase();
+      if (gw === 'manual') {
+        all = all.filter((s) => (s as any).payment_provider === 'manual' || (s as any).provider === 'manual' || (s as any).payment_provider === 'razorpay_manual_activation' || Boolean(s.last_payment_id && s.last_payment_id.toLowerCase().includes('manual')));
+      } else {
+        all = all.filter((s) => (s.provider || '').toLowerCase() === gw);
+      }
+    }
+    if (filters?.currency && filters.currency !== 'all') {
+      const curr = filters.currency.toUpperCase();
+      all = all.filter((s) => (s.currency || s.billing_currency || '').toUpperCase() === curr);
+    }
+    if (filters?.plan && filters.plan !== 'all') {
+      const p = filters.plan.toLowerCase();
+      all = all.filter((s) => (s.plan?.slug || '').toLowerCase().includes(p) || (s.plan?.name || '').toLowerCase().includes(p));
+    }
+
+    // 6. Apply Search Query (across name, email, phone, country, business_id, role, order/invoice IDs)
     if (filters?.search) {
       const q = filters.search.toLowerCase();
       all = all.filter(
@@ -7974,8 +9757,16 @@ class QuoteFlowStore {
           (s.organization?.email || '').toLowerCase().includes(q) ||
           (s.organization?.phone || '').toLowerCase().includes(q) ||
           (s.organization?.country || '').toLowerCase().includes(q) ||
+          (s.billing_country || '').toLowerCase().includes(q) ||
+          (s.organization?.business_country || '').toLowerCase().includes(q) ||
+          (s.organization?.business_country_name || '').toLowerCase().includes(q) ||
           (s.razorpay_subscription_id || '').toLowerCase().includes(q) ||
           (s.last_payment_id || '').toLowerCase().includes(q) ||
+          (s.nowpayments_order_id || '').toLowerCase().includes(q) ||
+          (s.nowpayments_invoice_id || '').toLowerCase().includes(q) ||
+          (s.nowpayments_payment_id || '').toLowerCase().includes(q) ||
+          (s.provider_order_id || '').toLowerCase().includes(q) ||
+          (s.provider_payment_id || '').toLowerCase().includes(q) ||
           (s.email_role || '').toLowerCase().includes(q) ||
           (s.members || []).some((m) => m.email.toLowerCase().includes(q) || m.role.toLowerCase().includes(q))
       );
@@ -8056,6 +9847,7 @@ class QuoteFlowStore {
 
   // ---- SUBSCRIPTION PAYMENTS ----
   private getSubscriptionPaymentsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -8064,13 +9856,22 @@ class QuoteFlowStore {
   }
 
   private loadSubscriptionPaymentsFromFile(): SubscriptionPayment[] {
+    if (this.cachedSubscriptionPayments !== null) {
+      return this.cachedSubscriptionPayments;
+    }
+    if (isCloudflareWorker) {
+      this.cachedSubscriptionPayments = [];
+      return [];
+    }
     try {
       const p = this.getSubscriptionPaymentsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || [];
+        this.cachedSubscriptionPayments = JSON.parse(raw) || [];
+        return this.cachedSubscriptionPayments!;
       }
     } catch {}
+    this.cachedSubscriptionPayments = [];
     return [];
   }
 
@@ -8146,7 +9947,10 @@ class QuoteFlowStore {
           const fileAll = this.loadSubscriptionPaymentsFromFile();
           if (!fileAll.some((p) => p.razorpay_payment_id === sub.last_payment_id)) {
             fileAll.unshift(recoveredPayment);
-            fs.writeFileSync(this.getSubscriptionPaymentsFilePath(), JSON.stringify(fileAll, null, 2), 'utf-8');
+            if (!isCloudflareWorker) {
+              const p = this.getSubscriptionPaymentsFilePath();
+              if (p) fs.writeFileSync(p, JSON.stringify(fileAll, null, 2), 'utf-8');
+            }
           }
         } catch {}
 
@@ -8160,9 +9964,12 @@ class QuoteFlowStore {
   public async saveSubscriptionPayment(payment: SubscriptionPayment): Promise<SubscriptionPayment> {
     const all = this.loadSubscriptionPaymentsFromFile();
     all.unshift(payment);
-    try {
-      fs.writeFileSync(this.getSubscriptionPaymentsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
-    } catch {}
+    if (!isCloudflareWorker) {
+      try {
+        const p = this.getSubscriptionPaymentsFilePath();
+        if (p) fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+      } catch {}
+    }
 
     const admin = createAdminClient();
     if (admin) {
@@ -8178,6 +9985,7 @@ class QuoteFlowStore {
 
   // ---- SUBSCRIPTION EVENTS (Idempotent Webhooks) ----
   private getSubscriptionEventsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -8186,9 +9994,10 @@ class QuoteFlowStore {
   }
 
   private loadSubscriptionEventsFromFile(): Record<string, SubscriptionEvent> {
+    if (isCloudflareWorker) return {};
     try {
       const p = this.getSubscriptionEventsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
         return JSON.parse(raw) || {};
       }
@@ -8220,9 +10029,12 @@ class QuoteFlowStore {
     this.subscriptionEvents.set(event.event_id, event);
     const all = this.loadSubscriptionEventsFromFile();
     all[event.event_id] = event;
-    try {
-      fs.writeFileSync(this.getSubscriptionEventsFilePath(), JSON.stringify(all, null, 2), 'utf-8');
-    } catch {}
+    if (!isCloudflareWorker) {
+      try {
+        const p = this.getSubscriptionEventsFilePath();
+        if (p) fs.writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8');
+      } catch {}
+    }
 
     const admin = createAdminClient();
     if (admin) {
@@ -8248,6 +10060,7 @@ class QuoteFlowStore {
 
   // ---- PROMOTIONS & ASSIGNMENTS ----
   private getPromotionsFilePath(): string {
+    if (isCloudflareWorker) return '';
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) {
       try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -8264,14 +10077,16 @@ class QuoteFlowStore {
       } catch {}
     }
 
-    try {
-      const p = this.getPromotionsFilePath();
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf-8');
-        const list = JSON.parse(raw);
-        if (Array.isArray(list) && list.length > 0) return list;
-      }
-    } catch {}
+    if (!isCloudflareWorker) {
+      try {
+        const p = this.getPromotionsFilePath();
+        if (p && fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf-8');
+          const list = JSON.parse(raw);
+          if (Array.isArray(list) && list.length > 0) return list;
+        }
+      } catch {}
+    }
 
     return [
       {
@@ -8357,14 +10172,12 @@ class QuoteFlowStore {
 
   // ---- SUPPORT TICKETS ----
   private getSupportTicketsFilePath(): string {
+    if (isCloudflareWorker) return '';
     try {
       const dir = path.join(process.cwd(), 'data');
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      const testFile = path.join(dir, '.test-' + Date.now());
-      fs.writeFileSync(testFile, '1');
-      fs.unlinkSync(testFile);
       return path.join(dir, 'support-tickets.json');
     } catch {
       const tmpDir = path.join(os.tmpdir(), 'quoteflow-admin');
@@ -8378,19 +10191,31 @@ class QuoteFlowStore {
   }
 
   private loadSupportTicketsFromFile(): Record<string, SupportTicket> {
+    if (this.cachedSupportTickets !== null) {
+      return this.cachedSupportTickets;
+    }
+    if (isCloudflareWorker) {
+      this.cachedSupportTickets = {};
+      return {};
+    }
     try {
       const p = this.getSupportTicketsFilePath();
-      if (fs.existsSync(p)) {
+      if (p && fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf-8');
-        return JSON.parse(raw) || {};
+        this.cachedSupportTickets = JSON.parse(raw) || {};
+        return this.cachedSupportTickets!;
       }
     } catch {}
+    this.cachedSupportTickets = {};
     return {};
   }
 
   private saveSupportTicketsToFile(data: Record<string, SupportTicket>): void {
+    this.cachedSupportTickets = data;
+    if (isCloudflareWorker) return;
     try {
-      fs.writeFileSync(this.getSupportTicketsFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+      const p = this.getSupportTicketsFilePath();
+      if (p) fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8');
     } catch {}
   }
 
@@ -8765,8 +10590,38 @@ class QuoteFlowStore {
   }
 
   // ---- ADMIN AUDIT LOGS ----
+  private getAdminAuditLogsFilePath(): string {
+    if (isCloudflareWorker) return '';
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'admin-audit-logs.json');
+  }
+
+  private loadAdminAuditLogsFromFile(): AdminAuditLog[] {
+    if (isCloudflareWorker) return this.cachedAdminAuditLogs;
+    try {
+      const p = this.getAdminAuditLogsFilePath();
+      if (p && fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || [];
+      }
+    } catch {}
+    return [];
+  }
+
   public async logAdminAudit(log: AdminAuditLog): Promise<AdminAuditLog> {
     this.adminAuditLogs.unshift(log);
+    const fileLogs = this.loadAdminAuditLogsFromFile();
+    fileLogs.unshift(log);
+    if (!isCloudflareWorker) {
+      try {
+        const p = this.getAdminAuditLogsFilePath();
+        if (p) fs.writeFileSync(p, JSON.stringify(fileLogs.slice(0, 500), null, 2), 'utf-8');
+      } catch {}
+    }
+
     const admin = createAdminClient();
     if (admin) {
       try {
@@ -8776,7 +10631,7 @@ class QuoteFlowStore {
     return log;
   }
 
-  public async getAdminAuditLogs(limit = 50): Promise<AdminAuditLog[]> {
+  public async getAdminAuditLogs(limit = 100): Promise<AdminAuditLog[]> {
     const admin = createAdminClient();
     if (admin) {
       try {
@@ -8785,10 +10640,170 @@ class QuoteFlowStore {
           .select('*')
           .order('created_at', { ascending: false })
           .limit(limit);
-        if (data) return data;
+        if (data && data.length > 0) return data;
       } catch {}
     }
+    const fileLogs = this.loadAdminAuditLogsFromFile();
+    if (fileLogs.length > 0) {
+      return fileLogs.slice(0, limit);
+    }
     return this.adminAuditLogs.slice(0, limit);
+  }
+
+  // ---- PAYMENT COUNTRY RULES ----
+  private getPaymentCountryRulesFilePath(): string {
+    if (isCloudflareWorker) return '';
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'payment-country-rules.json');
+  }
+
+  private loadPaymentCountryRulesFromFile(): PaymentCountryRule[] {
+    if (isCloudflareWorker) return this.cachedPaymentCountryRules;
+    try {
+      const p = this.getPaymentCountryRulesFilePath();
+      if (p && fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+    } catch {}
+    return [];
+  }
+
+  private savePaymentCountryRulesToFile(rules: PaymentCountryRule[]): void {
+    this.cachedPaymentCountryRules = rules;
+    if (isCloudflareWorker) return;
+    try {
+      const p = this.getPaymentCountryRulesFilePath();
+      if (p) fs.writeFileSync(p, JSON.stringify(rules, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  public async getPaymentCountryRules(): Promise<PaymentCountryRule[]> {
+    let rules = this.loadPaymentCountryRulesFromFile();
+    if (!rules || rules.length === 0) {
+      rules = getDefaultCountryRules();
+      this.savePaymentCountryRulesToFile(rules);
+    }
+    return rules;
+  }
+
+  public async updatePaymentCountryRule(
+    countryCode: string,
+    updates: Partial<PaymentCountryRule>
+  ): Promise<PaymentCountryRule> {
+    const rules = await this.getPaymentCountryRules();
+    const code = countryCode.toUpperCase();
+    const idx = rules.findIndex((r) => r.country_code.toUpperCase() === code);
+
+    let updatedRule: PaymentCountryRule;
+    if (idx >= 0) {
+      updatedRule = {
+        ...rules[idx],
+        ...updates,
+        updated_at: new Date().toISOString(),
+      };
+      rules[idx] = updatedRule;
+    } else {
+      const countryMeta = findCountry(code);
+      const isIndia = code === 'IN';
+      updatedRule = {
+        country_code: code,
+        country_name: countryMeta.name,
+        flag: countryMeta.flag,
+        razorpay_enabled: isIndia,
+        nowpayments_enabled: !isIndia,
+        billing_currency: isIndia ? 'INR' : 'USD',
+        plan_amount: isIndia ? 99 : 12,
+        active: true,
+        ...updates,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      rules.push(updatedRule);
+    }
+    this.savePaymentCountryRulesToFile(rules);
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('payment_country_rules').upsert(updatedRule);
+      } catch {}
+    }
+
+    return updatedRule;
+  }
+
+  // ---- PAYMENT EVENTS (Auditing & Idempotency) ----
+  private getPaymentEventsFilePath(): string {
+    if (isCloudflareWorker) return '';
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    }
+    return path.join(dir, 'payment-events.json');
+  }
+
+  private loadPaymentEventsFromFile(): PaymentEvent[] {
+    if (isCloudflareWorker) return this.cachedPaymentEvents;
+    try {
+      const p = this.getPaymentEventsFilePath();
+      if (p && fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(raw) || [];
+      }
+    } catch {}
+    return [];
+  }
+
+  public async logPaymentEvent(event: PaymentEvent): Promise<PaymentEvent> {
+    const all = this.loadPaymentEventsFromFile();
+    all.unshift(event);
+    this.cachedPaymentEvents = all;
+    if (!isCloudflareWorker) {
+      try {
+        const p = this.getPaymentEventsFilePath();
+        if (p) fs.writeFileSync(p, JSON.stringify(all.slice(0, 500), null, 2), 'utf-8');
+      } catch {}
+    }
+
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        await admin.from('payment_events').insert(event);
+      } catch {}
+    }
+    return event;
+  }
+
+  public async getPaymentEvents(filter?: {
+    organizationId?: string;
+    provider?: string;
+    limit?: number;
+  }): Promise<PaymentEvent[]> {
+    const limit = filter?.limit || 50;
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        let q = admin.from('payment_events').select('*').order('created_at', { ascending: false }).limit(limit);
+        if (filter?.organizationId) q = q.eq('organization_id', filter.organizationId);
+        if (filter?.provider) q = q.eq('provider', filter.provider);
+        const { data } = await q;
+        if (data && data.length > 0) return data;
+      } catch {}
+    }
+
+    let all = this.loadPaymentEventsFromFile();
+    if (filter?.organizationId) {
+      all = all.filter((e) => e.organization_id === filter.organizationId);
+    }
+    if (filter?.provider) {
+      all = all.filter((e) => e.provider === filter.provider);
+    }
+    return all.slice(0, limit);
   }
 
   // ---- MRR & METRICS ----
@@ -8808,7 +10823,7 @@ class QuoteFlowStore {
     for (const sub of subscribers) {
       if (sub.status === 'active' || sub.status === 'grace_period' || sub.status === 'past_due') {
         activeCount += 1;
-        const planAmount = sub.amount || 0; // in paise
+        const planAmount = sub.amount || 0;
         mrr += planAmount / 100;
         if (planAmount === 9900) {
           promoCount += 1;
@@ -8824,15 +10839,41 @@ class QuoteFlowStore {
       promoCount,
       standardCount,
       breakdown: [
-        { plan: 'QuoteFlow Pro (₹99/mo)', count: activeCount, amount: activeCount * 99 },
+        { plan: 'QuoteFlow Pro (₹149/mo)', count: activeCount, amount: activeCount * 149 },
       ],
     };
   }
 
   public async getSubscriptionStats(): Promise<{
     totalBusinesses: number;
-    trialBusinesses: number;
+    indianCustomers: number;
+    internationalCustomers: number;
     activeSubscribers: number;
+    expiredSubscribers: number;
+    paymentPending: number;
+    newCustomersThisMonth: number;
+    indiaRevenue: number;
+    internationalRevenue: number;
+    razorpayRevenue: number;
+    nowpaymentsRevenue: number;
+    customersByCountry: Array<{
+      countryCode: string;
+      countryName: string;
+      flag: string;
+      totalCount: number;
+      activeCount: number;
+      billingRegion: 'INDIA' | 'INTERNATIONAL';
+      currency: 'INR' | 'USD';
+    }>;
+    countryWiseRevenue: Array<{
+      countryCode: string;
+      countryName: string;
+      flag: string;
+      currency: 'INR' | 'USD';
+      revenue: number;
+      activeSubscribers: number;
+    }>;
+    trialBusinesses: number;
     promoSubscribers: number;
     pastDue: number;
     gracePeriod: number;
@@ -8842,6 +10883,10 @@ class QuoteFlowStore {
     mrr: number;
   }> {
     const { subscribers } = await this.getAllSubscribers({ limit: 10000 });
+    const payments = this.loadSubscriptionPaymentsFromFile();
+    const now = Date.now();
+    const currentMonthPrefix = new Date().toISOString().slice(0, 7); // YYYY-MM
+
     let trialBusinesses = 0;
     let activeSubscribers = 0;
     let promoSubscribers = 0;
@@ -8852,23 +10897,157 @@ class QuoteFlowStore {
     let halted = 0;
     let mrr = 0;
 
+    let indianCustomers = 0;
+    let internationalCustomers = 0;
+    let newCustomersThisMonth = 0;
+    let paymentPending = 0;
+    let expiredSubscribers = 0;
+
+    let indiaRevenue = 0;
+    let internationalRevenue = 0;
+    let razorpayRevenue = 0;
+    let nowpaymentsRevenue = 0;
+
+    const countryMap = new Map<
+      string,
+      {
+        countryCode: string;
+        countryName: string;
+        flag: string;
+        totalCount: number;
+        activeCount: number;
+        billingRegion: 'INDIA' | 'INTERNATIONAL';
+        currency: 'INR' | 'USD';
+        revenue: number;
+      }
+    >();
+
     for (const sub of subscribers) {
-      if (sub.status === 'trialing') trialBusinesses += 1;
-      else if (sub.status === 'active') {
+      const isTrialing = sub.status === 'trialing';
+      const isTrialExpired = isTrialing && sub.trial_end_at ? new Date(sub.trial_end_at).getTime() <= now : false;
+      const isSubActive = sub.status === 'active' || (sub as any).is_trial_prepaid;
+
+      // Region & Country attribution
+      const rawCountry = sub.billing_country || sub.organization?.business_country || sub.organization?.country || 'IN';
+      const countryMeta = findCountry(rawCountry);
+      const isIndia = countryMeta.code === 'IN' || (rawCountry.toUpperCase() === 'IN') || (rawCountry.toLowerCase() === 'india');
+
+      const countryCode = countryMeta.code;
+      const billingRegion: 'INDIA' | 'INTERNATIONAL' = isIndia ? 'INDIA' : 'INTERNATIONAL';
+      const billingCurrency: 'INR' | 'USD' = isIndia ? 'INR' : 'USD';
+
+      if (isIndia) {
+        indianCustomers += 1;
+      } else {
+        internationalCustomers += 1;
+      }
+
+      // Check registration month
+      const createdStr = sub.created_at || sub.organization?.created_at || '';
+      if (createdStr.startsWith(currentMonthPrefix)) {
+        newCustomersThisMonth += 1;
+      }
+
+      // Status aggregation
+      if (isSubActive) {
         activeSubscribers += 1;
-        mrr += (sub.amount || 0) / 100;
-        if (sub.amount === 9900) promoSubscribers += 1;
-      } else if (sub.status === 'past_due') pastDue += 1;
-      else if (sub.status === 'grace_period') gracePeriod += 1;
-      else if (sub.status === 'cancelled') cancelled += 1;
-      else if (sub.status === 'expired') expired += 1;
-      else if (sub.status === 'halted') halted += 1;
+        if (isIndia) {
+          const inrAmt = (sub.amount || 9900) / 100;
+          indiaRevenue += inrAmt;
+          razorpayRevenue += inrAmt;
+          mrr += inrAmt;
+          if (sub.amount === 9900) promoSubscribers += 1;
+        } else {
+          const usdAmt = sub.amount === 10 ? 10 : (sub.amount ? sub.amount / 100 : 10);
+          internationalRevenue += usdAmt;
+          nowpaymentsRevenue += usdAmt;
+        }
+      } else if (isTrialing && !isTrialExpired) {
+        trialBusinesses += 1;
+      } else if (sub.status === 'past_due') {
+        pastDue += 1;
+        paymentPending += 1;
+      } else if (sub.status === 'grace_period') {
+        gracePeriod += 1;
+        paymentPending += 1;
+      } else if (sub.status === 'cancelled') {
+        cancelled += 1;
+      } else if (sub.status === 'expired' || isTrialExpired) {
+        expired += 1;
+        expiredSubscribers += 1;
+        paymentPending += 1;
+      } else if (sub.status === 'halted') {
+        halted += 1;
+      }
+
+      // Country map update
+      const existingCountry = countryMap.get(countryCode) || {
+        countryCode,
+        countryName: countryMeta.name,
+        flag: countryMeta.flag,
+        totalCount: 0,
+        activeCount: 0,
+        billingRegion,
+        currency: billingCurrency,
+        revenue: 0,
+      };
+
+      existingCountry.totalCount += 1;
+      if (isSubActive) {
+        existingCountry.activeCount += 1;
+        existingCountry.revenue += isIndia ? (sub.amount || 9900) / 100 : 10;
+      }
+      countryMap.set(countryCode, existingCountry);
     }
+
+    // Include historical payments in revenue calculation if any payments are stored
+    for (const p of payments) {
+      if (p.status === 'captured' || p.status === 'finished') {
+        const isUsd = (p.currency || '').toUpperCase() === 'USD' || p.provider === 'nowpayments';
+        if (isUsd) {
+          const amt = p.amount >= 100 ? p.amount / 100 : p.amount;
+          if (amt > internationalRevenue) {
+            internationalRevenue = amt;
+            nowpaymentsRevenue = amt;
+          }
+        } else {
+          const amt = p.amount / 100;
+          if (amt > indiaRevenue) {
+            indiaRevenue = amt;
+            razorpayRevenue = amt;
+          }
+        }
+      }
+    }
+
+    const customersByCountry = Array.from(countryMap.values()).sort((a, b) => b.totalCount - a.totalCount);
+    const countryWiseRevenue = Array.from(countryMap.values())
+      .filter((c) => c.revenue > 0 || c.activeCount > 0)
+      .map((c) => ({
+        countryCode: c.countryCode,
+        countryName: c.countryName,
+        flag: c.flag,
+        currency: c.currency,
+        revenue: c.revenue,
+        activeSubscribers: c.activeCount,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
 
     return {
       totalBusinesses: subscribers.length,
-      trialBusinesses,
+      indianCustomers,
+      internationalCustomers,
       activeSubscribers,
+      expiredSubscribers,
+      paymentPending,
+      newCustomersThisMonth,
+      indiaRevenue,
+      internationalRevenue,
+      razorpayRevenue,
+      nowpaymentsRevenue,
+      customersByCountry,
+      countryWiseRevenue,
+      trialBusinesses,
       promoSubscribers,
       pastDue,
       gracePeriod,
@@ -8877,6 +11056,370 @@ class QuoteFlowStore {
       halted,
       mrr,
     };
+  }
+
+  // ==============================================================================
+  // META WHATSAPP BUSINESS PLATFORM STORE METHODS
+  // ==============================================================================
+
+  public async getWhatsAppConnection(orgId: string): Promise<WhatsAppConnection | null> {
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        const { data, error } = await admin
+          .from('whatsapp_connections')
+          .select('*')
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (data && !error) {
+          const conn: WhatsAppConnection = data;
+          this.whatsappConnections.set(orgId, conn);
+          return conn;
+        }
+
+        // Check fallback persistent storage in templates table (durable across all isolates & restarts)
+        const tmplName = `WHATSAPP_CONNECTION:${orgId}`;
+        const { data: tmplData } = await admin
+          .from('templates')
+          .select('layout_style')
+          .eq('name', tmplName)
+          .maybeSingle();
+
+        if (tmplData?.layout_style) {
+          try {
+            const conn: WhatsAppConnection = JSON.parse(tmplData.layout_style);
+            this.whatsappConnections.set(orgId, conn);
+            return conn;
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB get connection error, using cache:', err);
+    }
+    return this.whatsappConnections.get(orgId) || null;
+  }
+
+  public async saveWhatsAppConnection(
+    connectionData: Partial<WhatsAppConnection> & { organization_id: string }
+  ): Promise<WhatsAppConnection> {
+    const existing = await this.getWhatsAppConnection(connectionData.organization_id);
+    const now = new Date().toISOString();
+    const fullConnection: WhatsAppConnection = {
+      id: connectionData.id || existing?.id || crypto.randomUUID(),
+      organization_id: connectionData.organization_id,
+      meta_business_id: connectionData.meta_business_id ?? existing?.meta_business_id ?? null,
+      waba_id: connectionData.waba_id || existing?.waba_id || '',
+      phone_number_id: connectionData.phone_number_id || existing?.phone_number_id || '',
+      display_phone_number: connectionData.display_phone_number || existing?.display_phone_number || '',
+      verified_name: connectionData.verified_name ?? existing?.verified_name ?? null,
+      connection_status: connectionData.connection_status || existing?.connection_status || 'connected',
+      encrypted_access_token: connectionData.encrypted_access_token ?? existing?.encrypted_access_token ?? null,
+      credential_reference: connectionData.credential_reference ?? existing?.credential_reference ?? null,
+      token_expiry: connectionData.token_expiry ?? existing?.token_expiry ?? null,
+      quality_rating: connectionData.quality_rating ?? existing?.quality_rating ?? 'UNKNOWN',
+      messaging_status: connectionData.messaging_status ?? existing?.messaging_status ?? 'APPROVED',
+      code_verification_status: connectionData.code_verification_status ?? existing?.code_verification_status ?? null,
+      account_review_status: connectionData.account_review_status ?? existing?.account_review_status ?? null,
+      connected_by_user_id: connectionData.connected_by_user_id ?? existing?.connected_by_user_id ?? null,
+      connected_at: existing?.connected_at || now,
+      updated_at: now,
+      disconnected_at: connectionData.disconnected_at ?? existing?.disconnected_at ?? null,
+      metadata: { ...(existing?.metadata || {}), ...(connectionData.metadata || {}) },
+    };
+
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        await admin
+          .from('whatsapp_connections')
+          .upsert(fullConnection, { onConflict: 'organization_id' })
+          .catch(() => {});
+
+        // Dual-persist to templates table as durable storage across serverless instances
+        const tmplName = `WHATSAPP_CONNECTION:${connectionData.organization_id}`;
+        const payload = JSON.stringify(fullConnection);
+        const { data: existingTmpl } = await admin
+          .from('templates')
+          .select('id')
+          .eq('name', tmplName)
+          .maybeSingle();
+
+        if (existingTmpl) {
+          await admin
+            .from('templates')
+            .update({ layout_style: payload })
+            .eq('id', existingTmpl.id);
+        } else {
+          await admin
+            .from('templates')
+            .insert({
+              organization_id: connectionData.organization_id || DEFAULT_ORG_ID,
+              name: tmplName,
+              layout_style: payload,
+              accent_color: 'WHATSAPP',
+              is_default: false,
+            });
+        }
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB save connection error, saved to in-memory store:', err);
+    }
+
+    this.whatsappConnections.set(connectionData.organization_id, fullConnection);
+    return fullConnection;
+  }
+
+  public async disconnectWhatsApp(orgId: string): Promise<boolean> {
+    const existing = await this.getWhatsAppConnection(orgId);
+    if (!existing) return true;
+
+    const updated: WhatsAppConnection = {
+      ...existing,
+      connection_status: 'disconnected',
+      encrypted_access_token: null,
+      disconnected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        await admin
+          .from('whatsapp_connections')
+          .update({
+            connection_status: 'disconnected',
+            encrypted_access_token: null,
+            disconnected_at: updated.disconnected_at,
+            updated_at: updated.updated_at,
+          })
+          .eq('organization_id', orgId)
+          .catch(() => {});
+
+        // Clean up from templates table
+        const tmplName = `WHATSAPP_CONNECTION:${orgId}`;
+        await admin
+          .from('templates')
+          .delete()
+          .eq('name', tmplName)
+          .catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB disconnect error, updated local store:', err);
+    }
+
+    this.whatsappConnections.set(orgId, updated);
+    return true;
+  }
+
+  public async getWhatsAppTemplates(orgId: string): Promise<WhatsAppTemplate[]> {
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        const { data, error } = await admin
+          .from('whatsapp_templates')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('name', { ascending: true });
+        if (data && !error && data.length > 0) {
+          const list: WhatsAppTemplate[] = data;
+          this.whatsappTemplates.set(orgId, list);
+          return list;
+        }
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB get templates error, using cache:', err);
+    }
+    const cached = this.whatsappTemplates.get(orgId);
+    if (cached && cached.length > 0) return cached;
+
+    // Return standard approved QuoteFlow templates so modal template selection is immediately available
+    const standardList: WhatsAppTemplate[] = Object.values(QUOTEFLOW_STANDARD_TEMPLATES).map((def) => ({
+      id: `tmpl_${def.name}`,
+      organization_id: orgId,
+      meta_template_id: null,
+      name: def.name,
+      language: def.language,
+      category: def.category as any,
+      status: 'APPROVED',
+      components: def.components,
+      header_type: def.headerType as any,
+      body_text: def.bodyText,
+      sample_values: {},
+      rejection_reason: null,
+      last_synced_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+    this.whatsappTemplates.set(orgId, standardList);
+    return standardList;
+  }
+
+  public async saveWhatsAppTemplate(
+    templateData: Partial<WhatsAppTemplate> & { organization_id: string; name: string }
+  ): Promise<WhatsAppTemplate> {
+    const now = new Date().toISOString();
+    const fullTemplate: WhatsAppTemplate = {
+      id: templateData.id || crypto.randomUUID(),
+      organization_id: templateData.organization_id,
+      meta_template_id: templateData.meta_template_id || null,
+      name: templateData.name,
+      language: templateData.language || 'en_US',
+      category: templateData.category || 'UTILITY',
+      status: templateData.status || 'PENDING',
+      components: templateData.components || [],
+      header_type: templateData.header_type || 'NONE',
+      body_text: templateData.body_text || '',
+      sample_values: templateData.sample_values || {},
+      rejection_reason: templateData.rejection_reason || null,
+      last_synced_at: now,
+      created_at: templateData.created_at || now,
+      updated_at: now,
+    };
+
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        await admin.from('whatsapp_templates').upsert(fullTemplate, {
+          onConflict: 'organization_id,name,language',
+        });
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB save template error, saved to in-memory store:', err);
+    }
+
+    const currentList = this.whatsappTemplates.get(templateData.organization_id) || [];
+    const idx = currentList.findIndex((t) => t.name === fullTemplate.name && t.language === fullTemplate.language);
+    if (idx >= 0) {
+      currentList[idx] = fullTemplate;
+    } else {
+      currentList.push(fullTemplate);
+    }
+    this.whatsappTemplates.set(templateData.organization_id, currentList);
+    return fullTemplate;
+  }
+
+  public async getWhatsAppMessages(
+    orgId: string,
+    options?: { limit?: number; offset?: number; documentId?: string }
+  ): Promise<WhatsAppMessage[]> {
+    const limit = options?.limit || 50;
+    const offset = options?.offset || 0;
+
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        let query = admin
+          .from('whatsapp_messages')
+          .select('*, customer:customers(*)')
+          .eq('organization_id', orgId);
+
+        if (options?.documentId) {
+          query = query.eq('document_id', options.documentId);
+        }
+
+        const { data, error } = await query
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+
+        if (data && !error) {
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB get messages error, using cache:', err);
+    }
+
+    let messages = this.whatsappMessages.get(orgId) || [];
+    if (options?.documentId) {
+      messages = messages.filter((m) => m.document_id === options.documentId);
+    }
+    return messages.slice(offset, offset + limit);
+  }
+
+  public async createWhatsAppMessage(
+    messageData: Partial<WhatsAppMessage> & { organization_id: string; recipient_phone: string }
+  ): Promise<WhatsAppMessage> {
+    const now = new Date().toISOString();
+    const fullMessage: WhatsAppMessage = {
+      id: messageData.id || crypto.randomUUID(),
+      organization_id: messageData.organization_id,
+      customer_id: messageData.customer_id || null,
+      document_type: messageData.document_type || 'NOTIFICATION',
+      document_id: messageData.document_id || null,
+      document_number: messageData.document_number || null,
+      recipient_phone: messageData.recipient_phone,
+      template_name: messageData.template_name || null,
+      template_language: messageData.template_language || 'en_US',
+      meta_message_id: messageData.meta_message_id || null,
+      status: messageData.status || 'QUEUED',
+      error_code: messageData.error_code || null,
+      error_message: messageData.error_message || null,
+      idempotency_key: messageData.idempotency_key || null,
+      channel: messageData.channel || 'whatsapp_cloud_api',
+      sent_by_user_id: messageData.sent_by_user_id || null,
+      sent_at: messageData.sent_at || (messageData.status === 'SENT' ? now : null),
+      delivered_at: messageData.delivered_at || null,
+      read_at: messageData.read_at || null,
+      failed_at: messageData.failed_at || null,
+      metadata: messageData.metadata || {},
+      created_at: now,
+      updated_at: now,
+    };
+
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        await admin.from('whatsapp_messages').insert(fullMessage);
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB create message error, stored in cache:', err);
+    }
+
+    const currentList = this.whatsappMessages.get(messageData.organization_id) || [];
+    currentList.unshift(fullMessage);
+    this.whatsappMessages.set(messageData.organization_id, currentList);
+    return fullMessage;
+  }
+
+  public async updateWhatsAppMessageStatus(
+    metaMessageId: string,
+    status: WhatsAppMessageStatus,
+    error?: string
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+    const updatePayload: Record<string, any> = {
+      status,
+      updated_at: now,
+    };
+    if (status === 'SENT') updatePayload.sent_at = now;
+    if (status === 'DELIVERED') updatePayload.delivered_at = now;
+    if (status === 'READ') updatePayload.read_at = now;
+    if (status === 'FAILED') {
+      updatePayload.failed_at = now;
+      if (error) updatePayload.error_message = error;
+    }
+
+    try {
+      const admin = createAdminClient();
+      if (admin) {
+        await admin
+          .from('whatsapp_messages')
+          .update(updatePayload)
+          .eq('meta_message_id', metaMessageId);
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Store] DB update status error:', err);
+    }
+
+    // Also update in-memory lists
+    for (const [orgId, messages] of this.whatsappMessages.entries()) {
+      const msg = messages.find((m) => m.meta_message_id === metaMessageId);
+      if (msg) {
+        Object.assign(msg, updatePayload);
+        break;
+      }
+    }
+    return true;
   }
 }
 

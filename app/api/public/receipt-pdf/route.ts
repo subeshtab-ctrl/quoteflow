@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { generatePaymentReceiptPdf } from '@/lib/pdf/receipt-pdf-generator';
+import { getSanitizedPdfFilename } from '@/lib/quotations/calculations';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -39,12 +40,13 @@ export async function GET(req: NextRequest) {
     }
 
     const pdfBytes = await generatePaymentReceiptPdf(quote);
+    const filename = getSanitizedPdfFilename('receipt', quote.quotation_number);
 
     return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="Receipt-${quote.quotation_number}.pdf"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'no-cache',
       },
     });

@@ -164,3 +164,194 @@ export function isInterstateSupply(params: {
   // Fallback to normalized name comparison
   return normalizeState(supplierState) !== normalizeState(placeOfSupply);
 }
+
+export interface HsnSacEntry {
+  code: string;
+  type: 'HSN' | 'SAC';
+  description: string;
+  category: string;
+  defaultTaxRate: number;
+}
+
+export const COMMON_HSN_SAC_CODES: HsnSacEntry[] = [
+  // SAC - Services (Code starts with 99)
+  {
+    code: '998311',
+    type: 'SAC',
+    description: 'IT software development, mobile app programming & engineering',
+    category: 'Information Technology',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998312',
+    type: 'SAC',
+    description: 'Business and management consulting, project strategy & advisory',
+    category: 'Consulting',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998313',
+    type: 'SAC',
+    description: 'IT consulting, architecture advisory & system design',
+    category: 'Information Technology',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998314',
+    type: 'SAC',
+    description: 'IT infrastructure, devops, server & network management',
+    category: 'Information Technology',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998315',
+    type: 'SAC',
+    description: 'Cloud hosting, SaaS subscriptions & infrastructure provisioning',
+    category: 'Cloud & Hosting',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998316',
+    type: 'SAC',
+    description: 'Cybersecurity, compliance audits & vulnerability testing',
+    category: 'Information Technology',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998319',
+    type: 'SAC',
+    description: 'Other computer and digital IT services not elsewhere classified',
+    category: 'Information Technology',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998361',
+    type: 'SAC',
+    description: 'Advertising, digital marketing, SEO, social media & creative design',
+    category: 'Marketing',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998211',
+    type: 'SAC',
+    description: 'Legal advisory, compliance documentation & legal drafting',
+    category: 'Legal',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998222',
+    type: 'SAC',
+    description: 'Accounting, auditing, financial bookkeeping & tax compliance',
+    category: 'Accounting',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998717',
+    type: 'SAC',
+    description: 'Maintenance, AMC, servicing & repair of commercial machinery',
+    category: 'Maintenance & Repair',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998719',
+    type: 'SAC',
+    description: 'Maintenance, installation, AMC & repair of RO water purifiers & appliances',
+    category: 'Maintenance & Repair',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '998599',
+    type: 'SAC',
+    description: 'General support services, business facilitation & coordination',
+    category: 'General Services',
+    defaultTaxRate: 18,
+  },
+  // HSN - Goods
+  {
+    code: '8421',
+    type: 'HSN',
+    description: 'Water filtering or purifying machinery, RO filtration systems & filter cartridges',
+    category: 'Water & Filtration',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '8471',
+    type: 'HSN',
+    description: 'Automatic data processing machines, computers, servers, laptops & terminals',
+    category: 'Electronics & IT',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '8517',
+    type: 'HSN',
+    description: 'Smartphones, telecom devices, routers, gateways & communication apparatus',
+    category: 'Electronics & IT',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '8504',
+    type: 'HSN',
+    description: 'Power transformers, static converters, power supplies, SMPS & UPS systems',
+    category: 'Electrical',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '8528',
+    type: 'HSN',
+    description: 'Monitors, commercial display panels, video projectors & display units',
+    category: 'Electronics & IT',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '8443',
+    type: 'HSN',
+    description: 'Printers, photocopiers, barcode scanners & multifunctional printing units',
+    category: 'Office Equipment',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '8544',
+    type: 'HSN',
+    description: 'Network cables, ethernet patch cords, fiber optic cables & connectors',
+    category: 'Electrical & Cabling',
+    defaultTaxRate: 18,
+  },
+  {
+    code: '4820',
+    type: 'HSN',
+    description: 'Registers, note books, invoices, printed forms, order books & paper stationery',
+    category: 'Stationery',
+    defaultTaxRate: 12,
+  },
+  {
+    code: '3926',
+    type: 'HSN',
+    description: 'Articles of plastics, fittings, enclosures, housings & membrane filter bodies',
+    category: 'Plastics & Components',
+    defaultTaxRate: 18,
+  },
+];
+
+/**
+ * Searches common HSN/SAC codes by keyword or numeric prefix
+ */
+export function searchHsnSacCodes(query?: string | null): HsnSacEntry[] {
+  if (!query || !query.trim()) return COMMON_HSN_SAC_CODES.slice(0, 10);
+  const q = query.trim().toLowerCase();
+  return COMMON_HSN_SAC_CODES.filter(
+    (item) =>
+      item.code.toLowerCase().includes(q) ||
+      item.description.toLowerCase().includes(q) ||
+      item.category.toLowerCase().includes(q) ||
+      item.type.toLowerCase() === q
+  );
+}
+
+/**
+ * Finds exact HSN/SAC code entry
+ */
+export function findHsnSacCode(code?: string | null): HsnSacEntry | undefined {
+  if (!code) return undefined;
+  const clean = code.trim();
+  return COMMON_HSN_SAC_CODES.find((item) => item.code === clean);
+}

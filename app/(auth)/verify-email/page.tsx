@@ -30,6 +30,7 @@ function VerifyEmailContent() {
   const code = searchParams.get('code');
   const urlEmail = searchParams.get('email') || '';
   const urlError = searchParams.get('error') || searchParams.get('error_description');
+  const isVerifiedParam = searchParams.get('verified') === 'true';
 
   const [status, setStatus] = useState<VerificationStatus>('verifying');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -131,6 +132,34 @@ function VerifyEmailContent() {
       setStatus('error');
       setErrorMessage(urlError);
       return;
+    }
+
+    // Direct verified flag from /auth/callback redirect
+    if (isVerifiedParam) {
+      if (urlEmail) {
+        setVerifiedEmail(urlEmail);
+      }
+      setStatus('verified');
+      setTimeout(() => {
+        triggerFireworks();
+      }, 100);
+      return;
+    }
+
+    // Handle Supabase hash fragment auth (e.g. #access_token=...&type=signup)
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const hash = window.location.hash.substring(1);
+      const hashParams = new URLSearchParams(hash);
+      const hashType = hashParams.get('type');
+      const hashAccessToken = hashParams.get('access_token');
+      if (hashAccessToken && (hashType === 'signup' || hashType === 'email_change' || !hashType)) {
+        if (urlEmail) setVerifiedEmail(urlEmail);
+        setStatus('verified');
+        setTimeout(() => {
+          triggerFireworks();
+        }, 100);
+        return;
+      }
     }
 
     const verifyAuth = async () => {
@@ -376,9 +405,13 @@ function VerifyEmailContent() {
       <div className="relative z-10 w-full max-w-md">
         {/* Brand Header */}
         <div className="mb-6 text-center space-y-2">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--brand-color,#4f46e5)] text-white font-black text-2xl shadow-lg shadow-indigo-200 dark:shadow-none">
-            Q
-          </div>
+          <Link href="/" className="inline-block">
+            <img
+              src="/quoteflow-icon.png"
+              alt="QuoteFlow"
+              className="h-14 w-14 rounded-2xl shadow-md object-contain mx-auto hover:scale-105 transition-transform"
+            />
+          </Link>
           <h1 className="text-sm font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
             QuoteFlow Security
           </h1>
@@ -453,10 +486,20 @@ function VerifyEmailContent() {
                 )}
               </div>
 
-              {/* Login Button with Entrance Animation (Step 4) */}
+              {/* Continue to Dashboard Button */}
               <div className="w-full pt-2 animate-fade-in-up">
                 <Button
-                  onClick={() => {
+                  onClick={async () => {
+                    try {
+                      const supabase = createClient();
+                      if (supabase) {
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (user && Boolean(user.email_confirmed_at || user.confirmed_at)) {
+                          router.push('/dashboard');
+                          return;
+                        }
+                      }
+                    } catch {}
                     const loginUrl = verifiedEmail
                       ? `/login?email=${encodeURIComponent(verifiedEmail)}&verified=true`
                       : '/login?verified=true';
@@ -465,7 +508,7 @@ function VerifyEmailContent() {
                   variant="primary"
                   className="w-full h-12 text-sm font-bold shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/35 transition-all group"
                 >
-                  <span>Login to Dashboard</span>
+                  <span>Continue to Dashboard</span>
                   <ArrowRight className="h-4 w-4 ml-2 transition-transform group-hover:translate-x-1" />
                 </Button>
 

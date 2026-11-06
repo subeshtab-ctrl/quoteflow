@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/service-role';
 import { sendEmail, generateVerificationOtpEmail } from '@/lib/email/service';
 import { getAuthRedirectUrl } from '@/lib/utils/auth';
+import { checkRateLimit, generateSecureOtp } from '@/lib/auth/otp-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
+    const clientIp =
+      req.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+      req.headers.get('x-real-ip') ||
+      '127.0.0.1';
+
     const body = await req.json();
     const email = (body.email || '').trim().toLowerCase();
     const fullName = (body.fullName || '').trim();
@@ -14,6 +20,30 @@ export async function POST(req: NextRequest) {
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'A valid email address is required.' }, { status: 400 });
+    }
+
+    // Rate limiting: max 5 requests / 15m per IP
+    const ipCheck = checkRateLimit(`otp:ip:${clientIp}`, 5, 15 * 60 * 1000, 2000);
+    if (!ipCheck.allowed) {
+      return NextResponse.json(
+        { error: ipCheck.reason || 'Too many OTP requests. Please wait a moment.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(ipCheck.retryAfterSeconds) },
+        }
+      );
+    }
+
+    // Cooldown & Rate limiting per target email: 60s cooldown, max 5 per 15m
+    const emailCheck = checkRateLimit(`otp:email:${email}`, 5, 15 * 60 * 1000, 60 * 1000);
+    if (!emailCheck.allowed) {
+      return NextResponse.json(
+        { error: emailCheck.reason || 'Please wait 60s before requesting another verification email.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(emailCheck.retryAfterSeconds) },
+        }
+      );
     }
 
     const admin = createAdminClient();
@@ -24,7 +54,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let otpCode: string | null = null;
+    // Generate secure 6-digit CSPRNG hashed OTP (10-minute expiry, max 5 attempts)
+    const { otp: generatedOtp } = generateSecureOtp(email, 'VERIFICATION', 5, 10 * 60 * 1000);
+
+    let otpCode: string | null = generatedOtp;
     let actionLink: string | null = null;
     let userFullName = fullName;
     let userCompanyName = companyName;
@@ -32,7 +65,7 @@ export async function POST(req: NextRequest) {
     // 1. Check if the user already exists in Supabase
     let existingUser = null;
     try {
-      const { data: listData } = await admin.auth.admin.listUsers();
+      const { data: listData } = await admin.auth.admin.listUsers({ perPage: 1000 });
       existingUser = (listData?.users || []).find(
         (u) => u.email?.toLowerCase() === email
       );
@@ -57,15 +90,31 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        // Stamp 10-minute expiry reference timestamp in user_metadata
+        try {
+          await admin.auth.admin.updateUserById(existingUser.id, {
+            user_metadata: {
+              ...(existingUser.user_metadata || {}),
+              verification_link_sent_at: new Date().toISOString(),
+            },
+          });
+        } catch (metaErr) {
+          console.warn('Failed to update verification_link_sent_at for existing user:', metaErr);
+        }
+
         if (!error && data?.properties) {
-          otpCode = data.properties.email_otp || null;
           actionLink = data.properties.action_link || null;
+          if (data.properties.email_otp) {
+            otpCode = data.properties.email_otp;
+          }
         } else if (error) {
           console.warn('generateLink magiclink error:', error);
         }
       } else {
         // For new signups: use 'signup'
-        const metadata: Record<string, any> = {};
+        const metadata: Record<string, any> = {
+          verification_link_sent_at: new Date().toISOString(),
+        };
         if (fullName) metadata.full_name = fullName;
         if (companyName) metadata.company_name = companyName;
 
@@ -80,8 +129,10 @@ export async function POST(req: NextRequest) {
         });
 
         if (!error && data?.properties) {
-          otpCode = data.properties.email_otp || null;
           actionLink = data.properties.action_link || null;
+          if (data.properties.email_otp) {
+            otpCode = data.properties.email_otp;
+          }
         } else if (error) {
           console.warn('generateLink signup error:', error);
         }
@@ -92,12 +143,6 @@ export async function POST(req: NextRequest) {
 
     // 2. Dispatch branded verification email via Resend
     if (otpCode || actionLink) {
-      console.log(`\n======================================================`);
-      console.log(`[VERIFICATION EMAIL DISPATCH] Target: ${email}`);
-      console.log(`[VERIFICATION OTP CODE]      ${otpCode}`);
-      console.log(`[ACTION LINK]                ${actionLink}`);
-      console.log(`======================================================\n`);
-
       const emailPayload = generateVerificationOtpEmail({
         email,
         verifyUrl: actionLink || undefined,
@@ -121,10 +166,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Secure response: NEVER return raw otpCode or links in HTTP response
     return NextResponse.json({
       success: true,
       message: 'Verification email sent to your inbox.',
-      otpCode,
     });
   } catch (err: any) {
     console.error('Send verification OTP error:', err);

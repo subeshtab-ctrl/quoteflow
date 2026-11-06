@@ -29,6 +29,7 @@ import {
   X,
   Download,
   PhoneCall,
+  Mail,
 } from 'lucide-react';
 import { playNotificationChime } from '@/lib/utils/sound';
 
@@ -247,6 +248,30 @@ export function SupportView({ initialTickets }: { initialTickets?: SupportTicket
           <Plus className="h-4 w-4" />
           <span>New Support Ticket</span>
         </Button>
+      </div>
+
+      {/* Contact Section (Requirement 11) */}
+      <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-white to-purple-50/50 dark:from-indigo-950/30 dark:via-slate-900 dark:to-purple-950/20 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="h-10 w-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <Mail className="h-5 w-5" />
+          </div>
+          <div className="space-y-0.5">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Can&apos;t find what you&apos;re looking for? Contact the QuoteFlow team and we&apos;ll be happy to help.
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Direct email support for quotation questions, billing assistance, account setup, or feature requests.
+            </p>
+          </div>
+        </div>
+        <a
+          href="mailto:hello@blendandbold.com"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-all shrink-0 justify-center"
+        >
+          <Mail className="h-4 w-4" />
+          <span>hello@blendandbold.com</span>
+        </a>
       </div>
 
       {/* Filters Bar & Status Pills */}

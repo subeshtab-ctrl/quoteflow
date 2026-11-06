@@ -88,6 +88,6 @@ describe('Quotation Financial Calculations Engine', () => {
   it('formats currency correctly for multiple countries', () => {
     expect(formatCurrency(50000, 'INR')).toContain('50,000');
     expect(formatCurrency(1200.5, 'USD')).toContain('1,200.50');
-    expect(formatCurrency(850, 'EUR')).toContain('850,00');
+    expect(formatCurrency(850, 'EUR')).toContain('850.00');
   });
 });

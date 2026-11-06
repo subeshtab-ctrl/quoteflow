@@ -132,4 +132,49 @@ describe('Quotation Bank, UPI QR & Crypto Payment Options', () => {
     expect(org?.default_bank_details?.account_number).toBe('12345678901');
     expect(org?.default_upi_details?.upi_id).toBe('subeshm@sbi');
   });
+
+  it('resolves quotations and records payments by human-readable quotation_number (e.g. Q-xxxxx)', async () => {
+    const quotations = await store.getQuotations(orgId);
+    expect(quotations.length).toBeGreaterThan(0);
+    const quote = quotations[0];
+    const qNumber = quote.quotation_number;
+    expect(qNumber).toBeDefined();
+
+    // 1. Fetch by quotation_number
+    const fetchedByNum = await store.getQuotationById(qNumber);
+    expect(fetchedByNum).toBeDefined();
+    expect(fetchedByNum?.id).toBe(quote.id);
+    expect(fetchedByNum?.quotation_number).toBe(qNumber);
+
+    // 2. Update payment using quotation_number directly
+    const updatedByNum = await store.updateQuotationPayment(
+      qNumber,
+      {
+        paid_amount: 500,
+        is_paid: false,
+        payment_status: 'PARTIALLY_PAID',
+        payment_method: 'BANK_TRANSFER',
+        payment_notes: 'Test advance by quotation_number',
+      },
+      orgId
+    );
+    expect(updatedByNum).toBeDefined();
+    expect(updatedByNum.id).toBe(quote.id);
+    expect(updatedByNum.paid_amount).toBe(500);
+    expect(updatedByNum.payment_status).toBe('PARTIALLY_PAID');
+    expect(updatedByNum.payment_notes).toBe('Test advance by quotation_number');
+
+    // 3. Reset payment
+    const reset = await store.updateQuotationPayment(
+      qNumber,
+      {
+        is_paid: false,
+        paid_amount: 0,
+        payment_status: 'UNPAID',
+      },
+      orgId
+    );
+    expect(reset.is_paid).toBe(false);
+    expect(reset.paid_amount).toBe(0);
+  });
 });

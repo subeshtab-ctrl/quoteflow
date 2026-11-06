@@ -4,6 +4,7 @@ import {
   calculateLineItem,
   formatCurrency,
   isValidDocumentText,
+  sanitizeTaxBreakdown,
 } from '@/lib/quotations/calculations';
 import { validateGstin, isInterstateSupply, getStateCodeByName } from '@/lib/tax/india-gst';
 
@@ -146,13 +147,13 @@ describe('Tax Inclusive & Exclusive Calculations (Requirements 1, 2, 3, 11)', ()
   });
 
   it('Currency formatting always shows official symbols', () => {
-    expect(formatCurrency(5000, 'INR')).toBe('₹5,000.00');
-    expect(formatCurrency(5000, 'USD')).toBe('$5,000.00');
-    expect(formatCurrency(5000, 'EUR')).toBe('€5,000.00');
-    expect(formatCurrency(5000, 'GBP')).toBe('£5,000.00');
-    expect(formatCurrency(5000, 'AED')).toBe('د.إ 5,000.00');
-    expect(formatCurrency(5000, 'SAR')).toBe('ر.س 5,000.00');
-    expect(formatCurrency(5000, 'KWD')).toBe('د.ك 5,000.00');
+    expect(formatCurrency(5000, 'INR')).toBe('₹ 5,000.00');
+    expect(formatCurrency(5000, 'USD')).toBe('$ 5,000.00');
+    expect(formatCurrency(5000, 'EUR')).toBe('€ 5,000.00');
+    expect(formatCurrency(5000, 'GBP')).toBe('£ 5,000.00');
+    expect(formatCurrency(5000, 'AED')).toBe('⃃ 5,000.00');
+    expect(formatCurrency(5000, 'SAR')).toBe('SAR 5,000.00');
+    expect(formatCurrency(5000, 'KWD')).toBe('KWD 5,000.00');
   });
 
   it('Indian GSTIN validator validates 15-character structure', () => {
@@ -506,5 +507,165 @@ describe('Tax Inclusive & Exclusive Calculations (Requirements 1, 2, 3, 11)', ()
 
     const reportPdfBytes = await generateQuoteFlowPdfReport(reportData);
     expect(reportPdfBytes.byteLength).toBeGreaterThan(1000);
+  }, 120000);
+
+  describe('Strict Non-India Tax Isolation (Zero CGST / SGST / IGST in UAE, US, UK)', () => {
+    it('UAE quote in AED with 5% tax produces clean VAT and ZERO CGST/SGST', () => {
+      const result = calculateQuotationTotals({
+        items: [
+          {
+            description: 'Brand Identity Design',
+            quantity: 1,
+            unit: 'project',
+            unit_price: 25000,
+            tax_rate: 5,
+          },
+        ],
+        currency: 'AED',
+        country: 'United Arab Emirates',
+        tax_rate: 5,
+        tax_mode: 'exclusive',
+      });
+
+      expect(result.subtotal).toBe(25000);
+      expect(result.tax_amount).toBe(1250);
+      expect(result.grand_total).toBe(26250);
+      expect(result.tax_name).toBe('VAT');
+
+      // Zero Indian tax fields
+      expect(result.cgst_rate ?? 0).toBe(0);
+      expect(result.cgst_amount ?? 0).toBe(0);
+      expect(result.sgst_rate ?? 0).toBe(0);
+      expect(result.sgst_amount ?? 0).toBe(0);
+      expect(result.igst_rate ?? 0).toBe(0);
+      expect(result.igst_amount ?? 0).toBe(0);
+
+      // Single clean VAT row
+      expect(result.tax_breakdown).toHaveLength(1);
+      expect(result.tax_breakdown[0].label).toBe('VAT 5%');
+      expect(result.tax_breakdown[0].amount).toBe(1250);
+      expect(result.tax_breakdown[0].rate).toBe(5);
+
+      // Guarantee NO mention of CGST, SGST, IGST, or GST in labels
+      result.tax_breakdown.forEach((t) => {
+        expect(t.label).not.toMatch(/CGST/i);
+        expect(t.label).not.toMatch(/SGST/i);
+        expect(t.label).not.toMatch(/IGST/i);
+        expect(t.label).not.toMatch(/^GST/i);
+      });
+    });
+
+    it('sanitizeTaxBreakdown cleans legacy database quotes with stored CGST/SGST for UAE', () => {
+      // Suppose an old UAE quote had CGST + SGST stored in database
+      const legacySavedBreakdown = [
+        { label: 'CGST 2.5%', rate: 2.5, amount: 625 },
+        { label: 'SGST 2.5%', rate: 2.5, amount: 625 },
+      ];
+
+      const cleaned = sanitizeTaxBreakdown(
+        legacySavedBreakdown,
+        false, // isIndia = false
+        'VAT', // taxName
+        1250,  // totalTax
+        5      // taxRate
+      );
+
+      expect(cleaned).toHaveLength(1);
+      expect(cleaned[0].label).toBe('VAT 5%');
+      expect(cleaned[0].amount).toBe(1250);
+      expect(cleaned[0].rate).toBe(5);
+
+      cleaned.forEach((t) => {
+        expect(t.label).not.toMatch(/CGST/i);
+        expect(t.label).not.toMatch(/SGST/i);
+        expect(t.label).not.toMatch(/IGST/i);
+      });
+    });
+
+    it('United Kingdom quote in GBP produces clean VAT 20% without Indian taxes', () => {
+      const result = calculateQuotationTotals({
+        items: [
+          {
+            description: 'Engineering Advisory',
+            quantity: 1,
+            unit: 'month',
+            unit_price: 10000,
+            tax_rate: 20,
+          },
+        ],
+        currency: 'GBP',
+        country: 'United Kingdom',
+        tax_rate: 20,
+        tax_mode: 'exclusive',
+      });
+
+      expect(result.subtotal).toBe(10000);
+      expect(result.tax_amount).toBe(2000);
+      expect(result.grand_total).toBe(12000);
+      expect(result.tax_name).toBe('VAT');
+      expect(result.cgst_amount ?? 0).toBe(0);
+      expect(result.sgst_amount ?? 0).toBe(0);
+      expect(result.tax_breakdown).toHaveLength(1);
+      expect(result.tax_breakdown[0].label).toBe('VAT 20%');
+    });
+
+    it('United States quote in USD produces clean Tax 7% without Indian taxes', () => {
+      const result = calculateQuotationTotals({
+        items: [
+          {
+            description: 'Cloud Infrastructure Setup',
+            quantity: 1,
+            unit: 'unit',
+            unit_price: 5000,
+            tax_rate: 7,
+          },
+        ],
+        currency: 'USD',
+        country: 'United States',
+        tax_rate: 7,
+        tax_mode: 'exclusive',
+      });
+
+      expect(result.subtotal).toBe(5000);
+      expect(result.tax_amount).toBe(350);
+      expect(result.grand_total).toBe(5350);
+      expect(result.tax_name).toBe('Tax');
+      expect(result.cgst_amount ?? 0).toBe(0);
+      expect(result.sgst_amount ?? 0).toBe(0);
+      expect(result.tax_breakdown).toHaveLength(1);
+      expect(result.tax_breakdown[0].label).toBe('Tax 7%');
+    });
+
+    it('India quote preserves correct CGST + SGST intra-state breakdown', () => {
+      const result = calculateQuotationTotals({
+        items: [
+          {
+            description: 'Domestic Goods Supply',
+            quantity: 1,
+            unit: 'nos',
+            unit_price: 10000,
+            tax_rate: 18,
+          },
+        ],
+        currency: 'INR',
+        country: 'India',
+        supplier_state: 'Maharashtra',
+        place_of_supply: 'Maharashtra',
+        tax_rate: 18,
+        tax_mode: 'exclusive',
+      });
+
+      expect(result.subtotal).toBe(10000);
+      expect(result.tax_amount).toBe(1800);
+      expect(result.grand_total).toBe(11800);
+      expect(result.cgst_rate).toBe(9);
+      expect(result.cgst_amount).toBe(900);
+      expect(result.sgst_rate).toBe(9);
+      expect(result.sgst_amount).toBe(900);
+      expect(result.igst_amount).toBe(0);
+      expect(result.tax_breakdown).toHaveLength(2);
+      expect(result.tax_breakdown[0].label).toBe('CGST 9%');
+      expect(result.tax_breakdown[1].label).toBe('SGST 9%');
+    });
   });
 });

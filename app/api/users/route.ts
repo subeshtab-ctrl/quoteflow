@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/service-role';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { sendEmail } from '@/lib/email/service';
+import { staffService } from '@/lib/staff/staff-service';
+import { StaffRole, StaffPermissions, ROLE_PERMISSION_PRESETS, isOwnerOrAdminRole } from '@/types/staff';
 
 export async function GET() {
   try {
@@ -98,7 +100,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { fullName, email, password, role = 'STAFF' } = body;
+    const { fullName, email, password, role = 'STAFF', phone, branch = 'Main Branch', permissions } = body;
 
     if (!fullName || !fullName.trim()) {
       return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
@@ -113,9 +115,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const assignedRole = role === 'ADMIN' ? 'ADMIN' : 'STAFF';
+    const normalizedRole = (role || 'STAFF').toUpperCase() as StaffRole;
+    if (normalizedRole === 'OWNER' && auth.role.toUpperCase() !== 'OWNER') {
+      return NextResponse.json({ error: 'Only the Account Owner can assign the Owner role.' }, { status: 403 });
+    }
+
+    const assignedRole = normalizedRole === 'OWNER' ? 'OWNER' : normalizedRole === 'ADMIN' ? 'ADMIN' : 'STAFF';
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = fullName.trim();
+    const cleanBranch = (branch || 'Main Branch').trim();
+    const cleanPhone = phone ? phone.trim() : null;
+
+    const preset = ROLE_PERMISSION_PRESETS[normalizedRole] || ROLE_PERMISSION_PRESETS.STAFF;
+    const finalPermissions: StaffPermissions = {
+      ...preset,
+      ...(permissions || {}),
+    };
+
+    if (normalizedRole !== 'OWNER' && normalizedRole !== 'ADMIN') {
+      finalPermissions.billing_view = false;
+      finalPermissions.billing_manage_subscription = false;
+      finalPermissions.billing_manage_payment_method = false;
+    }
 
     const supabase = createAdminClient();
     if (!supabase) {
@@ -153,10 +174,14 @@ export async function POST(req: NextRequest) {
             ...existingUser.user_metadata,
             full_name: cleanName,
             organization_id: auth.orgId,
-            role: assignedRole,
+            role: normalizedRole,
             company_name: auth.organization.name,
+            branch: cleanBranch,
+            phone: cleanPhone,
+            permissions: finalPermissions,
             invited_by: auth.userId,
             must_change_password: true,
+            is_active: true,
           },
         });
 
@@ -166,7 +191,6 @@ export async function POST(req: NextRequest) {
       targetUserId = updatedData.user.id;
     } else {
       // 2. Create auth user with email confirmed and the temporary password.
-      //    Set must_change_password: true so staff is prompted to set their own password on first login.
       const { data: userData, error: createError } = await supabase.auth.admin.createUser({
         email: cleanEmail,
         password,
@@ -174,10 +198,14 @@ export async function POST(req: NextRequest) {
         user_metadata: {
           full_name: cleanName,
           organization_id: auth.orgId,
-          role: assignedRole,
+          role: normalizedRole,
           company_name: auth.organization.name,
+          branch: cleanBranch,
+          phone: cleanPhone,
+          permissions: finalPermissions,
           invited_by: auth.userId,
           must_change_password: true,
+          is_active: true,
         },
       });
 
@@ -214,9 +242,34 @@ export async function POST(req: NextRequest) {
       id: targetUserId,
       full_name: cleanName,
       email: cleanEmail,
+      phone: cleanPhone,
       role: assignedRole,
       updated_at: new Date().toISOString(),
     });
+
+    // 6. Log staff activity
+    await staffService.logStaffActivity({
+      organization_id: auth.orgId,
+      user_id: auth.userId,
+      user_name: auth.fullName || auth.email,
+      user_email: auth.email,
+      user_role: auth.role,
+      action: 'CREATE',
+      action_key: 'staff_created',
+      module: 'STAFF',
+      target_id: targetUserId,
+      target_identifier: cleanEmail,
+      details: `Added new staff member "${cleanName}" with role ${normalizedRole} (${cleanBranch})`,
+      diff: {
+        new: {
+          full_name: cleanName,
+          email: cleanEmail,
+          role: normalizedRole,
+          branch: cleanBranch,
+          phone: cleanPhone,
+        },
+      },
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,

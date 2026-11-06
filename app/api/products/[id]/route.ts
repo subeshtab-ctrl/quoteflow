@@ -12,21 +12,31 @@ export async function PUT(
 ) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
     const body = await req.json();
     const validated = ProductFormSchema.parse(body);
 
-    const updated = await store.updateProduct(id, {
-      organization_id: orgId,
-      name: validated.name,
-      sku: validated.sku || null,
-      description: validated.description || null,
-      unit_price: validated.unit_price,
-      unit: validated.unit || 'unit',
-      tax_rate: validated.tax_rate,
-      is_active: validated.is_active,
-    });
+    const updated = await store.updateProduct(
+      id,
+      {
+        organization_id: orgId,
+        name: validated.name,
+        sku: validated.sku || null,
+        description: validated.description || null,
+        unit_price: validated.unit_price,
+        unit: validated.unit || 'unit',
+        tax_rate: validated.tax_rate,
+        is_active: validated.is_active,
+        hsn_code: validated.hsn_code || null,
+        classification_type: (validated.classification_type as any) || null,
+        category: validated.category || null,
+      },
+      orgId
+    );
 
     return NextResponse.json({ success: true, product: updated });
   } catch (err: any) {
@@ -44,7 +54,10 @@ export async function DELETE(
 ) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
     await store.deleteProduct(id, orgId);
     return NextResponse.json({ success: true, message: 'Product deleted successfully' });

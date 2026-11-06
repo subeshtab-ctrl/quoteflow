@@ -15,13 +15,15 @@ export interface InvitationRecord {
 }
 
 export function getInvitationsFilePath(): string {
-  const dir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dir)) {
-    try {
+  try {
+    const dir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
-    } catch {}
+    }
+    return path.join(dir, 'invitations.json');
+  } catch {
+    return 'invitations.json';
   }
-  return path.join(dir, 'invitations.json');
 }
 
 export function loadInvitations(): Record<string, InvitationRecord> {

@@ -1,7 +1,8 @@
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { runAutoTable, loadPdfLogoImage } from '@/lib/pdf/font-loader';
 import { Quotation, Organization } from '@/types/database';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import { formatPdfCurrency } from '@/lib/reports/pdf-report-builder';
+import { getCompanyInitials } from '@/lib/utils/logo';
 import { format } from 'date-fns';
 
 export interface ReportPdfOptions {
@@ -63,28 +64,55 @@ export async function generateFinancialReportPdf({
 
   // 1. Top Decorative Brand Bar
   doc.setFillColor(79, 70, 229); // Indigo 600
-  doc.rect(0, 0, pageWidth, 5, 'F');
+  doc.rect(0, 0, pageWidth, 4, 'F');
 
-  // 2. Organization Info & Title
+  // 2. Organization Info & Title with Logo / Monogram
+  const logoData = await loadPdfLogoImage(org.logo_url);
+  const logoSize = 13;
+  let compTextX = margin;
+
+  if (logoData && logoData.base64) {
+    try {
+      doc.addImage(logoData.base64, 'PNG', margin, 10, logoSize, logoSize);
+      compTextX = margin + logoSize + 4;
+    } catch {
+      const initials = getCompanyInitials(org.name);
+      doc.setFillColor(79, 70, 229);
+      doc.roundedRect(margin, 10, logoSize, logoSize, 2, 2, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(logoSize * 0.52);
+      doc.setTextColor(255, 255, 255);
+      doc.text(initials, margin + logoSize / 2, 10 + logoSize * 0.68, { align: 'center' });
+      compTextX = margin + logoSize + 4;
+    }
+  } else {
+    const initials = getCompanyInitials(org.name);
+    doc.setFillColor(79, 70, 229);
+    doc.roundedRect(margin, 10, logoSize, logoSize, 2, 2, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(logoSize * 0.52);
+    doc.setTextColor(255, 255, 255);
+    doc.text(initials, margin + logoSize / 2, 10 + logoSize * 0.68, { align: 'center' });
+    compTextX = margin + logoSize + 4;
+  }
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(14);
   doc.setTextColor(30, 41, 59); // Slate 800
-  doc.text(org.name || 'QuoteFlow Statement', margin, 17);
+  doc.text(org.name || 'QuoteFlow Statement', compTextX, 15);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(100, 116, 139); // Slate 500
   const compLines: string[] = [
-    org.address_line1 || '',
-    `${org.city || ''} ${org.state || ''} ${org.postal_code || ''} ${org.country || ''}`.trim(),
-    `Email: ${org.email} | Tel: ${org.phone || 'N/A'}`,
-    org.gst_vat_number ? `Tax / GST: ${org.gst_vat_number}` : '',
+    [org.address_line1, org.city, org.state, org.postal_code, org.country].filter(Boolean).join(', '),
+    `Email: ${org.email} | Tel: ${org.phone || 'N/A'}${org.gst_vat_number ? ` | Tax ID: ${org.gst_vat_number}` : ''}`,
   ].filter(Boolean) as string[];
 
-  let compY = 22;
+  let compY = 20;
   compLines.forEach((line) => {
-    doc.text(line, margin, compY);
-    compY += 4;
+    doc.text(line, compTextX, compY);
+    compY += 3.8;
   });
 
   // Right Side Header: Statement Title
@@ -126,7 +154,7 @@ export async function generateFinancialReportPdf({
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  doc.text(formatCurrency(totalValue, primaryCurrency), margin + 3, kpiY + 17);
+  doc.text(formatPdfCurrency(totalValue, primaryCurrency), margin + 3, kpiY + 17);
 
   // Card 2: Approved Revenue
   const c2X = margin + colWidth + 3;
@@ -138,7 +166,7 @@ export async function generateFinancialReportPdf({
   doc.text('APPROVED REVENUE', c2X + 3, kpiY + 6);
   doc.setFontSize(11);
   doc.setTextColor(79, 70, 229);
-  doc.text(formatCurrency(approvedValue, primaryCurrency), c2X + 3, kpiY + 12);
+  doc.text(formatPdfCurrency(approvedValue, primaryCurrency), c2X + 3, kpiY + 12);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
@@ -155,7 +183,7 @@ export async function generateFinancialReportPdf({
   doc.text('COLLECTED (PAID)', c3X + 3, kpiY + 6);
   doc.setFontSize(11);
   doc.setTextColor(22, 101, 52);
-  doc.text(formatCurrency(paidValue, primaryCurrency), c3X + 3, kpiY + 12);
+  doc.text(formatPdfCurrency(paidValue, primaryCurrency), c3X + 3, kpiY + 12);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(22, 101, 52);
@@ -172,7 +200,7 @@ export async function generateFinancialReportPdf({
   doc.text('OUTSTANDING BALANCE', c4X + 3, kpiY + 6);
   doc.setFontSize(11);
   doc.setTextColor(180, 83, 9);
-  doc.text(formatCurrency(outstandingValue, primaryCurrency), c4X + 3, kpiY + 12);
+  doc.text(formatPdfCurrency(outstandingValue, primaryCurrency), c4X + 3, kpiY + 12);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(180, 83, 9);
@@ -205,11 +233,11 @@ export async function generateFinancialReportPdf({
       quote.valid_until || '—',
       quote.status,
       paymentStr,
-      formatCurrency(quote.grand_total, quote.currency),
+      formatPdfCurrency(quote.grand_total, quote.currency),
     ];
   });
 
-  autoTable(doc, {
+  runAutoTable(doc, {
     startY: kpiY + 26,
     head: [['#', 'Doc #', 'Customer / Company', 'Issue Date', 'Valid / Due', 'Status', 'Payment', 'Amount']],
     body: tableData,
@@ -242,7 +270,7 @@ export async function generateFinancialReportPdf({
     alternateRowStyles: {
       fillColor: [250, 250, 252],
     },
-    didParseCell: (data) => {
+    didParseCell: (data: any) => {
       // Color-code Status column
       if (data.section === 'body' && data.column.index === 5) {
         const val = String(data.cell.raw);

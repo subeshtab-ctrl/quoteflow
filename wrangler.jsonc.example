@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quoteflow-app",
+  "compatibility_date": "2026-10-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "vinext/server/fetch-handler",
+  "assets": {
+    "directory": "dist/client",
+    "not_found_handling": "none",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": false
+  },
+  "routes": [
+    {
+      "pattern": "blendandbold.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.blendandbold.com",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "CLOUDFLARE_WORKER": "true",
+    "NEXT_PUBLIC_APP_URL": "https://www.blendandbold.com",
+    "NEXT_PUBLIC_SUPABASE_URL": "https://YOUR_PROJECT.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "YOUR_ANON_KEY",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "YOUR_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY": "YOUR_SERVICE_ROLE_KEY",
+    "RESEND_API_KEY": "re_YOUR_KEY",
+    "EMAIL_FROM": "QuoteFlow <quotes@blendandbold.com>",
+    "RAZORPAY_KEY_ID": "YOUR_RAZORPAY_KEY_ID",
+    "RAZORPAY_KEY_SECRET": "YOUR_RAZORPAY_SECRET",
+    "RAZORPAY_WEBHOOK_SECRET": "YOUR_WEBHOOK_SECRET",
+    "RAZORPAY_MODE": "live",
+    "NEXT_PUBLIC_RAZORPAY_KEY_ID": "YOUR_RAZORPAY_KEY_ID",
+    "RAZORPAY_PLAN_ID_PROMO_99": "plan_PROMO_ID",
+    "RAZORPAY_PLAN_ID_STANDARD_199": "plan_STANDARD_ID",
+    "PAYMENT_GRACE_PERIOD_DAYS": "7",
+    "NOWPAYMENTS_API_KEY": "YOUR_NOWPAYMENTS_KEY",
+    "NOWPAYMENTS_IPN_SECRET": "YOUR_NOWPAYMENTS_IPN",
+    "NOWPAYMENTS_API_URL": "https://api.nowpayments.io/v1"
+  }
+}

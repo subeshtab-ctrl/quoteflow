@@ -148,9 +148,10 @@ export function calculateReportData({
   userRole?: string;
 }): ReportResponseData {
   const currency: CurrencyCode = organization.default_currency || 'INR';
-  const countryProfile = getCountryProfile(organization.country || 'IN');
-  const isIndiaGst = countryProfile.isIndiaGst;
-  const isUaeVat = countryProfile.isUaeVat;
+  const orgCountry = organization.country || (currency === 'AED' ? 'AE' : (currency === 'INR' ? 'IN' : 'Other'));
+  const countryProfile = getCountryProfile(orgCountry);
+  const isIndiaGst = countryProfile.isIndiaGst && currency === 'INR';
+  const isUaeVat = countryProfile.isUaeVat || currency === 'AED';
 
   const { startDate, endDate, label: dateRangeLabel } = computeDatePresetRange(
     filters.preset,

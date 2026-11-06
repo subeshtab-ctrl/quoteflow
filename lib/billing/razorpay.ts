@@ -701,7 +701,14 @@ export class RazorpayService {
       return false;
     }
 
-    const secret = this.webhookSecret || this.keySecret || 'mock_webhook_secret';
+    const secret =
+      this.webhookSecret ||
+      this.keySecret ||
+      (process.env.VITEST || process.env.NODE_ENV === 'test' ? 'mock_webhook_secret' : '');
+    if (!secret) {
+      console.warn('Razorpay webhook secret is not configured; rejecting unverified webhook.');
+      return false;
+    }
     const expectedSignature = crypto
       .createHmac('sha256', secret)
       .update(rawBody)

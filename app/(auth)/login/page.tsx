@@ -43,6 +43,35 @@ function LoginForm() {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isSavingPassword, setIsSavingPassword] = useState(false);
 
+  // If verification tokens or Supabase confirmation hash are passed to /login,
+  // immediately forward to /verify-email to display the official verified celebration UI
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const search = window.location.search;
+    const hash = window.location.hash;
+    const params = new URLSearchParams(search);
+
+    const token_hash = params.get('token_hash');
+    const code = params.get('code');
+    const type = params.get('type');
+    const isSignupType =
+      type === 'signup' ||
+      type === 'email_change' ||
+      hash.includes('type=signup') ||
+      hash.includes('type=email_change');
+
+    if (code || token_hash || isSignupType) {
+      router.replace(`/verify-email${search}${hash}`);
+      return;
+    }
+  }, [router]);
+
+  useEffect(() => {
+    if (paramEmail && !email) {
+      setEmail(paramEmail);
+    }
+  }, [paramEmail, email]);
+
   useEffect(() => {
     const checkExistingTempUser = async () => {
       const supabase = createClient();
@@ -280,9 +309,13 @@ function LoginForm() {
   return (
     <div className="w-full max-w-md space-y-6">
       <div className="text-center space-y-2">
-        <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white font-black text-2xl shadow-lg shadow-indigo-200">
-          Q
-        </div>
+        <Link href="/" className="inline-block">
+          <img
+            src="/quoteflow-icon.png"
+            alt="QuoteFlow"
+            className="h-14 w-14 rounded-2xl shadow-md object-contain mx-auto hover:scale-105 transition-transform"
+          />
+        </Link>
         <h1 className="text-2xl font-black text-slate-900">Sign in to QuoteFlow</h1>
         <p className="text-xs text-slate-500">
           Enter your credentials to access your organization dashboard.
@@ -293,7 +326,7 @@ function LoginForm() {
         <form onSubmit={handleLogin}>
           <CardContent className="p-6 space-y-4">
             {/* Google Sign In Option */}
-            <GoogleSignInButton mode="signin" />
+            <GoogleSignInButton mode="signin" redirect={redirectParam} />
 
             <div className="relative py-1">
               <div className="absolute inset-0 flex items-center">
@@ -307,9 +340,18 @@ function LoginForm() {
             </div>
 
             {verified && (
-              <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 border border-emerald-200 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>Email verified successfully! You can now sign in.</span>
+              <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 p-4 text-xs text-emerald-900 dark:text-emerald-200 border-2 border-emerald-300 dark:border-emerald-800 shadow-xs space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="h-6 w-6 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </div>
+                  <span className="font-extrabold text-sm text-emerald-800 dark:text-emerald-300">
+                    Email Verified Successfully!
+                  </span>
+                </div>
+                <p className="text-emerald-700 dark:text-emerald-300 text-[11px] pl-8">
+                  Your QuoteFlow workspace is ready. Enter your password to access your dashboard.
+                </p>
               </div>
             )}
 
@@ -393,6 +435,16 @@ function LoginForm() {
           </CardFooter>
         </form>
       </Card>
+
+      <div className="flex items-center justify-center gap-4 text-[11px] text-slate-400">
+        <Link href="/privacy" className="hover:text-slate-600 hover:underline">
+          Privacy Policy
+        </Link>
+        <span>•</span>
+        <Link href="/terms" className="hover:text-slate-600 hover:underline">
+          Terms of Service
+        </Link>
+      </div>
     </div>
   );
 }

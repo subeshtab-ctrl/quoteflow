@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sun,
   Moon,
@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Receipt,
   FileText,
+  Sliders,
 } from 'lucide-react';
 import {
   useThemeCustomization,
@@ -28,7 +29,47 @@ import {
 } from '@/lib/theme/theme-customization-context';
 import { Button } from '@/components/ui/button';
 
-export function AppearanceSettingsView() {
+export interface BrandPresetOption {
+  name: string;
+  hex: string;
+  accentKey: AccentColor;
+}
+
+export const BRAND_PRESETS: BrandPresetOption[] = [
+  { name: 'Modern Indigo', hex: '#4f46e5', accentKey: 'purple' },
+  { name: 'Emerald', hex: '#059669', accentKey: 'emerald' },
+  { name: 'Ocean Blue', hex: '#2563eb', accentKey: 'blue' },
+  { name: 'Slate Steel', hex: '#334155', accentKey: 'purple' },
+  { name: 'Sunset Orange', hex: '#ea580c', accentKey: 'orange' },
+  { name: 'Crimson Rose', hex: '#e11d48', accentKey: 'rose' },
+];
+
+function mapHexToAccentKey(hex: string): AccentColor {
+  const h = hex.toLowerCase();
+  if (h === '#059669' || h.includes('059669') || h.includes('10b981') || h.includes('047857')) {
+    return 'emerald';
+  }
+  if (h === '#2563eb' || h.includes('2563eb') || h.includes('3b82f6') || h.includes('1d4ed8')) {
+    return 'blue';
+  }
+  if (h === '#ea580c' || h.includes('ea580c') || h.includes('f97316') || h.includes('c2410c')) {
+    return 'orange';
+  }
+  if (h === '#e11d48' || h.includes('e11d48') || h.includes('f43f5e') || h.includes('be123c')) {
+    return 'rose';
+  }
+  return 'purple';
+}
+
+interface AppearanceSettingsViewProps {
+  initialBrandColor?: string;
+  onBrandColorChange?: (color: string) => void;
+}
+
+export function AppearanceSettingsView({
+  initialBrandColor,
+  onBrandColorChange,
+}: AppearanceSettingsViewProps = {}) {
   const {
     theme,
     resolvedTheme,
@@ -49,17 +90,54 @@ export function AppearanceSettingsView() {
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  const [currentBrandHex, setCurrentBrandHex] = useState<string>(() => {
+    if (initialBrandColor) return initialBrandColor;
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('quoteflow_brand_color');
+      if (stored) return stored;
+    }
+    return ACCENT_COLOR_MAP[accentColor]?.hex || '#4f46e5';
+  });
+
+  useEffect(() => {
+    if (initialBrandColor && initialBrandColor.toLowerCase() !== currentBrandHex.toLowerCase()) {
+      setCurrentBrandHex(initialBrandColor);
+    }
+  }, [initialBrandColor]);
+
+  const applyBrandColor = (hex: string, autoSave: boolean = false) => {
+    setCurrentBrandHex(hex);
+    const mappedAccent = mapHexToAccentKey(hex);
+    setAccentColor(mappedAccent);
+
+    if (typeof window !== 'undefined') {
+      const root = document.documentElement;
+      root.style.setProperty('--brand-color', hex);
+      try {
+        localStorage.setItem('quoteflow_brand_color', hex);
+      } catch {}
+    }
+
+    onBrandColorChange?.(hex);
+
+    if (autoSave && /^#[0-9A-Fa-f]{6}$/.test(hex)) {
+      fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand_color: hex }),
+      }).catch((e) => console.warn('Could not auto-save brand color:', e));
+    }
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const selectedAccent = ACCENT_COLOR_MAP[accentColor] || ACCENT_COLOR_MAP.purple;
       if (typeof window !== 'undefined') {
         const root = document.documentElement;
         root.setAttribute('data-accent', accentColor);
-        root.style.setProperty('--brand-color', selectedAccent.hex);
-        root.style.setProperty('--brand-rgb', selectedAccent.rgb);
+        root.style.setProperty('--brand-color', currentBrandHex);
         try {
-          localStorage.setItem('quoteflow_brand_color', selectedAccent.hex);
+          localStorage.setItem('quoteflow_brand_color', currentBrandHex);
           localStorage.setItem(
             'quoteflow-customization-v2',
             JSON.stringify({
@@ -77,7 +155,7 @@ export function AppearanceSettingsView() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          brand_color: selectedAccent.hex,
+          brand_color: currentBrandHex,
         }),
       });
       setSavedSuccess(true);
@@ -91,13 +169,10 @@ export function AppearanceSettingsView() {
     }
   };
 
-  const accentOptions: { key: AccentColor; label: string; hex: string }[] = [
-    { key: 'purple', label: 'QuoteFlow Purple', hex: '#6366f1' },
-    { key: 'blue', label: 'Ocean Blue', hex: '#2563eb' },
-    { key: 'emerald', label: 'Emerald Green', hex: '#059669' },
-    { key: 'orange', label: 'Sunset Orange', hex: '#ea580c' },
-    { key: 'rose', label: 'Rose Red', hex: '#e11d48' },
-  ];
+  const handleReset = () => {
+    resetToDefaults();
+    applyBrandColor('#4f46e5', true);
+  };
 
   const radiusOptions: { key: BorderRadius; label: string; desc: string }[] = [
     { key: 'small', label: 'Small (8px)', desc: 'Clean, modern, crisp' },
@@ -137,7 +212,7 @@ export function AppearanceSettingsView() {
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Personalize your QuoteFlow dashboard interface, accent palette, corner rounding, and display density.
+            Personalize your QuoteFlow dashboard interface, brand palette presets, corner rounding, and display density.
           </p>
         </div>
 
@@ -145,7 +220,7 @@ export function AppearanceSettingsView() {
           <Button
             variant="outline"
             size="sm"
-            onClick={resetToDefaults}
+            onClick={handleReset}
             className="gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -209,35 +284,91 @@ export function AppearanceSettingsView() {
             </div>
           </div>
 
-          {/* Section 2: Accent Color */}
-          <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
-            <div className="flex items-center gap-2">
-              <Palette className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Primary Brand Accent
-              </h3>
+          {/* Section 2: Brand Colors & Quotation Styling (Unified & Non-duplicated) */}
+          <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Palette className="h-5 w-5 text-indigo-500" />
+                  <span>Brand Colors &amp; Quotation Styling</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Choose a signature brand palette or custom hex code. Applied dynamically to customer portals, digital estimates, and signature links.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span
+                  className="h-6 w-6 rounded-full border-2 border-white dark:border-slate-800 shadow-sm ring-2 ring-slate-200 dark:ring-slate-700"
+                  style={{ backgroundColor: currentBrandHex }}
+                />
+                <span className="font-mono text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {currentBrandHex}
+                </span>
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {accentOptions.map((opt) => {
-                const isSelected = accentColor === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    onClick={() => setAccentColor(opt.key)}
-                    className={`flex items-center gap-2.5 p-3 rounded-xl border text-xs font-semibold transition-all ${
-                      isSelected
-                        ? 'border-slate-900 dark:border-white ring-2 ring-slate-900/10 dark:ring-white/20 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white'
-                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                    }`}
-                  >
-                    <span
-                      className="h-4 w-4 rounded-full shadow-xs shrink-0"
-                      style={{ backgroundColor: opt.hex }}
-                    />
-                    <span className="truncate">{opt.label}</span>
-                  </button>
-                );
-              })}
+
+            <div className="space-y-3">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                Preset Brand Palettes
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {BRAND_PRESETS.map((preset) => {
+                  const isSelected = currentBrandHex.toLowerCase() === preset.hex.toLowerCase();
+                  return (
+                    <button
+                      key={preset.hex}
+                      type="button"
+                      onClick={() => applyBrandColor(preset.hex, true)}
+                      className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center group cursor-pointer ${
+                        isSelected
+                          ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-850'
+                      }`}
+                    >
+                      <span
+                        className="h-7 w-7 rounded-full shadow-sm flex items-center justify-center text-white transition-transform group-hover:scale-105"
+                        style={{ backgroundColor: preset.hex }}
+                      >
+                        {isSelected && <Check className="h-4 w-4 stroke-[3]" />}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight">
+                        {preset.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {preset.hex}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Or enter custom hex code:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={currentBrandHex}
+                    onChange={(e) => applyBrandColor(e.target.value, true)}
+                    className="h-8 w-10 cursor-pointer rounded border border-slate-300 bg-transparent p-0.5"
+                    title="Choose custom color"
+                  />
+                  <input
+                    type="text"
+                    value={currentBrandHex}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCurrentBrandHex(val);
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        applyBrandColor(val, true);
+                      }
+                    }}
+                    placeholder="#4f46e5"
+                    className="h-8 w-28 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 font-mono text-xs font-semibold text-slate-900 dark:text-slate-100 uppercase"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -315,12 +446,49 @@ export function AppearanceSettingsView() {
             </div>
           </div>
 
-          {/* Section 5: Density */}
+          {/* Section 5: Navigation Sidebar Style */}
           <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+              <Sliders className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Interface Density
+                Navigation Sidebar Style
+              </h3>
+            </div>
+            <div className="grid grid-cols-3 gap-2.5">
+              {sidebarOptions.map((opt) => {
+                const isSelected = sidebarStyle === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    onClick={() => setSidebarStyle(opt.key)}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      isSelected
+                        ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <p
+                      className={`text-xs font-bold ${
+                        isSelected
+                          ? 'text-indigo-700 dark:text-indigo-300'
+                          : 'text-slate-900 dark:text-slate-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Section 6: Information Density */}
+          <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
+            <div className="flex items-center gap-2">
+              <Sliders className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Information Density
               </h3>
             </div>
             <div className="grid grid-cols-3 gap-2.5">
@@ -360,7 +528,7 @@ export function AppearanceSettingsView() {
               Real-time Component Preview
             </span>
             <span className="text-[11px] font-mono text-slate-400">
-              {resolvedTheme.toUpperCase()} • {accentColor.toUpperCase()}
+              {resolvedTheme.toUpperCase()} • {currentBrandHex}
             </span>
           </div>
 
@@ -383,8 +551,8 @@ export function AppearanceSettingsView() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-200/50 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <div
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-white font-extrabold text-xs shadow-sm"
-                  style={{ backgroundColor: ACCENT_COLOR_MAP[accentColor].hex }}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-white font-extrabold text-xs shadow-sm transition-colors"
+                  style={{ backgroundColor: currentBrandHex }}
                 >
                   Q
                 </div>
@@ -395,8 +563,8 @@ export function AppearanceSettingsView() {
               </div>
 
               <span
-                className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white shadow-2xs"
-                style={{ backgroundColor: ACCENT_COLOR_MAP[accentColor].hex }}
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white shadow-2xs transition-colors"
+                style={{ backgroundColor: currentBrandHex }}
               >
                 PRO
               </span>
@@ -439,9 +607,9 @@ export function AppearanceSettingsView() {
             {/* Action Buttons with Dynamic Accent & Radius */}
             <div className="flex items-center gap-2 pt-2">
               <button
-                className="flex-1 py-2 px-3 text-xs font-bold text-white shadow-xs transition-opacity hover:opacity-90 flex items-center justify-center gap-1.5"
+                className="flex-1 py-2 px-3 text-xs font-bold text-white shadow-xs transition-all hover:opacity-90 flex items-center justify-center gap-1.5"
                 style={{
-                  backgroundColor: ACCENT_COLOR_MAP[accentColor].hex,
+                  backgroundColor: currentBrandHex,
                   borderRadius:
                     borderRadius === 'small' ? '6px' : borderRadius === 'large' ? '16px' : '10px',
                 }}

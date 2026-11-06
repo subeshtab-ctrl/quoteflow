@@ -11,17 +11,22 @@ export async function PATCH(
     const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
     const { id } = await params;
+    const targetId = decodeURIComponent(id || '').trim();
     const body = await request.json();
 
-    if (typeof body.is_paid !== 'boolean' && typeof body.paid_amount !== 'number') {
+    if (
+      typeof body.is_paid !== 'boolean' &&
+      typeof body.paid_amount !== 'number' &&
+      !Array.isArray(body.payment_records)
+    ) {
       return NextResponse.json(
-        { error: 'Invalid payload: is_paid boolean or paid_amount number is required' },
+        { error: 'Invalid payload: is_paid boolean, paid_amount number, or payment_records array is required' },
         { status: 400 }
       );
     }
 
     const updated = await store.updateQuotationPayment(
-      id,
+      targetId,
       {
         is_paid: body.is_paid,
         paid_amount: typeof body.paid_amount === 'number' ? body.paid_amount : undefined,

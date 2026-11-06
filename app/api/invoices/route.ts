@@ -2,12 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { subscriptionService } from '@/lib/billing/subscription-service';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { staffService } from '@/lib/staff/staff-service';
+import { isOwnerOrAdminRole } from '@/types/staff';
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
+    const canView =
+      isOwnerOrAdminRole(auth.role) ||
+      staffService.hasPermission(auth.role, undefined, 'invoices_view');
+    if (!canView) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient permissions to view invoices' }, { status: 403 });
+    }
+    const orgId = auth.orgId;
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || undefined;
     const search = searchParams.get('search') || undefined;
@@ -30,14 +41,27 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
+
+    const canCreate =
+      isOwnerOrAdminRole(auth.role) ||
+      staffService.hasPermission(auth.role, undefined, 'invoices_create');
+    if (!canCreate) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient permissions to create invoices' }, { status: 403 });
+    }
 
     // Enforce subscription restriction after 3-day grace period
     const access = await subscriptionService.getBusinessSubscriptionAccess(orgId);
     if (!access.allowed || access.isRestricted) {
       return NextResponse.json(
         {
-          error: 'Your ₹99 subscription payment is overdue. Please complete payment to restore full QuoteFlow access.',
+          error:
+            auth.role === 'STAFF'
+              ? "Your organization's QuoteFlow subscription has expired. Please contact your administrator."
+              : `Your ${access.priceDisplay || 'subscription'} payment is overdue. Please complete payment to restore full QuoteFlow access.`,
           code: 'SUBSCRIPTION_RESTRICTED',
           access,
         },
@@ -46,6 +70,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+
+    if (!body.customer_id) {
+      if (body.customer?.id) {
+        body.customer_id = body.customer.id;
+      } else if (body.quotation_id) {
+        const quote = await store.getQuotationById(body.quotation_id, orgId);
+        if (quote?.customer_id) {
+          body.customer_id = quote.customer_id;
+        } else if (quote?.customer?.id) {
+          body.customer_id = quote.customer.id;
+        }
+      }
+    }
 
     if (!body.customer_id) {
       return NextResponse.json(
@@ -84,6 +121,27 @@ export async function POST(request: NextRequest) {
       ...body,
       organization_id: orgId,
     });
+
+    // Log staff activity
+    await staffService.logStaffActivity({
+      organization_id: orgId,
+      user_id: auth.userId,
+      user_name: auth.fullName || auth.email,
+      user_email: auth.email,
+      user_role: auth.role,
+      action: 'CREATE',
+      action_key: 'invoice_created',
+      module: 'INVOICE',
+      target_id: invoice.id,
+      target_identifier: invoice.invoice_number,
+      details: `Created invoice ${invoice.invoice_number} (${invoice.currency || '₹'}${Number(invoice.total_amount || 0).toLocaleString()})`,
+      diff: {
+        invoice_number: invoice.invoice_number,
+        total_amount: invoice.total_amount,
+        customer_id: invoice.customer_id,
+        status: invoice.status,
+      },
+    }).catch((err) => console.warn('Failed to log staff activity on invoice creation:', err));
 
     return NextResponse.json({
       success: true,

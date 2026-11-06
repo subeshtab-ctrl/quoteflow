@@ -7,6 +7,7 @@ import {
   syncCloudAdminConfig,
 } from '@/lib/billing/dev-admin-auth';
 import { razorpayService } from '@/lib/billing/razorpay';
+import { SUBSCRIPTION_CONFIG } from '@/lib/billing/subscription-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,14 +138,14 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Create QuoteFlow Pro ₹99/month recurring plan (Requirement 1: ONLY ₹99 plan exists)
+      // Create QuoteFlow Pro ₹149/month recurring plan (India Plan)
       const proPlan = await razorpayService.createPlan({
-        name: 'QuoteFlow Pro',
-        amount: 9900,
+        name: SUBSCRIPTION_CONFIG.INDIA.name,
+        amount: SUBSCRIPTION_CONFIG.INDIA.amountPaise,
         currency: 'INR',
         period: 'monthly',
         interval: 1,
-        description: 'QuoteFlow Pro ₹99/month recurring subscription',
+        description: 'QuoteFlow Pro ₹149/month recurring subscription',
       });
 
       // Update config with the newly created plan ID
@@ -157,7 +158,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: 'Successfully created and linked QuoteFlow Pro (₹99/month) plan in your Razorpay account!',
+        message: 'Successfully created and linked QuoteFlow Pro (₹149/month) plan in your Razorpay account!',
         promoPlanId: proPlan.id,
         standardPlanId: proPlan.id,
         testResult,

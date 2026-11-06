@@ -22,27 +22,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Verify that user exists in Supabase Auth
-    let userExists = false;
-    try {
-      const { data: listData, error: listError } = await admin.auth.admin.listUsers();
-      if (!listError && listData?.users) {
-        userExists = listData.users.some((u) => u.email?.toLowerCase() === email);
-      }
-    } catch (listErr) {
-      console.warn('Error checking user existence in forgot-password:', listErr);
-    }
-
-    // If user does not exist, return generic success to prevent email enumeration
-    if (!userExists) {
-      console.log(`[FORGOT PASSWORD] Account not found for email: ${email}`);
-      return NextResponse.json({
-        success: true,
-        message: 'If an account exists for this email, password reset instructions have been sent.',
-      });
-    }
-
-    // 2. Generate Supabase recovery link
+    // 1. Generate Supabase recovery link directly
     const redirectTo = getAuthRedirectUrl('/auth/callback?next=/reset-password');
     const { data, error } = await admin.auth.admin.generateLink({
       type: 'recovery',
@@ -52,10 +32,27 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (error || !data?.properties) {
+    // If user does not exist in Supabase Auth, return generic success to prevent email enumeration
+    if (error) {
+      const errMsg = (error.message || '').toLowerCase();
+      if (errMsg.includes('not found') || (error as any).status === 404) {
+        console.log(`[FORGOT PASSWORD] Account not found for email: ${email}`);
+        return NextResponse.json({
+          success: true,
+          message: 'If an account exists for this email, password reset instructions have been sent.',
+        });
+      }
+
       console.error('generateLink recovery error:', error);
       return NextResponse.json(
-        { error: error?.message || 'Failed to generate password reset link.' },
+        { error: error.message || 'Failed to generate password reset link.' },
+        { status: 500 }
+      );
+    }
+
+    if (!data?.properties) {
+      return NextResponse.json(
+        { error: 'Failed to generate recovery credentials.' },
         { status: 500 }
       );
     }
@@ -63,13 +60,7 @@ export async function POST(req: NextRequest) {
     const actionLink = data.properties.action_link;
     const otpCode = data.properties.email_otp;
 
-    console.log(`\n======================================================`);
-    console.log(`[PASSWORD RESET EMAIL DISPATCH] Target: ${email}`);
-    console.log(`[RECOVERY OTP CODE]              ${otpCode}`);
-    console.log(`[ACTION LINK]                    ${actionLink}`);
-    console.log(`======================================================\n`);
-
-    // 3. Dispatch branded HTML email via Resend
+    // 2. Dispatch branded HTML email via Resend
     const emailPayload = generatePasswordResetEmail({
       email,
       resetUrl: actionLink,

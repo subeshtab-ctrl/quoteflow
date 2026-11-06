@@ -23,6 +23,13 @@ export function InvoiceStatusModal({
   onStatusUpdated,
 }: InvoiceStatusModalProps) {
   const router = useRouter();
+  const isIndia = Boolean(
+    (invoice.organization?.business_country || '').toUpperCase() === 'IN' ||
+    (invoice.organization?.country || '').toLowerCase() === 'india' ||
+    (invoice.organization?.country || '').toUpperCase() === 'IN' ||
+    invoice.organization?.billing_region === 'INDIA' ||
+    invoice.currency === 'INR'
+  );
   const [status, setStatus] = useState<InvoiceStatus>(invoice.status);
   const [paymentMethod, setPaymentMethod] = useState(invoice.payment_method || 'BANK_TRANSFER');
   const [paymentNotes, setPaymentNotes] = useState(invoice.payment_notes || '');
@@ -174,7 +181,11 @@ export function InvoiceStatusModal({
                 className="w-full h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-xs sm:text-sm text-slate-900 dark:text-slate-100"
               >
                 <option value="BANK_TRANSFER">Bank Wire / NEFT / RTGS</option>
-                <option value="UPI">UPI / Instant Pay</option>
+                {isIndia ? (
+                  <option value="UPI">UPI / Instant Pay</option>
+                ) : (
+                  <option value="PAYMENT_LINK">Online Payment Link (Card / Stripe / PayPal)</option>
+                )}
                 <option value="CARD">Credit / Debit Card</option>
                 <option value="CHEQUE">Cheque / Demand Draft</option>
                 <option value="CASH">Cash</option>

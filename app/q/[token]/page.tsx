@@ -25,9 +25,42 @@ export async function generateMetadata({ params }: PublicQuotePageProps): Promis
     };
   }
 
+  const orgName = quote.organization?.name || 'QuoteFlow';
+  const totalAmount = Number(quote.grand_total || (quote as any).total_amount || 0);
+  const currencySymbol = quote.currency || 'USD';
+  const totalStr = totalAmount > 0 ? `${currencySymbol} ${totalAmount.toLocaleString()}` : '';
+  const customerName = (quote.customer as any)?.company_name || (quote.customer as any)?.name || '';
+
+  const title = `Quotation ${quote.quotation_number} • ${orgName}`;
+  const description = `Review and digitally approve quotation ${quote.quotation_number}${
+    customerName ? ` for ${customerName}` : ''
+  }${totalStr ? ` • Total: ${totalStr}` : ''}. Tap to view items & sign.`;
+  const logoUrl = quote.organization?.logo_url || 'https://blendandbold.com/quoteflow-icon.png';
+
   return {
-    title: `Quotation ${quote.quotation_number} - ${quote.organization?.name || 'QuoteFlow'}`,
-    description: `Review and approve quotation ${quote.quotation_number} for ${quote.title}`,
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: 'website',
+      url: `https://blendandbold.com/q/${token}`,
+      siteName: orgName,
+      images: [
+        {
+          url: logoUrl,
+          width: 512,
+          height: 512,
+          alt: `${orgName} Quotation ${quote.quotation_number}`,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary',
+      title,
+      description,
+      images: [logoUrl],
+    },
   };
 }
 

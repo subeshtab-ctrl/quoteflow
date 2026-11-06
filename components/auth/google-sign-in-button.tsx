@@ -1,35 +1,39 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/client';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ExternalLink, HelpCircle } from 'lucide-react';
 
 interface GoogleSignInButtonProps {
   mode?: 'signin' | 'signup';
   className?: string;
+  redirect?: string;
   onError?: (error: string) => void;
 }
 
 export function GoogleSignInButton({
   mode = 'signin',
   className = '',
+  redirect = '/dashboard',
   onError,
 }: GoogleSignInButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSetupNeeded, setIsSetupNeeded] = useState(false);
 
   const handleGoogleAuth = async () => {
     setIsLoading(true);
     setErrorMsg(null);
+    setIsSetupNeeded(false);
 
     try {
       const supabase = createClient();
       if (!supabase) {
-        throw new Error('Supabase client could not be initialized.');
+        throw new Error('Authentication client could not be initialized.');
       }
 
-      const redirectUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`;
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const redirectUrl = `${origin}/auth/callback?next=${encodeURIComponent(redirect || '/dashboard')}`;
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -43,8 +47,10 @@ export function GoogleSignInButton({
       });
 
       if (error) {
-        if (error.message.toLowerCase().includes('provider is not enabled') || error.message.toLowerCase().includes('not supported')) {
-          const setupMsg = 'Google sign-in is not enabled yet in your Supabase project. In Supabase Dashboard -> Authentication -> Providers, turn on Google provider with your Google Client ID.';
+        const lower = error.message.toLowerCase();
+        if (lower.includes('provider is not enabled') || lower.includes('not supported') || lower.includes('unsupported provider')) {
+          setIsSetupNeeded(true);
+          const setupMsg = 'Google authentication is not yet enabled in your Supabase project dashboard.';
           setErrorMsg(setupMsg);
           onError?.(setupMsg);
           setIsLoading(false);
@@ -62,14 +68,50 @@ export function GoogleSignInButton({
   };
 
   return (
-    <div className={`space-y-2 ${className}`}>
-      {errorMsg && (
-        <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 border border-amber-200 flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-semibold">Google Provider Setup Required</p>
-            <p className="text-[11px] leading-relaxed text-amber-800">{errorMsg}</p>
+    <div className={`space-y-3 ${className}`}>
+      {isSetupNeeded && (
+        <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 p-3.5 text-xs text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-amber-950 dark:text-amber-100">
+                Google Sign-In Needs Activation in Supabase
+              </p>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5 leading-relaxed">
+                To enable Google login, turn on Google in your Supabase dashboard:
+              </p>
+            </div>
           </div>
+
+          <div className="bg-white/80 dark:bg-slate-900/80 rounded-lg p-2.5 text-[11px] space-y-1.5 border border-amber-200/60 dark:border-amber-800/60 font-mono text-slate-700 dark:text-slate-300">
+            <div>
+              <span className="font-bold text-slate-900 dark:text-slate-100">1.</span> Open{' '}
+              <a
+                href="https://supabase.com/dashboard/project/qykxxxayympfhbymmnnw/auth/providers"
+                target="_blank"
+                rel="noreferrer"
+                className="text-indigo-600 dark:text-indigo-400 underline font-semibold inline-flex items-center gap-0.5"
+              >
+                Supabase Auth Providers <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            </div>
+            <div>
+              <span className="font-bold text-slate-900 dark:text-slate-100">2.</span> Turn on <strong className="text-slate-900 dark:text-slate-100">Google</strong> &amp; paste your Google Client ID &amp; Secret
+            </div>
+            <div>
+              <span className="font-bold text-slate-900 dark:text-slate-100">3.</span> Redirect URI in Google Cloud Console:{' '}
+              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded select-all break-all">
+                https://qykxxxayympfhbymmnnw.supabase.co/auth/v1/callback
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {errorMsg && !isSetupNeeded && (
+        <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 p-3 text-xs text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0" />
+          <span>{errorMsg}</span>
         </div>
       )}
 
@@ -77,7 +119,7 @@ export function GoogleSignInButton({
         type="button"
         onClick={handleGoogleAuth}
         disabled={isLoading}
-        className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 font-semibold text-xs sm:text-sm shadow-xs transition-all disabled:opacity-60 cursor-pointer"
+        className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 active:bg-slate-100 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm shadow-xs transition-all disabled:opacity-60 cursor-pointer"
       >
         {isLoading ? (
           <div className="h-4 w-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />

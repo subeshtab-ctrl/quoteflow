@@ -1,4 +1,21 @@
-export type UserRole = 'OWNER' | 'ADMIN' | 'STAFF';
+export type UserRole =
+  | 'OWNER'
+  | 'ADMIN'
+  | 'MANAGER'
+  | 'SALES'
+  | 'ACCOUNTS'
+  | 'MARKETING'
+  | 'CUSTOM'
+  | 'STAFF';
+
+export type {
+  StaffRole,
+  StaffPermissions,
+  StaffMember,
+  StaffActivityLog,
+  StaffActivityFilterParams,
+} from './staff';
+export { isOwnerOrAdminRole, isStaffRole, ROLE_PERMISSION_PRESETS } from './staff';
 
 export type QuotationStatus =
   | 'DRAFT'
@@ -28,10 +45,55 @@ export type InvoiceStatus =
 export type DiscountType = 'PERCENTAGE' | 'FIXED';
 export type ActorType = 'USER' | 'CUSTOMER' | 'SYSTEM';
 export type SignatureType = 'DRAWN' | 'TYPED';
-export type CurrencyCode = 'INR' | 'USD' | 'AED' | 'EUR' | 'GBP';
+export type CurrencyCode =
+  | 'INR'
+  | 'USD'
+  | 'AED'
+  | 'EUR'
+  | 'GBP'
+  | 'SAR'
+  | 'KWD'
+  | 'CAD'
+  | 'AUD'
+  | 'SGD'
+  | 'JPY'
+  | 'CNY'
+  | 'CHF'
+  | 'NZD'
+  | 'BRL'
+  | 'ZAR'
+  | 'SEK'
+  | 'NOK'
+  | 'DKK'
+  | 'PLN'
+  | 'TRY'
+  | 'RUB'
+  | 'MXN'
+  | 'THB'
+  | 'MYR'
+  | 'IDR'
+  | 'PHP'
+  | 'VND'
+  | 'PKR'
+  | 'BDT'
+  | 'LKR'
+  | 'NPR'
+  | 'QAR'
+  | 'OMR'
+  | 'BHD'
+  | 'EGP'
+  | 'NGN'
+  | 'KES'
+  | 'GHS'
+  | 'ILS'
+  | 'HKD'
+  | 'KRW'
+  | 'TWD'
+  | (string & {});
 export type PaymentMethod =
   | 'BANK_TRANSFER'
   | 'UPI'
+  | 'PAYMENT_LINK'
   | 'CASH'
   | 'CHEQUE'
   | 'CARD'
@@ -41,6 +103,7 @@ export type PaymentDisplayMode =
   | 'BOTH'
   | 'BANK_ONLY'
   | 'UPI_ONLY'
+  | 'PAYMENT_LINK_ONLY'
   | 'CRYPTO_ONLY'
   | 'ALL'
   | 'CUSTOM';
@@ -125,15 +188,19 @@ export interface Organization {
   current_invoice_counter?: number;
   default_terms?: string | null;
   invoice_footer?: string | null;
+  google_review_url?: string | null;
   require_full_payment_for_invoice?: boolean;
   default_payment_display_mode?: PaymentDisplayMode;
   default_show_bank_details?: boolean;
   default_show_upi_details?: boolean;
+  default_show_payment_link?: boolean;
   default_show_crypto_details?: boolean;
   default_show_cash_details?: boolean;
   default_cash_instructions?: string | null;
   default_bank_details?: BankAccountDetails | null;
   default_upi_details?: UpiPaymentDetails | null;
+  default_payment_link?: string | null;
+  default_payment_link_label?: string | null;
   default_crypto_details?: CryptoPaymentDetails | null;
   mode?: 'test' | 'live';
   current_test_quotation_counter?: number;
@@ -141,10 +208,54 @@ export interface Organization {
   deleted_at?: string | null;
   deleted_by?: string | null;
   deletion_reason?: string | null;
+  business_country?: string | null; // ISO code e.g. "IN", "AE", "US", "GB"
+  business_country_name?: string | null;
+  billing_region?: 'INDIA' | 'INTERNATIONAL' | null;
+  billing_currency?: 'INR' | 'USD' | null;
+  payment_provider?: 'RAZORPAY' | 'NOWPAYMENTS' | null;
+  country_locked?: boolean;
+  country_pending_change?: {
+    requested_country: string;
+    requested_country_name: string;
+    requested_at: string;
+    apply_mode: 'next_cycle' | 'immediate';
+    status: 'pending' | 'approved' | 'rejected';
+    reason?: string;
+  } | null;
   email_role?: 'owner' | 'staff';
   members?: BusinessSubscriptionMember[];
+  // Business WhatsApp & Automation
+  whatsapp_number?: string | null;
+  whatsapp_country_code?: string | null;
+  whatsapp_automation_enabled?: boolean;
+  whatsapp_auto_reply_enabled?: boolean;
+  whatsapp_quote_ready_template?: string | null;
+  whatsapp_quote_reminder_template?: string | null;
+  whatsapp_quote_approved_template?: string | null;
+  whatsapp_payment_reminder_template?: string | null;
+  whatsapp_template_chat_reply?: string | null;
+  whatsapp_template_quote?: string | null;
+  whatsapp_template_reminder?: string | null;
+  whatsapp_template_payment?: string | null;
+  whatsapp_linked_at?: string | null;
+  document_language?: 'en' | 'ar' | 'both' | null;
+  notification_preferences?: NotificationPreferences;
   created_at: string;
   updated_at: string;
+}
+
+export interface NotificationPreferences {
+  browserNotificationsEnabled: boolean;
+  quoteViewed: boolean;
+  quoteApprovedRejected: boolean;
+  quoteWaitingApproval: boolean;
+  paymentDueOverdue: boolean;
+  paymentReceived: boolean;
+  invoiceOverdue: boolean;
+  customerActivity: boolean;
+  quoteExpiringSoon: boolean;
+  aiRecommendedFollowup: boolean;
+  deliveryFailures: boolean;
 }
 
 export interface BusinessSubscriptionMember {
@@ -198,7 +309,13 @@ export interface Customer {
   state_code?: string;
   place_of_supply?: string;
   notes?: string;
+  whatsapp_enabled?: boolean;
+  email_enabled?: boolean;
+  whatsapp_opt_in?: boolean;
   environment?: 'test' | 'live';
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
   is_demo?: boolean;
   demo_pin?: string;
   created_at: string;
@@ -238,6 +355,9 @@ export interface Product {
   unit: string;
   tax_rate: number;
   is_active: boolean;
+  hsn_code?: string | null;
+  classification_type?: string | null;
+  category?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -269,6 +389,8 @@ export interface QuotationItem {
   igst_rate?: number;
   igst_amount?: number;
   tax_category?: string | null;
+  is_optional?: boolean;
+  is_selected?: boolean;
   created_at?: string;
 }
 
@@ -333,6 +455,16 @@ export interface AttachmentItem {
   created_at: string;
 }
 
+export interface PaymentMilestone {
+  id: string;
+  name: string;
+  percentage: number;
+  amount: number;
+  due_stage: string;
+  is_paid?: boolean;
+  paid_at?: string | null;
+}
+
 export interface Quotation {
   id: string;
   organization_id: string;
@@ -343,6 +475,9 @@ export interface Quotation {
   title: string;
   status: QuotationStatus;
   environment?: 'test' | 'live';
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
   issue_date: string;
   valid_until: string;
   currency: CurrencyCode;
@@ -396,6 +531,7 @@ export interface Quotation {
   paid_amount?: number;
   balance_amount?: number;
   advance_percentage?: number | null;
+  enable_advance?: boolean;
   payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
   payment_confirmed_by_company?: boolean;
   payment_confirmed_at?: string | null;
@@ -405,13 +541,18 @@ export interface Quotation {
   payment_display_mode?: PaymentDisplayMode;
   show_bank_details?: boolean;
   show_upi_details?: boolean;
+  show_payment_link?: boolean;
   show_crypto_details?: boolean;
   show_cash_details?: boolean;
   cash_instructions?: string | null;
   bank_details?: BankAccountDetails | null;
   upi_details?: UpiPaymentDetails | null;
+  payment_link?: string | null;
+  payment_link_label?: string | null;
   crypto_details?: CryptoPaymentDetails | null;
   payment_records?: PaymentRecord[];
+  milestones?: PaymentMilestone[];
+  payment_terms_type?: 'FULL' | 'ADVANCE_SPLIT' | 'MILESTONES';
 
   // Chat Tracking
   has_unread_chat?: boolean;
@@ -474,6 +615,8 @@ export interface InvoiceItem {
   igst_rate?: number;
   igst_amount?: number;
   tax_category?: string | null;
+  is_optional?: boolean;
+  is_selected?: boolean;
   created_at?: string;
 }
 
@@ -491,9 +634,14 @@ export interface Invoice {
   customer_id: string;
   quotation_id?: string | null;
   invoice_number: string;
+  document_type?: 'tax_invoice' | 'proforma_invoice' | 'delivery_note' | 'delivery_challan';
+  proforma_converted_invoice_id?: string | null;
   po_number?: string | null;
   status: InvoiceStatus;
   environment?: 'test' | 'live';
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deletion_reason?: string | null;
   cancellation_reason?: string | null;
   cancelled_at?: string | null;
   cancelled_by?: string | null;
@@ -534,11 +682,23 @@ export interface Invoice {
   paid_amount?: number;
   balance_amount?: number;
   advance_percentage?: number | null;
+  enable_advance?: boolean;
   payment_status?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | string | null;
   payment_confirmed_by_company?: boolean;
   payment_confirmed_at?: string | null;
   payment_confirmed_by?: string | null;
+  // Delivery Note & Physical/Digital Signatures
+  delivery_recipient_name?: string | null;
+  delivery_signature_data_url?: string | null;
+  delivery_confirmed_at?: string | null;
+  delivery_status?: 'PENDING' | 'DELIVERED';
+  delivery_address?: string | null;
+  delivery_contact_person?: string | null;
+  delivery_contact_phone?: string | null;
+  delivery_vehicle_no?: string | null;
   attachments?: AttachmentItem[];
+  milestones?: PaymentMilestone[];
+  payment_terms_type?: 'FULL' | 'ADVANCE_SPLIT' | 'MILESTONES';
   created_by?: string | null;
   created_at: string;
   updated_at?: string;
@@ -605,6 +765,79 @@ export interface Notification {
   type: 'VIEWED' | 'APPROVED' | 'REJECTED' | 'EXPIRING';
   is_read: boolean;
   created_at: string;
+}
+
+export interface DeletedQuotationRecord {
+  id: string;
+  quotation_id: string;
+  quotation_number: string;
+  customer_name?: string;
+  grand_total: number;
+  currency: string;
+  deleted_at: string;
+  organization_id: string;
+}
+
+export type RecommendationStatus =
+  | 'pending'
+  | 'actioned'
+  | 'dismissed'
+  | 'ignored'
+  | 'snoozed'
+  | 'resolved';
+
+export type RecommendationActionTaken =
+  | 'whatsapp_sent'
+  | 'email_sent'
+  | 'dismissed'
+  | 'ignored'
+  | 'snoozed'
+  | null;
+
+export type RecommendationResolvedReason =
+  | 'source_deleted'
+  | 'source_approved'
+  | 'source_paid'
+  | 'source_rejected'
+  | 'customer_deleted'
+  | 'manually_resolved'
+  | 'superseded'
+  | null;
+
+export interface PersistentRecommendationRecord {
+  id: string;
+  recommendation_key: string; // Stable fingerprint e.g. "quote_followup:Q-000016:awaiting_approval:cycle_1"
+  organization_id: string;
+  user_id?: string | null;
+  user_name?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  quote_id?: string | null;
+  quote_number?: string | null;
+  invoice_id?: string | null;
+  invoice_number?: string | null;
+  recommendation_type:
+    | 'invoice_overdue'
+    | 'quote_expiring'
+    | 'high_interest_lead'
+    | 'quote_unapproved'
+    | 'batch_followup'
+    | 'system_update';
+  priority: 'URGENT' | 'ACTION_REQUIRED' | 'OPPORTUNITY' | 'INFORMATION';
+  title: string;
+  description: string;
+  amount?: number;
+  currency?: string;
+  status: RecommendationStatus;
+  action_taken?: RecommendationActionTaken;
+  action_taken_at?: string | null;
+  snooze_until?: string | null;
+  last_reminder_sent_at?: string | null;
+  cycle_number: number;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+  resolved_reason?: RecommendationResolvedReason;
 }
 
 export interface Template {
@@ -688,6 +921,22 @@ export interface BusinessSubscription {
   last_payment_at: string | null;
   last_payment_id: string | null;
   payment_failure_count: number;
+  provider_payment_id?: string | null;
+  provider_invoice_id?: string | null;
+  provider_order_id?: string | null;
+  nowpayments_invoice_id?: string | null;
+  nowpayments_payment_id?: string | null;
+  nowpayments_order_id?: string | null;
+  nowpayments_pay_address?: string | null;
+  payment_status?: string | null;
+  payment_provider?: string | null;
+  subscription_status?: SubscriptionStatus | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  paid_at?: string | null;
+  billing_region?: 'INDIA' | 'INTERNATIONAL';
+  billing_country?: string | null;
+  billing_currency?: string | null;
   is_trial_prepaid?: boolean;
   plan_start_mode?: 'immediate' | 'after_trial';
   autopay_enabled?: boolean;
@@ -712,17 +961,56 @@ export interface SubscriptionPayment {
   id: string;
   business_id: string;
   subscription_id: string | null;
-  razorpay_payment_id: string;
-  razorpay_subscription_id: string | null;
-  razorpay_invoice_id: string | null;
+  provider?: 'razorpay' | 'nowpayments' | 'manual' | string;
+  provider_payment_id?: string | null;
+  provider_invoice_id?: string | null;
+  provider_order_id?: string | null;
+  razorpay_payment_id?: string;
+  razorpay_subscription_id?: string | null;
+  razorpay_invoice_id?: string | null;
+  nowpayments_payment_id?: string | null;
+  nowpayments_invoice_id?: string | null;
+  nowpayments_order_id?: string | null;
+  crypto_currency?: string | null;
+  crypto_amount?: number | null;
+  actually_paid?: number | null;
+  outcome_amount?: number | null;
+  outcome_currency?: string | null;
+  pay_address?: string | null;
+  network?: string | null;
   invoice_url?: string | null;
-  amount: number; // in paise
+  amount: number; // in paise for INR, cents or whole dollars for USD
   currency: string;
-  status: SubscriptionPaymentStatus;
+  status: SubscriptionPaymentStatus | string;
   payment_method: string | null;
   card_details?: string | null;
   failure_reason: string | null;
   paid_at: string | null;
+  created_at: string;
+}
+
+export interface PaymentCountryRule {
+  country_code: string;
+  country_name: string;
+  flag?: string;
+  razorpay_enabled: boolean;
+  nowpayments_enabled: boolean;
+  billing_currency: 'INR' | 'USD';
+  plan_amount: number; // 99 for INR, 10 for USD
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PaymentEvent {
+  id: string;
+  provider: 'razorpay' | 'nowpayments';
+  provider_event_id?: string | null;
+  organization_id?: string | null;
+  subscription_id?: string | null;
+  status: string;
+  payload: Record<string, any>;
+  signature_verified: boolean;
   created_at: string;
 }
 
@@ -820,6 +1108,28 @@ export interface SubscriptionAccess {
   cancelAtPeriodEnd?: boolean;
   activeUntil?: string | null;
   warningMessage: string | null;
+  currency?: string;
+  priceDisplay?: string;
+}
+
+export type EntitlementStatus = 'TRIALING' | 'ACTIVE' | 'CANCELLED' | 'EXPIRED';
+
+export interface OrganizationEntitlement {
+  plan: 'PRO';
+  status: EntitlementStatus;
+  hasAccess: boolean;
+  expiresAt: string | null;
+  isTrial: boolean;
+  isPaid: boolean;
+  isCancelled: boolean;
+  daysRemaining: number;
+  reason?: string;
+}
+
+export interface UserAccessCheck {
+  hasAccess: boolean;
+  reason?: 'ACTIVE' | 'USER_DEACTIVATED' | 'USER_NOT_FOUND' | 'SUBSCRIPTION_EXPIRED' | 'ORGANIZATION_NOT_FOUND';
+  entitlement: OrganizationEntitlement;
 }
 
 // ==============================================================================
@@ -919,6 +1229,130 @@ export interface AdminAuditLog {
   action: string;
   target_type: string;
   target_id: string;
-  metadata: Record<string, any>;
+  organization_id?: string | null;
+  customer_id?: string | null;
+  previous_value?: any;
+  new_value?: any;
+  reason?: string | null;
+  ip_address?: string | null;
+  metadata?: Record<string, any>;
   created_at: string;
 }
+
+// ==============================================================================
+// META WHATSAPP BUSINESS PLATFORM INTEGRATION TYPES
+// ==============================================================================
+
+export type WhatsAppConnectionStatus =
+  | 'connected'
+  | 'disconnected'
+  | 'pending'
+  | 'restricted'
+  | 'revoked';
+
+export type WhatsAppQualityRating = 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN';
+
+export type WhatsAppTemplateCategory = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION';
+
+export type WhatsAppTemplateStatus =
+  | 'APPROVED'
+  | 'PENDING'
+  | 'REJECTED'
+  | 'PAUSED'
+  | 'DISABLED'
+  | 'IN_APPEAL'
+  | 'DRAFT';
+
+export type WhatsAppMessageStatus =
+  | 'QUEUED'
+  | 'SENT'
+  | 'DELIVERED'
+  | 'READ'
+  | 'FAILED';
+
+export interface WhatsAppConnection {
+  id: string;
+  organization_id: string;
+  meta_business_id?: string | null;
+  waba_id: string;
+  phone_number_id: string;
+  display_phone_number: string;
+  verified_name?: string | null;
+  connection_status: WhatsAppConnectionStatus;
+  encrypted_access_token?: string | null;
+  credential_reference?: string | null;
+  token_expiry?: string | null;
+  quality_rating?: WhatsAppQualityRating | string | null;
+  messaging_status?: string | null;
+  code_verification_status?: string | null;
+  account_review_status?: string | null;
+  connected_by_user_id?: string | null;
+  connected_at: string;
+  updated_at: string;
+  disconnected_at?: string | null;
+  metadata?: Record<string, any>;
+}
+
+export interface WhatsAppTemplateComponent {
+  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS';
+  format?: 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'VIDEO' | 'LOCATION';
+  text?: string;
+  example?: {
+    header_text?: string[];
+    body_text?: string[][];
+    header_handle?: string[];
+  };
+  buttons?: Array<{
+    type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
+    text: string;
+    url?: string;
+    phone_number?: string;
+  }>;
+}
+
+export interface WhatsAppTemplate {
+  id: string;
+  organization_id: string;
+  meta_template_id?: string | null;
+  name: string;
+  language: string;
+  category: WhatsAppTemplateCategory;
+  status: WhatsAppTemplateStatus;
+  components: WhatsAppTemplateComponent[];
+  header_type?: 'NONE' | 'TEXT' | 'DOCUMENT' | 'IMAGE' | string;
+  body_text: string;
+  sample_values?: Record<string, string>;
+  rejection_reason?: string | null;
+  last_synced_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WhatsAppMessage {
+  id: string;
+  organization_id: string;
+  customer_id?: string | null;
+  document_type?: 'QUOTATION' | 'INVOICE' | 'PAYMENT' | 'NOTIFICATION';
+  document_id?: string | null;
+  document_number?: string | null;
+  recipient_phone: string;
+  template_name?: string | null;
+  template_language?: string;
+  meta_message_id?: string | null;
+  status: WhatsAppMessageStatus;
+  error_code?: string | null;
+  error_message?: string | null;
+  idempotency_key?: string | null;
+  channel?: string;
+  sent_by_user_id?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+  failed_at?: string | null;
+  metadata?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+  // Hydrated references
+  customer?: Customer;
+}
+

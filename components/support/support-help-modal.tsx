@@ -29,6 +29,7 @@ import {
   Plus,
   ArrowLeft,
   Headphones,
+  Mail,
 } from 'lucide-react';
 
 interface SupportHelpModalProps {
@@ -267,6 +268,22 @@ export function SupportHelpModal({
           </div>
         </div>
 
+        {/* Contact Banner (Requirement 11) */}
+        <div className="mt-3 p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900/60 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+            <Mail className="h-4 w-4 text-indigo-600 shrink-0" />
+            <span className="font-semibold text-[11px] sm:text-xs">
+              Can&apos;t find what you&apos;re looking for? Contact the QuoteFlow team and we&apos;ll be happy to help.
+            </span>
+          </div>
+          <a
+            href="mailto:hello@blendandbold.com"
+            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 underline shrink-0"
+          >
+            hello@blendandbold.com
+          </a>
+        </div>
+
         {/* Navigation Tabs */}
         <div className="flex items-center gap-2 pt-3 pb-2 border-b border-slate-100 dark:border-slate-800">
           <button
@@ -372,7 +389,7 @@ export function SupportHelpModal({
                 type="text"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                placeholder="e.g. Inquiring about ₹99 promotional plan / Payment receipt"
+                placeholder="e.g. Inquiring about QuoteFlow Pro subscription / Payment receipt"
                 required
                 className="text-xs"
               />

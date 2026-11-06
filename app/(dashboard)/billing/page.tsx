@@ -45,6 +45,12 @@ export default async function BillingPage() {
   const keyId = razorpayService.getKeyId();
   const isTestMode = Boolean(keyId && keyId.startsWith('rzp_test_'));
 
+  const rules = await store.getPaymentCountryRules();
+  const org = await store.getOrganization(auth.orgId);
+  const { getBillingDetailsForCountry } = await import('@/lib/billing/country-rules');
+  const rawCountry = org?.business_country || org?.country || 'IN';
+  const billingDetails = getBillingDetailsForCountry(rawCountry, rules);
+
   const initialData = {
     subscription,
     access,
@@ -55,6 +61,10 @@ export default async function BillingPage() {
     isTestMode,
     keyId,
     userTimezone,
+    billingDetails,
+    userRole: auth.role,
+    orgName: auth.organization.name,
+    adminEmail: auth.organization.email,
   };
 
   return <BillingView initialData={initialData} />;

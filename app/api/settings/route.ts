@@ -9,7 +9,10 @@ export const revalidate = 0;
 
 export async function GET() {
   const auth = await getAuthenticatedUserContext();
-  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  if (!auth || !auth.orgId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const orgId = auth.orgId;
   const org = await store.getOrganization(orgId);
   const hasLiveDocuments = await store.hasLiveDocuments(orgId);
   return NextResponse.json({ success: true, organization: org, has_live_documents: hasLiveDocuments });
@@ -18,9 +21,12 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
 
-    if (auth && auth.role === 'STAFF') {
+    if (auth.role === 'STAFF') {
       return NextResponse.json(
         { error: 'Staff members cannot modify organization settings.' },
         { status: 403 }
@@ -64,9 +70,12 @@ export async function PUT(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
 
-    if (auth && auth.role === 'STAFF') {
+    if (auth.role === 'STAFF') {
       return NextResponse.json(
         { error: 'Staff members cannot modify organization settings.' },
         { status: 403 }

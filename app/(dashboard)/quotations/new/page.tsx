@@ -6,7 +6,16 @@ import { store } from '@/lib/supabase/data-store';
 import { QuotationBuilder } from '@/components/quotations/quotation-builder';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
-export default async function NewQuotationPage() {
+interface NewQuotationPageProps {
+  searchParams?: Promise<{
+    customerId?: string;
+    customer_id?: string;
+  }>;
+}
+
+export default async function NewQuotationPage({ searchParams }: NewQuotationPageProps) {
+  const { customerId, customer_id } = (await searchParams) || {};
+  const initialCustomerId = customerId || customer_id;
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
 
@@ -24,6 +33,7 @@ export default async function NewQuotationPage() {
         customers={customers}
         products={products}
         organization={organization!}
+        initialCustomerId={initialCustomerId}
       />
     </DashboardLayout>
   );

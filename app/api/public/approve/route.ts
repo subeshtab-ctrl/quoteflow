@@ -17,16 +17,17 @@ export async function POST(req: NextRequest) {
 
     const approvedQuote = await store.approveQuotation({
       token: validated.token,
-      signer_name: validated.signer_name,
-      signer_email: validated.signer_email,
-      signer_phone: validated.signer_phone,
-      phone_country_code: validated.phone_country_code,
-      signer_company: validated.signer_company,
+      signer_name: (validated.signer_name || '').trim(),
+      signer_email: (validated.signer_email || '').trim() || undefined,
+      signer_phone: (validated.signer_phone || '').trim() || undefined,
+      phone_country_code: validated.phone_country_code || undefined,
+      signer_company: (validated.signer_company || '').trim() || undefined,
       signature_data_url: validated.signature_data_url,
       signature_type: validated.signature_type,
       ip_address: ip,
       user_agent: userAgent,
       signer_timezone: signerTimezone,
+      selected_optional_item_ids: validated.selected_optional_item_ids,
     });
 
     // Send email notification to business and customer

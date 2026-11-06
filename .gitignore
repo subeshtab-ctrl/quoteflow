@@ -41,3 +41,8 @@ data/admin-otp.json
 
 .vercel
 .env*
+/dist/
+.vinext/
+.wrangler/
+wrangler.jsonc
+wrangler.json

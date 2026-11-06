@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Quotation, QuotationChatMessage } from '@/types/database';
-import { formatCurrency, calculateQuotationTotals, isValidDocumentText } from '@/lib/quotations/calculations';
+import { formatCurrency, calculateQuotationTotals, isValidDocumentText, sanitizeTaxBreakdown, harmonizePaymentTerms, harmonizeTermsAndConditions } from '@/lib/quotations/calculations';
+import { getCountryProfile } from '@/lib/tax/country-config';
+import { getEffectiveDocumentLanguage, getLocalizedTerm, isGccCountry } from '@/lib/tax/gcc-translations';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +12,7 @@ import { ApprovalModal } from '@/components/public-quote/approval-modal';
 import { RejectionModal } from '@/components/public-quote/rejection-modal';
 import {
   Download,
+  Printer,
   CheckCircle2,
   XCircle,
   Clock,
@@ -17,6 +20,8 @@ import {
   Building2,
   Calendar,
   AlertTriangle,
+  Smartphone,
+  Layers,
   MessageSquare,
   Send,
   CheckCheck,
@@ -31,6 +36,10 @@ import {
   Copy,
   Check,
   Sparkles,
+  ExternalLink,
+  Link as LinkIcon,
+  ChevronDown,
+  Loader2,
 } from 'lucide-react';
 import {
   parseLogoUrl,
@@ -38,8 +47,11 @@ import {
   getLogoFitClass,
   getCompanyInitials,
 } from '@/lib/utils/logo';
+import { getSanitizedPdfFilename } from '@/lib/quotations/calculations';
 import { PortalPinGate } from '@/components/public-quote/portal-pin-gate';
 import { QuotationFlowChart } from '@/components/quotations/quotation-flow-chart';
+import { QuotationCountdownWidget } from '@/components/public-quote/quotation-countdown-widget';
+import { getBusinessDirectWhatsAppUrl } from '@/lib/whatsapp/automation';
 
 interface PublicQuoteViewProps {
   initialQuotation: Quotation;
@@ -49,12 +61,23 @@ interface PublicQuoteViewProps {
 
 export function PublicQuoteView({ initialQuotation, allQuotations, token }: PublicQuoteViewProps) {
   const [quotation, setQuotation] = useState<Quotation>(initialQuotation);
+  const [selectedOptionalIds, setSelectedOptionalIds] = useState<Set<string>>(() => {
+    const set = new Set<string>();
+    (initialQuotation.items || []).forEach((it) => {
+      if (it.is_optional && it.is_selected !== false) {
+        set.add(it.id || it.description);
+      }
+    });
+    return set;
+  });
   const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [isRejectionOpen, setIsRejectionOpen] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
   const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
   const [clientCategory, setClientCategory] = useState<string>('ALL');
+  const [isProposalMenuOpen, setIsProposalMenuOpen] = useState(false);
+  const [switchingToken, setSwitchingToken] = useState<string | null>(null);
 
   // Client Portal PIN Auth Gate state
   const [authChecked, setAuthChecked] = useState(false);
@@ -128,7 +151,17 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   ).length;
 
   const org = quotation.organization || initialQuotation.organization;
+  const docLang = getEffectiveDocumentLanguage(org);
+  const brandColor = org?.brand_color || (quotation as any)?.brand_color || '#4f46e5';
   const customer = quotation.customer;
+
+  const businessWhatsAppUrl = getBusinessDirectWhatsAppUrl({
+    businessWhatsAppNumber: org?.whatsapp_number,
+    businessCountryCode: org?.whatsapp_country_code || '+91',
+    quotationNumber: quotation.quotation_number,
+    companyName: org?.name,
+    customerName: customer?.name || customer?.company_name,
+  });
   const taxMode = quotation.tax_mode || org?.default_tax_mode || 'exclusive';
   const placeOfSupply =
     quotation.place_of_supply ||
@@ -136,37 +169,93 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     customer?.billing_state ||
     customer?.state ||
     null;
-  const isIndiaGst = Boolean(
-    org?.country === 'India' ||
-      quotation.currency === 'INR' ||
-      org?.gst_registered ||
-      org?.gstin ||
-      org?.gst_vat_number
+
+  const countryNameOrCode =
+    quotation.organization?.country ||
+    org?.country ||
+    quotation.organization?.business_country ||
+    org?.business_country ||
+    '';
+
+  const isIndia = Boolean(
+    (quotation.organization?.business_country || org?.business_country || '').toUpperCase() === 'IN' ||
+    (quotation.organization?.country || org?.country || '').toLowerCase() === 'india' ||
+    (quotation.organization?.country || org?.country || '').toUpperCase() === 'IN' ||
+    quotation.organization?.billing_region === 'INDIA' ||
+    org?.billing_region === 'INDIA' ||
+    quotation.currency === 'INR' ||
+    org?.default_currency === 'INR'
   );
+
+  const isUAE = Boolean(
+    (quotation.organization?.business_country || org?.business_country || '').toUpperCase() === 'AE' ||
+    (quotation.organization?.country || org?.country || '').toLowerCase().includes('emirates') ||
+    (quotation.organization?.country || org?.country || '').toLowerCase() === 'uae' ||
+    quotation.currency === 'AED' ||
+    org?.default_currency === 'AED'
+  );
+
+  const countryProfile = getCountryProfile(countryNameOrCode || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US')));
+
+  const effectiveTaxName = !isIndia
+    ? (quotation.tax_name && !quotation.tax_name.toUpperCase().includes('GST')
+        ? quotation.tax_name
+        : (isUAE ? 'VAT' : (org?.tax_label && !org?.tax_label.toUpperCase().includes('GST') ? org.tax_label : 'Tax')))
+    : (quotation.tax_name || org?.tax_label || 'GST');
+
   const calculated = calculateQuotationTotals(
-    (quotation.items || []).map((it) => ({
-      quantity: Number(it.quantity) || 0,
-      unit_price: Number(it.unit_price) || 0,
-      tax_rate: Number(it.tax_rate) || 0,
-    })),
+    (quotation.items || []).map((it) => {
+      const isSel = it.is_optional ? selectedOptionalIds.has(it.id || it.description) : true;
+      return {
+        quantity: Number(it.quantity) || 0,
+        unit_price: Number(it.unit_price) || 0,
+        tax_rate: (it.tax_rate !== undefined && it.tax_rate !== null && it.tax_rate !== '')
+          ? Number(it.tax_rate)
+          : Number(quotation.tax_rate || 0),
+        is_optional: it.is_optional,
+        is_selected: isSel,
+      };
+    }),
     quotation.discount_type || null,
     Number(quotation.discount_value) || 0,
     {
       taxMode,
-      taxName: quotation.tax_name || org?.tax_label || 'GST',
-      isIndiaGst,
+      currency: quotation.currency,
+      country: countryNameOrCode || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US')),
+      taxName: effectiveTaxName,
+      isIndiaGst: isIndia,
+      taxRate: Number(quotation.tax_rate || 0),
       businessState: org?.business_state || org?.state || null,
       placeOfSupply,
     }
   );
-  const displaySubtotal = calculated.subtotal;
-  const displayDiscount = calculated.discount_amount;
-  const displayTax = calculated.tax_amount;
-  const displayTotal = calculated.grand_total;
-  const displayTaxBreakdown =
+
+  const hasOptionalItemsToggled = (quotation.items || []).some(
+    (it) => it.is_optional && !selectedOptionalIds.has(it.id || it.description)
+  );
+
+  const displaySubtotal = (!hasOptionalItemsToggled && Number(quotation.subtotal) > 0)
+    ? Number(quotation.subtotal)
+    : calculated.subtotal;
+  const displayDiscount = (!hasOptionalItemsToggled && Number(quotation.discount_amount) > 0)
+    ? Number(quotation.discount_amount)
+    : calculated.discount_amount;
+  const displayTax = (!hasOptionalItemsToggled && Number(quotation.tax_amount) > 0)
+    ? Number(quotation.tax_amount)
+    : calculated.tax_amount;
+  const displayTotal = (!hasOptionalItemsToggled && Number(quotation.grand_total) > 0)
+    ? Number(quotation.grand_total)
+    : calculated.grand_total;
+
+  const displayTaxBreakdown = sanitizeTaxBreakdown(
     quotation.tax_breakdown && quotation.tax_breakdown.length > 0
       ? quotation.tax_breakdown
-      : calculated.tax_breakdown;
+      : calculated.tax_breakdown,
+    isIndia,
+    effectiveTaxName,
+    displayTax,
+    quotation.tax_rate || calculated.tax_rate || (isUAE ? 5 : 0)
+  );
   const grandTotalFormatted = formatCurrency(displayTotal, quotation.currency);
   const isDemo = token === 'sec_8f92m1k4092b' || quotation.quotation_number === 'Q-000042';
 
@@ -183,6 +272,62 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     return d.getTime();
   };
 
+  const validityCountdown = React.useMemo(() => {
+    if (!quotation.valid_until) return null;
+    // If the quotation has already been approved, paid, or completed, validity no longer counts down or expires
+    if (
+      quotation.is_paid ||
+      quotation.status === 'APPROVED' ||
+      quotation.status === 'IN_PROGRESS' ||
+      quotation.status === 'COMPLETED' ||
+      quotation.status === 'PAYMENT_COMPLETED'
+    ) {
+      return null;
+    }
+    const endTime = getValidityEndTime(quotation.valid_until);
+    const now = Date.now();
+    const diffMs = endTime - now;
+    if (diffMs <= 0) {
+      return { isExpired: true, isUrgent: true, days: 0, hours: 0, text: 'Offer Expired' };
+    }
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const isUrgent = days <= 3;
+    let text = '';
+    if (days > 0) {
+      text = `${days} ${days === 1 ? 'day' : 'days'} remaining`;
+      if (hours > 0 && days <= 2) {
+        text += ` and ${hours} ${hours === 1 ? 'hr' : 'hrs'}`;
+      }
+    } else {
+      text = `${hours} ${hours === 1 ? 'hour' : 'hours'} remaining`;
+    }
+    return { isExpired: false, isUrgent, days, hours, text };
+  }, [quotation.valid_until, quotation.status, quotation.is_paid]);
+
+  // Advance payment is ONLY active if explicitly enabled by the business and configured with a valid percentage
+  const isAdvanceRequired = Boolean(
+    quotation.enable_advance === true &&
+    quotation.payment_terms_type !== 'FULL' &&
+    quotation.advance_percentage !== null &&
+    quotation.advance_percentage !== undefined &&
+    Number(quotation.advance_percentage) > 0 &&
+    Number(quotation.advance_percentage) < 100
+  );
+
+  const amountDueForUpi = React.useMemo(() => {
+    if (quotation.payment_status === 'PARTIALLY_PAID' && quotation.balance_amount) {
+      return quotation.balance_amount;
+    }
+    if (
+      (!quotation.is_paid || quotation.payment_status === 'UNPAID') &&
+      isAdvanceRequired
+    ) {
+      return Math.round(((displayTotal * quotation.advance_percentage!) / 100 + Number.EPSILON) * 100) / 100;
+    }
+    return displayTotal;
+  }, [quotation, displayTotal, isAdvanceRequired]);
+
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const handleCopy = (text: string, fieldKey: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -196,6 +341,10 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const upiInfo = quotation.upi_details || org?.default_upi_details;
   const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
 
+  const paymentLinkUrl = quotation.payment_link || org?.default_payment_link;
+  const paymentLinkLabel = quotation.payment_link_label || org?.default_payment_link_label || 'Pay Online';
+  let showPaymentLink = quotation.show_payment_link ?? org?.default_show_payment_link ?? Boolean(paymentLinkUrl);
+
   const mode = quotation.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
   let showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
   let showUpi = quotation.show_upi_details ?? org?.default_show_upi_details ?? true;
@@ -208,21 +357,41 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     showUpi = false;
     showCash = false;
     showCrypto = true;
+    showPaymentLink = false;
   } else if (mode === 'BANK_ONLY') {
     showBank = true;
     showUpi = false;
     showCash = false;
     showCrypto = false;
+    showPaymentLink = false;
   } else if (mode === 'UPI_ONLY') {
     showBank = false;
     showUpi = true;
     showCash = false;
     showCrypto = false;
+    showPaymentLink = false;
+  } else if (mode === 'PAYMENT_LINK_ONLY') {
+    showBank = false;
+    showUpi = false;
+    showCash = false;
+    showCrypto = false;
+    showPaymentLink = true;
   } else if (mode === 'ALL') {
     showBank = true;
     showUpi = true;
     showCash = true;
     showCrypto = true;
+    showPaymentLink = true;
+  }
+
+  // Country enforcement:
+  // UPI payment option remove from other countries than india
+  if (!isIndia) {
+    showUpi = false;
+  }
+  // Payment link and client portal Pay button strictly don't show in india
+  if (isIndia) {
+    showPaymentLink = false;
   }
 
   const isPaid = Boolean(quotation.is_paid || quotation.status === 'PAYMENT_COMPLETED');
@@ -407,36 +576,24 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   };
 
   const selectQuotation = (target: Quotation) => {
-    setOpenedQuoteIds((prev) => {
-      const next = new Set(prev);
-      next.add(target.id);
-      try {
-        localStorage.setItem(
-          'quoteflow_client_opened_quotes',
-          JSON.stringify(Array.from(next))
-        );
-      } catch {}
-      return next;
-    });
+    if (!target?.public_token) return;
+    if (target.id === quotation.id) {
+      setIsProposalMenuOpen(false);
+      return;
+    }
+    setSwitchingToken(target.public_token);
+    try {
+      const saved = localStorage.getItem('quoteflow_client_opened_quotes');
+      const set = saved ? new Set(JSON.parse(saved)) : new Set();
+      set.add(target.id);
+      localStorage.setItem(
+        'quoteflow_client_opened_quotes',
+        JSON.stringify(Array.from(set))
+      );
+    } catch {}
 
-    const fullOrg = target.organization || quotation.organization || initialQuotation.organization;
-    const targetQuote: Quotation = {
-      ...target,
-      organization: fullOrg,
-    };
-    setQuotation(targetQuote);
-    window.history.pushState(null, '', `/q/${target.public_token}`);
-    fetch(`/api/public/quote?token=${encodeURIComponent(target.public_token)}&recordView=true`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.success && data?.quotation) {
-          setQuotation({
-            ...data.quotation,
-            organization: data.quotation.organization || fullOrg,
-          });
-        }
-      })
-      .catch(() => {});
+    // Clean, robust client navigation to target quotation
+    window.location.href = `/q/${target.public_token}`;
   };
 
   const handleCategoryTabClick = (catValue: string) => {
@@ -461,6 +618,13 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
     const diffDays = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
     return diffDays >= 0 ? diffDays : 0;
   })();
+
+  const harmonizedPaymentTerms = useMemo(() => {
+    return harmonizePaymentTerms(
+      isAdvanceRequired ? quotation.advance_percentage : 0,
+      quotation.payment_terms_instructions
+    );
+  }, [isAdvanceRequired, quotation.advance_percentage, quotation.payment_terms_instructions]);
 
   const currentToken = quotation.public_token || token;
 
@@ -635,6 +799,18 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const handleDownloadPdf = async () => {
     try {
       setIsDownloadingPdf(true);
+      const quoteFilename = getSanitizedPdfFilename('quotation', quotation.quotation_number);
+
+      // 1. Client-side generation (0ms Cloudflare CPU usage)
+      if (quotation) {
+        try {
+          const { downloadQuotationPdfClient } = await import('@/lib/pdf/client-download');
+          const success = await downloadQuotationPdfClient(quotation, quoteFilename);
+          if (success) return;
+        } catch {}
+      }
+
+      // 2. Server fallback
       const res = await fetch(
         `/api/public/pdf?token=${encodeURIComponent(currentToken || token || '')}&id=${encodeURIComponent(quotation.id)}`
       );
@@ -643,7 +819,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Quotation-${quotation.quotation_number}.pdf`;
+      a.download = quoteFilename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -659,6 +835,18 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const handleDownloadReceipt = async () => {
     try {
       setIsDownloadingReceipt(true);
+      const receiptFilename = getSanitizedPdfFilename('receipt', quotation.quotation_number);
+
+      // 1. Client-side receipt generation (0ms Cloudflare CPU usage)
+      if (quotation) {
+        try {
+          const { downloadReceiptPdfClient } = await import('@/lib/pdf/client-download');
+          const success = await downloadReceiptPdfClient(quotation, receiptFilename);
+          if (success) return;
+        } catch {}
+      }
+
+      // 2. Server fallback
       const res = await fetch(
         `/api/public/receipt-pdf?token=${encodeURIComponent(currentToken || '')}&id=${encodeURIComponent(quotation.id)}`
       );
@@ -673,7 +861,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Payment-Receipt-${quotation.quotation_number}.pdf`;
+      a.download = receiptFilename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -689,6 +877,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   const handleDownloadInvoice = async () => {
     try {
       setIsDownloadingInvoice(true);
+      const invoiceFilename = getSanitizedPdfFilename('invoice', quotation.invoice_number || quotation.quotation_number);
       const res = await fetch(
         `/api/public/invoice-pdf?token=${encodeURIComponent(currentToken || '')}&id=${encodeURIComponent(quotation.id)}`
       );
@@ -703,7 +892,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Invoice-${quotation.invoice_number || quotation.quotation_number}.pdf`;
+      a.download = invoiceFilename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -789,7 +978,13 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
   }
 
   return (
-    <div className="min-h-screen bg-slate-100/70 pb-16 pt-4 sm:pt-8 px-3 sm:px-6">
+    <div className="min-h-screen bg-[#f3f5f9] pb-16 pt-4 sm:pt-8 px-3 sm:px-6 relative">
+      {/* Background ambient lighting matching QuoteFlow theme */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
+        <div className="absolute top-10 left-1/4 w-[500px] h-[500px] bg-indigo-500/5 rounded-full blur-3xl" />
+        <div className="absolute top-1/3 right-1/4 w-[450px] h-[450px] bg-purple-500/5 rounded-full blur-3xl" />
+      </div>
+
       <div className="mx-auto max-w-4xl space-y-4">
         {/* Demo Portal Status Banner */}
         {isDemo && (
@@ -828,37 +1023,131 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         )}
 
         {/* Sticky Action Banner for Mobile & Desktop */}
-        <div className="sticky top-4 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/95 p-3.5 sm:p-4 shadow-lg backdrop-blur-md border border-slate-200/80">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status:</span>
+        <div className="sticky top-3 z-40 flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-white/95 p-3 sm:p-4 shadow-xl backdrop-blur-md border border-slate-100 ring-1 ring-slate-900/5">
+          <div className="flex items-center gap-2.5">
+            {/* Multi-Quotation Switcher Dropdown (if multiple quotes available) */}
+            {allQuotations && allQuotations.length > 1 ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsProposalMenuOpen(!isProposalMenuOpen)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-800 text-xs font-bold transition-all border border-slate-200/90 cursor-pointer shadow-2xs"
+                  title="Switch between your proposals & estimates"
+                >
+                  <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                  <span className="font-mono">{quotation.quotation_number}</span>
+                  <span className="text-slate-400 font-normal">({allQuotations.length})</span>
+                  <ChevronDown className={`h-3.5 w-3.5 text-slate-500 transition-transform ${isProposalMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isProposalMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsProposalMenuOpen(false)}
+                    />
+                    <div className="absolute left-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white border border-slate-200 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
+                      <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800">Your Proposals & Estimates</span>
+                        <span className="text-[11px] font-semibold text-slate-400">{allQuotations.length} available</span>
+                      </div>
+                      <div className="max-h-72 overflow-y-auto p-1 space-y-1">
+                        {allQuotations.map((q) => {
+                          const isSelected = q.id === quotation.id;
+                          const isSwitching = switchingToken === q.public_token;
+                          return (
+                            <a
+                              key={q.id}
+                              href={`/q/${q.public_token}`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                selectQuotation(q);
+                              }}
+                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left text-xs transition-all cursor-pointer block no-underline ${
+                                isSelected
+                                  ? 'bg-indigo-50 border border-indigo-200 text-indigo-950 font-bold ring-1 ring-indigo-500/10'
+                                  : 'hover:bg-slate-50 border border-transparent text-slate-700'
+                              } ${isSwitching ? 'opacity-70 pointer-events-none' : ''}`}
+                            >
+                              <div className="flex flex-col min-w-0 pr-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-slate-900">{q.quotation_number}</span>
+                                  {isQuoteNew(q) && (
+                                    <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-blue-600 text-white">
+                                      NEW
+                                    </span>
+                                  )}
+                                  {isSwitching && (
+                                    <Loader2 className="h-3 w-3 animate-spin text-indigo-600 shrink-0 ml-1" />
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-slate-500 truncate max-w-[180px]">{q.title}</span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="font-bold text-slate-900">{formatCurrency(q.grand_total, q.currency)}</span>
+                                <StatusBadge status={q.status} isPaid={q.is_paid} hideWarning />
+                              </div>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs font-mono font-bold text-slate-800 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200/80">
+                {quotation.quotation_number}
+              </span>
+            )}
+
+            {(quotation.revision_number > 1 || quotation.quotation_number.includes('-REV')) && (
+              <span className="rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 uppercase tracking-wide">
+                {quotation.quotation_number.match(/[-_](REV|rev)[-_]?(\d+)/i)?.[0]?.replace(/^[-_]/, '') || `REV ${quotation.revision_number - 1}`}
+              </span>
+            )}
+
             <StatusBadge
               status={quotation.status}
               isPaid={quotation.is_paid}
               completedUnpaid={quotation.completed_unpaid}
               paymentStatus={quotation.payment_status}
               paidAmount={quotation.paid_amount}
+              hideWarning
             />
+
             {isQuoteNew(quotation) && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-xs">
+              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-xs">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-200 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
                 </span>
-                <span>NEW (24h)</span>
+                <span>NEW</span>
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
             <Button
               variant="outline"
               size="sm"
               onClick={handleDownloadPdf}
               isLoading={isDownloadingPdf}
-              className="gap-1.5 shadow-sm"
+              className="gap-1.5 shadow-2xs text-xs font-semibold"
             >
-              <Download className="h-4 w-4 text-slate-600" />
-              <span className="hidden sm:inline">Download</span> PDF
+              <Download className="h-3.5 w-3.5 text-slate-600" />
+              <span>PDF</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.print()}
+              className="gap-1.5 shadow-2xs text-slate-700 hover:bg-slate-50 text-xs font-semibold"
+              title="Print official quotation"
+            >
+              <Printer className="h-3.5 w-3.5 text-slate-600" />
+              <span>Print</span>
             </Button>
 
             {hasPaymentRecorded && isPaymentConfirmed && (
@@ -867,11 +1156,37 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                 size="sm"
                 onClick={handleDownloadReceipt}
                 isLoading={isDownloadingReceipt}
-                className="gap-1.5 shadow-sm text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                className="gap-1.5 shadow-2xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs font-bold"
               >
-                <Download className="h-4 w-4 text-emerald-600" />
-                <span className="hidden sm:inline">Download</span> Receipt
+                <Download className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Receipt</span>
               </Button>
+            )}
+
+            {businessWhatsAppUrl && (
+              <a
+                href={businessWhatsAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-2xs hover:shadow transition-all cursor-pointer"
+                title={`Chat directly with ${org?.name || 'our team'} on WhatsApp`}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                <span>WhatsApp</span>
+              </a>
+            )}
+
+            {!isIndia && showPaymentLink && paymentLinkUrl && !isPaid && !isExpired && (
+              <a
+                href={paymentLinkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all cursor-pointer"
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>Pay {grandTotalFormatted}</span>
+                <ExternalLink className="h-3 w-3 opacity-80" />
+              </a>
             )}
 
             {canTakeAction && (
@@ -880,229 +1195,43 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   variant="outline"
                   size="sm"
                   onClick={() => setIsRejectionOpen(true)}
-                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                  className="rounded-2xl text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100/80 border-rose-200 text-xs font-bold px-3.5 py-2 shadow-2xs transition-all"
                 >
-                  <XCircle className="h-4 w-4 mr-1 text-rose-500" />
+                  <XCircle className="h-3.5 w-3.5 mr-1 text-rose-500" />
                   Decline
                 </Button>
                 <Button
-                  variant="success"
                   size="sm"
                   onClick={() => setIsApprovalOpen(true)}
-                  className="gap-1.5 shadow-md hover:shadow-lg font-semibold"
+                  className="rounded-2xl gap-1.5 shadow-md shadow-emerald-600/25 hover:shadow-lg hover:shadow-emerald-600/30 font-black text-white text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all"
                 >
                   <CheckCircle2 className="h-4 w-4" />
-                  Approve & Sign
+                  Review &amp; Approve
                 </Button>
               </>
             )}
           </div>
         </div>
 
-        {/* Multi-Quotation Customer Portal Switcher */}
+        {/* Multi-Quotation Subtle Indicator (if multiple quotes available) */}
         {allQuotations && allQuotations.length > 1 && (
-          <div className="rounded-2xl bg-white border border-slate-200/90 p-4 shadow-sm space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 px-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Building2 className="h-4 w-4 text-indigo-500" />
-                <span>Your Estimates &amp; Proposals ({allQuotations.length})</span>
-              </span>
-              <span className="text-[11px] text-slate-400">
-                You can review, track progress, chat, and approve each estimate below
-              </span>
+          <div className="flex items-center justify-between px-2 py-0.5 text-xs text-slate-500">
+            <div className="flex items-center gap-1.5">
+              <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+              <span>Showing proposal <strong>{quotation.quotation_number}</strong> of {allQuotations.length}</span>
             </div>
-
-            {/* Client Portal Category Filter Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-              {clientCategoryTabs.map((tab) => {
-                const isActive = clientCategory === tab.value;
-                const count = getCategoryCount(tab.value);
-                return (
-                  <button
-                    key={tab.value}
-                    type="button"
-                    onClick={() => handleCategoryTabClick(tab.value)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-xl whitespace-nowrap transition-all border cursor-pointer ${
-                      isActive ? tab.active : tab.inactive
-                    }`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-white' : tab.dot}`} />
-                    <span>{tab.label}</span>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                        isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-slate-200/80 text-slate-700'
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Quotations List */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
-              {(() => {
-                const filtered = allQuotations.filter((q) => isQuoteInCategory(q, clientCategory));
-                if (filtered.length === 0) {
-                  return (
-                    <div className="py-2.5 px-3 text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-200 rounded-xl flex items-center justify-between w-full">
-                      <span>
-                        No {clientCategoryTabs.find((t) => t.value === clientCategory)?.label.toLowerCase()} quotes found.
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCategoryTabClick('ALL')}
-                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline ml-2 cursor-pointer"
-                      >
-                        View All Quotes
-                      </button>
-                    </div>
-                  );
-                }
-
-                return filtered.map((q) => {
-                  const isSelected = q.id === quotation.id;
-                  const isNew = isQuoteNew(q);
-
-                  return (
-                    <button
-                      key={q.id}
-                      type="button"
-                      onClick={() => selectQuotation(q)}
-                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
-                        isSelected
-                          ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-xs ring-2 ring-indigo-500/20'
-                          : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      {isNew && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[9px] font-black uppercase tracking-wider shadow-xs">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-200 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                          </span>
-                          <span>NEW</span>
-                        </span>
-                      )}
-                      <span className="font-bold">{q.quotation_number}</span>
-                      <span className="text-slate-300 font-normal">|</span>
-                      <span className="font-medium truncate max-w-[140px]">{q.title}</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(q.grand_total, q.currency)}</span>
-                      <StatusBadge
-                        status={q.status}
-                        isPaid={q.is_paid}
-                        completedUnpaid={q.completed_unpaid}
-                        paymentStatus={q.payment_status}
-                        paidAmount={q.paid_amount}
-                      />
-                    </button>
-                  );
-                });
-              })()}
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsProposalMenuOpen(true)}
+              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>Switch proposal ({allQuotations.length})</span>
+              <ChevronDown className="h-3 w-3" />
+            </button>
           </div>
         )}
 
-        {/* Status Alerts */}
-        {quotation.status === 'IN_PROGRESS' && (
-          <div className="flex items-start sm:items-center gap-3.5 rounded-2xl bg-sky-50 border border-sky-200 p-4 text-sky-950 shadow-sm animate-in fade-in">
-            <div className="rounded-xl bg-sky-500 text-white p-2.5 shrink-0 shadow-xs shadow-sky-500/30">
-              <Clock className="h-6 w-6" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h4 className="font-bold text-sm sm:text-base text-sky-900 flex items-center gap-2">
-                  <span>Work In Progress</span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-bold border border-sky-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-ping" />
-                    {quotation.estimated_days || 7} Days Estimated
-                  </span>
-                </h4>
-                {quotation.estimated_completion_date && (
-                  <span className="text-xs font-bold text-sky-700 bg-sky-100/70 px-2.5 py-1 rounded-lg">
-                    Target Completion: {formatDate(quotation.estimated_completion_date)}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs sm:text-sm text-sky-800 mt-1 leading-relaxed">
-                Your approved proposal has moved to the execution phase. The team is actively fulfilling the deliverables.
-                {quotation.estimated_time_text ? ` Note: "${quotation.estimated_time_text}"` : ''}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {isPaid && (
-          <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 shadow-sm animate-in fade-in">
-            <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700 shrink-0">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-            <div>
-              <h4 className="font-bold text-sm sm:text-base">Quotation Settled & Fully Paid</h4>
-              <p className="text-xs sm:text-sm text-emerald-700">
-                Payment for this quotation has been successfully recorded and settled in full. Thank you for your business!
-              </p>
-            </div>
-          </div>
-        )}
-
-        {isPartiallyPaid && (
-          <div className="flex items-center gap-3 rounded-2xl bg-cyan-50 border border-cyan-200 p-4 text-cyan-950 shadow-sm animate-in fade-in">
-            <div className="rounded-xl bg-cyan-100 p-2 text-cyan-700 shrink-0">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h4 className="font-bold text-sm sm:text-base text-cyan-950">
-                  Advance Payment Received ({quotation.advance_percentage ? `${quotation.advance_percentage}%` : 'Partial'})
-                </h4>
-                {isPaymentConfirmed && (
-                  <span className="text-[11px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300 px-2.5 py-0.5 rounded-full">
-                    ✓ Confirmed by Company
-                  </span>
-                )}
-              </div>
-              <p className="text-xs sm:text-sm text-cyan-800 mt-0.5">
-                We have received your advance payment of{' '}
-                <strong>
-                  {formatCurrency(
-                    quotation.paid_amount || 0,
-                    quotation.currency
-                  )}
-                </strong>
-                . Remaining balance due:{' '}
-                <strong>
-                  {formatCurrency(
-                    quotation.balance_amount !== undefined
-                      ? quotation.balance_amount
-                      : quotation.grand_total - (quotation.paid_amount || 0),
-                    quotation.currency
-                  )}
-                </strong>
-                .
-              </p>
-            </div>
-          </div>
-        )}
-
-        {isCompleted && !isPaid && (
-          <div className="flex items-center gap-3 rounded-2xl bg-indigo-50 border border-indigo-200 p-4 text-indigo-900 shadow-sm animate-in fade-in">
-            <div className="rounded-xl bg-indigo-100 p-2 text-indigo-700 shrink-0">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-            <div>
-              <h4 className="font-bold text-sm sm:text-base">
-                {quotation.completed_unpaid ? 'Quotation Completed (Unpaid)' : 'Quotation Completed'}
-              </h4>
-              <p className="text-xs sm:text-sm text-indigo-700">
-                This quotation scope and order has been officially completed.
-              </p>
-            </div>
-          </div>
-        )}
+        {/* Critical Alerts (Draft / Expired / Declined only) */}
         {quotation.status === 'DRAFT' && (
           <div className="flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-200 p-4 text-amber-900 shadow-sm">
             <Clock className="h-6 w-6 text-amber-600 shrink-0" />
@@ -1115,25 +1244,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           </div>
         )}
 
-        {quotation.status === 'APPROVED' && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 shadow-sm animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700 shrink-0">
-                <CheckCircle2 className="h-6 w-6" />
-              </div>
-              <div>
-                <h4 className="font-bold text-sm sm:text-base">Quotation Approved & Signed</h4>
-                <p className="text-xs sm:text-sm text-emerald-700">
-                  {quotation.signature
-                    ? `Signed by ${quotation.signature.signer_name} on ${formatDateTime(quotation.signature.signed_at)}.`
-                    : 'This quotation has been officially approved.'}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {isExpired && (
+        {isExpired && !isPaid && !['APPROVED', 'IN_PROGRESS', 'COMPLETED', 'PAYMENT_COMPLETED'].includes(quotation.status) && (
           <div className="flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-200 p-4 text-amber-900 shadow-sm">
             <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0" />
             <div>
@@ -1158,11 +1269,23 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           </div>
         )}
 
-        {/* Visual Lifecycle Stepper Flow Chart for Client */}
-        <QuotationFlowChart quotation={quotation} isClientView />
+        {/* Visual Lifecycle Stepper Flow Chart for Client (5-Stage with Floating Detail Cards) */}
+        <QuotationFlowChart
+          quotation={quotation}
+          isClientView
+          onDownloadReceipt={handleDownloadReceipt}
+          isDownloadingReceipt={isDownloadingReceipt}
+          paymentLinkUrl={paymentLinkUrl}
+        />
 
         {/* Main Quotation Document Sheet */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-10 shadow-xl space-y-8">
+        <div
+          id="quotation-sheet"
+          dir={docLang === 'ar' ? 'rtl' : 'ltr'}
+          className="rounded-3xl border border-slate-100 bg-white text-slate-900 p-6 sm:p-12 shadow-xl space-y-8 relative overflow-hidden printable-document-sheet ring-1 ring-slate-900/5"
+        >
+          {/* Top Brand Accent Bar */}
+          <div className="absolute top-0 left-0 right-0 h-1.5" style={{ backgroundColor: brandColor }} />
           {/* Document Header */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 pb-6 border-b border-slate-100">
             <div className="space-y-1.5">
@@ -1213,7 +1336,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   <>
                     <br />
                     <span className="font-medium text-slate-600">
-                      GSTIN / Tax ID: {org.gstin || org.gst_vat_number}
+                      {getLocalizedTerm('trn_tax_id', docLang)}: {org.gstin || org.gst_vat_number}
                     </span>
                   </>
                 )}
@@ -1221,19 +1344,22 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
             </div>
 
             <div className="text-left sm:text-right space-y-1">
-              <span className="inline-block text-xs font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md">
-                Official Estimate
+              <span
+                className="inline-block text-xs font-bold uppercase tracking-widest px-2.5 py-1 rounded-md"
+                style={{ color: brandColor, backgroundColor: `${brandColor}18` }}
+              >
+                {getLocalizedTerm('quotation', docLang, 'Official Estimate')}
               </span>
               <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
                 {quotation.quotation_number}
               </h2>
               <div className="text-xs text-slate-500 space-y-0.5 pt-1">
                 <p>
-                  <span className="font-medium text-slate-600">Issue Date:</span>{' '}
+                  <span className="font-medium text-slate-600">{getLocalizedTerm('issue_date', docLang)}:</span>{' '}
                   {formatDate(quotation.issue_date)}
                 </p>
                 <p>
-                  <span className="font-medium text-slate-600">Valid Until:</span>{' '}
+                  <span className="font-medium text-slate-600">{getLocalizedTerm('valid_until', docLang)}:</span>{' '}
                   {formatDate(quotation.valid_until)}
                 </p>
                 {displayTax > 0 && (
@@ -1252,13 +1378,13 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50/80 rounded-xl p-5 border border-slate-100">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Quotation For
+                {getLocalizedTerm('quoted_to', docLang, 'Quotation For')}
               </span>
               <h3 className="text-base font-bold text-slate-900 mt-1">
                 {customer?.company_name || customer?.name || 'Valued Client'}
               </h3>
               {customer?.company_name && customer?.name && (
-                <p className="text-xs text-slate-600 font-medium">Attn: {customer.name}</p>
+                <p className="text-xs text-slate-600 font-medium">{getLocalizedTerm('attn', docLang)}: {customer.name}</p>
               )}
               <p className="text-xs text-slate-500 mt-1">
                 {customer?.billing_address && `${customer.billing_address}, `}
@@ -1269,7 +1395,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   <>
                     <br />
                     <span className="font-medium text-slate-700">
-                      GSTIN / Tax ID: {quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number}
+                      {getLocalizedTerm('trn_tax_id', docLang)}: {quotation.customer_gstin || customer?.customer_gstin || customer?.tax_number}
                     </span>
                   </>
                 )}
@@ -1277,7 +1403,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   <>
                     <br />
                     <span className="font-semibold text-indigo-700">
-                      Place of Supply: {placeOfSupply}
+                      {getLocalizedTerm('place_of_supply', docLang)}: {placeOfSupply}
                     </span>
                   </>
                 )}
@@ -1289,43 +1415,117 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                 Project / Scope Title
               </span>
               <h3 className="text-base font-bold text-slate-900 mt-1">{quotation.title}</h3>
-              <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
-                <Calendar className="h-3.5 w-3.5 text-indigo-500" />
-                <span>
-                  Validity: {validityDays} {validityDays === 1 ? 'day' : 'days'} from issuance
-                </span>
-              </div>
+              
+              {/* Urgency & Validity Countdown Banner (only while awaiting approval) */}
+              {validityCountdown && (
+                <div className="mt-3">
+                  {validityCountdown.isExpired ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
+                      <XCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                      <div>
+                        <span className="font-bold">Quotation Expired</span> on {formatDate(quotation.valid_until)}. Offer prices and delivery schedule may require revision.
+                      </div>
+                    </div>
+                  ) : validityCountdown.isUrgent ? (
+                    <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium animate-pulse">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                      <div>
+                        <span className="font-bold">⏳ Limited-Time Offer:</span> Valid until {formatDate(quotation.valid_until)} ({validityCountdown.text}). Approve today to lock in your pricing.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 p-2 rounded-xl bg-emerald-50/70 border border-emerald-100 text-emerald-800 text-xs font-medium">
+                      <Clock className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span>Offer valid until {formatDate(quotation.valid_until)} ({validityCountdown.text || `${validityDays} days remaining`})</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Interactive Optional Add-ons Info Banner (if any item is optional) */}
+          {(quotation.items || []).some((it) => it.is_optional) && (
+            <div className="flex items-center gap-2.5 p-3 rounded-xl bg-indigo-50/80 border border-indigo-100 text-xs text-indigo-900">
+              <Sparkles className="h-4 w-4 text-indigo-600 shrink-0" />
+              <span>
+                <strong>Interactive Package Options:</strong> Check or uncheck optional add-ons below. Your quote subtotal and tax recalculate live.
+              </span>
+            </div>
+          )}
 
           {/* Line Items Table */}
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-600 border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4 w-12 text-center">#</th>
-                  <th className="py-3 px-4">Description</th>
-                  <th className="py-3 px-4 text-center">Qty</th>
-                  <th className="py-3 px-4 text-right">Unit Price</th>
-                  <th className="py-3 px-4 text-center">Tax</th>
-                  <th className="py-3 px-4 text-right">Total</th>
+                  <th className="py-3 px-4 w-12 text-center">{getLocalizedTerm('hash', docLang)}</th>
+                  <th className="py-3 px-4">{getLocalizedTerm('item_description', docLang, 'Description')}</th>
+                  <th className="py-3 px-4 text-center">{getLocalizedTerm('quantity', docLang)}</th>
+                  <th className="py-3 px-4 text-right">{getLocalizedTerm('rate', docLang, 'Unit Price')}</th>
+                  <th className="py-3 px-4 text-center">{getLocalizedTerm('tax', docLang)}</th>
+                  <th className="py-3 px-4 text-right">{getLocalizedTerm('total', docLang)}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(quotation.items || []).map((item, idx) => {
                   const calcItem = calculated.items[idx];
                   const lineTotal = calcItem ? calcItem.line_total : item.line_total;
+                  const isOptional = Boolean(item.is_optional);
+                  const isSelected = isOptional ? selectedOptionalIds.has(item.id || item.description) : true;
+
                   return (
-                    <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-colors">
+                    <tr
+                      key={item.id || idx}
+                      className={`transition-colors ${
+                        isOptional && !isSelected
+                          ? 'bg-slate-50/40 opacity-70 hover:opacity-100'
+                          : 'hover:bg-slate-50/50'
+                      }`}
+                    >
                       <td className="py-3.5 px-4 text-center text-xs text-slate-400 font-medium">
-                        {idx + 1}
+                        {isOptional ? (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={!canTakeAction}
+                            onChange={(e) => {
+                              setSelectedOptionalIds((prev) => {
+                                const next = new Set(prev);
+                                const key = item.id || item.description;
+                                if (e.target.checked) next.add(key);
+                                else next.delete(key);
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:cursor-not-allowed"
+                            title={canTakeAction ? 'Toggle optional add-on' : 'Selection locked'}
+                          />
+                        ) : (
+                          idx + 1
+                        )}
                       </td>
                       <td className="py-3.5 px-4">
-                        <p className="font-semibold text-slate-800">{item.description}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className={`font-semibold ${isOptional && !isSelected ? 'text-slate-500 line-through' : 'text-slate-800'}`}>
+                            {item.description}
+                          </p>
+                          {isOptional && (
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
+                                isSelected
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : 'bg-slate-100 text-slate-500 border-slate-200'
+                              }`}
+                            >
+                              {isSelected ? '✓ Optional Added' : 'Optional (Unchecked)'}
+                            </span>
+                          )}
+                        </div>
                         {item.classification_code && (
                           <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
                             <span className="text-slate-400">
-                              {item.classification_type || (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')}:
+                              {item.classification_type || (isIndia ? (item.item_type === 'SERVICE' ? 'SAC' : 'HSN') : (item.item_type === 'SERVICE' ? countryProfile.serviceClassificationLabel : countryProfile.goodsClassificationLabel))}:
                             </span>{' '}
                             <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
                               {item.classification_code}
@@ -1344,8 +1544,10 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                           ? `${item.tax_rate}%${taxMode === 'inclusive' ? ' (Incl.)' : ''}`
                           : '-'}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-semibold text-slate-900">
-                        {formatCurrency(lineTotal, quotation.currency)}
+                      <td className="py-3.5 px-4 text-right font-semibold">
+                        <span className={isOptional && !isSelected ? 'text-slate-400 line-through' : 'text-slate-900'}>
+                          {formatCurrency(lineTotal, quotation.currency)}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -1393,7 +1595,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               {isValidDocumentText(quotation.notes) && (
                 <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Notes & Specifications
+                    {getLocalizedTerm('notes', docLang, 'Notes & Specifications')}
                   </h4>
                   <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
                     {quotation.notes!.trim()}
@@ -1404,52 +1606,193 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               {isValidDocumentText(quotation.terms_conditions) && (
                 <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Terms & Conditions
+                    {getLocalizedTerm('terms_conditions', docLang)}
                   </h4>
                   <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
-                    {quotation.terms_conditions!.trim().replace(
-                      /Quotation valid for \d+ days?/gi,
-                      `Quotation valid for ${validityDays} ${validityDays === 1 ? 'day' : 'days'}`
+                    {harmonizeTermsAndConditions(
+                      isAdvanceRequired ? quotation.advance_percentage : 0,
+                      quotation.terms_conditions!.trim().replace(
+                        /Quotation valid for \d+ days?/gi,
+                        validityDays > 0
+                          ? `Quotation valid for ${validityDays} ${validityDays === 1 ? 'day' : 'days'}`
+                          : 'Quotation valid on date of issue'
+                      )
                     )}
                   </p>
                 </div>
               )}
+            </div>
 
-              {(quotation.payment_terms_instructions ||
-                (quotation.advance_percentage !== undefined && quotation.advance_percentage !== null) ||
-                (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
-                (showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
-                (showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
-                (showCash && cashInstructions) ||
-                (showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url))) && (
-                <div className="rounded-xl bg-slate-50 p-4 sm:p-5 border border-slate-200/80 space-y-4">
-                  <div className="flex justify-between items-center text-slate-800 font-bold border-b border-slate-200/60 pb-2.5">
-                    <span className="flex items-center gap-2 text-xs uppercase tracking-wider">
-                      <CreditCard className="h-4 w-4 text-indigo-600" />
-                      <span>Payment & Remittance Instructions</span>
+            <div
+              className="w-full sm:w-5/12 space-y-2.5 rounded-xl bg-slate-50/70 p-5 border border-slate-200"
+              style={{ borderTop: `3px solid ${brandColor}` }}
+            >
+              <div className="flex justify-between text-xs text-slate-600">
+                <span>{taxMode === 'inclusive' ? `${getLocalizedTerm('subtotal', docLang)} (Taxable Amount)` : getLocalizedTerm('subtotal', docLang)}</span>
+                <span className="font-semibold text-slate-800">
+                  {formatCurrency(displaySubtotal, quotation.currency)}
+                </span>
+              </div>
+
+              {displayDiscount > 0 && (
+                <div className="flex justify-between text-xs text-rose-600">
+                  <span>
+                    {getLocalizedTerm('discount', docLang)} ({quotation.discount_type === 'PERCENTAGE' ? `${quotation.discount_value}%` : 'Fixed'})
+                  </span>
+                  <span className="font-semibold">
+                    -{formatCurrency(displayDiscount, quotation.currency)}
+                  </span>
+                </div>
+              )}
+
+              {displayTaxBreakdown.length > 0 ? (
+                displayTaxBreakdown.map((tb, idx) => (
+                  <div key={idx} className="flex justify-between text-xs text-slate-600">
+                    <span>{tb.label}</span>
+                    <span className="font-semibold text-slate-800">
+                      {formatCurrency(tb.amount, quotation.currency)}
                     </span>
-                    {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
-                      <span className="text-indigo-600 bg-indigo-100/70 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
-                        {quotation.advance_percentage}% Advance Required
-                      </span>
-                    )}
+                  </div>
+                ))
+              ) : displayTax > 0 ? (
+                <div className="flex justify-between text-xs text-slate-600">
+                  <span>
+                    {getLocalizedTerm('tax_amount', docLang, effectiveTaxName)} ({quotation.tax_rate || calculated.tax_rate}%{taxMode === 'inclusive' ? ' Included' : ''})
+                  </span>
+                  <span className="font-semibold text-slate-800">
+                    {formatCurrency(displayTax, quotation.currency)}
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
+                <span className="text-sm font-bold text-slate-900">{getLocalizedTerm('grand_total', docLang, 'Total Quotation Value')}</span>
+                <span className="text-xl font-extrabold" style={{ color: brandColor }}>
+                  {grandTotalFormatted}
+                </span>
+              </div>
+
+              {hasPaymentRecorded && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-200/80">
+                  <div className="flex justify-between text-xs text-emerald-700 font-semibold">
+                    <span>
+                      {getLocalizedTerm('paid_amount', docLang)}
+                      {isAdvanceRequired && quotation.advance_percentage ? ` (${quotation.advance_percentage}% Advance)` : ''}
+                    </span>
+                    <span>
+                      -{formatCurrency(
+                        quotation.paid_amount !== undefined
+                          ? quotation.paid_amount
+                          : (quotation.is_paid ? quotation.grand_total : 0),
+                        quotation.currency
+                      )}
+                    </span>
                   </div>
 
-                  {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="font-semibold text-slate-600 text-[11px]">Accepted:</span>
-                      {quotation.accepted_payment_methods.map((method: string) => (
-                        <span
-                          key={method}
-                          className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 text-[11px] font-medium"
-                        >
-                          {method}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex justify-between items-baseline pt-1 border-t border-dashed border-slate-200 text-xs">
+                    <span className="font-bold text-slate-900">{getLocalizedTerm('balance_due', docLang, 'Remaining Balance Due')}</span>
+                    <span
+                      className={`font-black text-sm ${
+                        (quotation.balance_amount === 0 || quotation.is_paid)
+                          ? 'text-emerald-700'
+                          : 'text-amber-700'
+                      }`}
+                    >
+                      {formatCurrency(
+                        quotation.balance_amount !== undefined
+                          ? quotation.balance_amount
+                          : (quotation.is_paid ? 0 : quotation.grand_total),
+                        quotation.currency
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
-                  {/* 1. Bank Transfer / Wire Details */}
+          {/* Full-Width Payment & Remittance Instructions (Expanded Matching Signature Card Width) */}
+          {(quotation.payment_terms_instructions ||
+            isAdvanceRequired ||
+            (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
+            (showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
+            (showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+            (!isIndia && showPaymentLink && paymentLinkUrl) ||
+            (showCash && cashInstructions) ||
+            (showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url))) && (
+            <div className="w-full rounded-2xl border border-slate-200/90 bg-slate-50/60 p-5 sm:p-6 space-y-4">
+              <div className="flex justify-between items-center text-slate-800 font-bold border-b border-slate-200/60 pb-2.5">
+                <span className="flex items-center gap-2 text-xs uppercase tracking-wider">
+                  <CreditCard className="h-4 w-4 text-indigo-600" />
+                  <span>Payment & Remittance Instructions</span>
+                </span>
+                {isAdvanceRequired && (
+                  <span className="text-indigo-600 bg-indigo-100/70 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                    {`${quotation.advance_percentage}% Advance Required`}
+                  </span>
+                )}
+              </div>
+
+              {/* Payment Milestone Schedule Breakdown (Only when advance payment is required) */}
+              {isAdvanceRequired && (
+                <div className="rounded-xl bg-white p-3.5 border border-indigo-100 shadow-2xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1 rounded-md bg-indigo-50 text-indigo-600">
+                        <Layers className="h-3.5 w-3.5" />
+                      </div>
+                      <h5 className="text-xs font-bold text-slate-900">
+                        Payment Schedule & Milestones
+                      </h5>
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                      {quotation.payment_terms_type === 'MILESTONES' ? '3-Stage Milestones' : 'Advance Split'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {(quotation.milestones && quotation.milestones.length > 0
+                      ? quotation.milestones
+                      : [
+                          {
+                            id: 'm1',
+                            name: `Stage 1: ${quotation.advance_percentage}% Advance Payment`,
+                            percentage: quotation.advance_percentage!,
+                            amount: (displayTotal * quotation.advance_percentage!) / 100,
+                            due_stage: 'To commence work upon approval',
+                          },
+                          {
+                            id: 'm2',
+                            name: `Stage 2: ${100 - quotation.advance_percentage!}% Balance on Delivery`,
+                            percentage: 100 - quotation.advance_percentage!,
+                            amount: (displayTotal * (100 - quotation.advance_percentage!)) / 100,
+                            due_stage: 'Upon project completion and delivery',
+                          },
+                        ]
+                    ).map((ms, msIdx) => (
+                      <div
+                        key={ms.id || msIdx}
+                        className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200/70 text-xs"
+                      >
+                        <div>
+                          <p className="font-bold text-slate-800">{ms.name}</p>
+                          {ms.due_stage && (
+                            <p className="text-[10px] text-slate-500">{ms.due_stage}</p>
+                          )}
+                        </div>
+                        <span className="font-mono font-bold text-slate-900">
+                          {formatCurrency(ms.amount, quotation.currency)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 2-Column Balanced Internal Grid for Remittance & Instant Payment */}
+              <div id="payment-details-section" className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                {/* Column 1: Bank Transfer Details / Online Payment Link */}
+                <div className="space-y-3">
                   {showBank && (bankInfo?.bank_name || bankInfo?.account_number) && (
                     <div className="rounded-xl bg-white p-3.5 border border-indigo-100 shadow-2xs space-y-2.5">
                       <div className="flex items-center justify-between">
@@ -1458,32 +1801,32 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                             <Landmark className="h-3.5 w-3.5" />
                           </div>
                           <h5 className="text-xs font-bold text-slate-900">
-                            Bank Transfer / Wire Remittance
+                            {getLocalizedTerm('bank_details', docLang, 'Bank Transfer / Wire Remittance')}
                           </h5>
                         </div>
                         <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-                          Bank Details
+                          {getLocalizedTerm('bank_details', docLang, 'Bank Details')}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs pt-1">
                         {bankInfo.bank_name && (
                           <div>
-                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Bank Name</span>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">{getLocalizedTerm('bank_name', docLang)}</span>
                             <span className="font-semibold text-slate-800">{bankInfo.bank_name}</span>
                           </div>
                         )}
 
                         {bankInfo.account_name && (
                           <div>
-                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Account Name</span>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">{getLocalizedTerm('account_name', docLang)}</span>
                             <span className="font-semibold text-slate-800">{bankInfo.account_name}</span>
                           </div>
                         )}
 
                         {bankInfo.account_number && (
                           <div>
-                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">Account Number / IBAN</span>
+                            <span className="text-[10px] text-slate-400 font-semibold block uppercase">{getLocalizedTerm('account_number', docLang, 'Account Number / IBAN')}</span>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="font-mono font-bold text-slate-900 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
                                 {bankInfo.account_number}
@@ -1560,7 +1903,70 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                     </div>
                   )}
 
-                  {/* 2. UPI Payment ID & Attached QR Code */}
+                  {!isIndia && showPaymentLink && paymentLinkUrl && (
+                    <div className="rounded-xl bg-white p-3.5 border border-blue-100 shadow-2xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 rounded-md bg-blue-50 text-blue-600">
+                            <CreditCard className="h-3.5 w-3.5" />
+                          </div>
+                          <h5 className="text-xs font-bold text-slate-900">
+                            Online Payment Link (Card / Stripe / PayPal)
+                          </h5>
+                        </div>
+                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                          Instant Checkout
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                        <div className="space-y-1 text-xs">
+                          <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+                            Official Checkout Link
+                          </span>
+                          <span className="font-mono text-xs font-semibold text-slate-800 break-all line-clamp-1">
+                            {paymentLinkUrl}
+                          </span>
+                          <p className="text-[11px] text-slate-500">
+                            Click to pay securely via Credit/Debit Card, Stripe, PayPal, or Wise.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(paymentLinkUrl, 'payment_link')}
+                            className="p-2 rounded-lg hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-300 bg-white shadow-2xs flex items-center gap-1.5 text-xs font-semibold"
+                            title="Copy Payment Link"
+                          >
+                            {copiedField === 'payment_link' ? (
+                              <>
+                                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                <span className="text-emerald-700">Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3.5 w-3.5" />
+                                <span>Copy Link</span>
+                              </>
+                            )}
+                          </button>
+                          <a
+                            href={paymentLinkUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                          >
+                            <span>{paymentLinkLabel || 'Pay Online'}</span>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Column 2: UPI Payment & QR Code / Crypto / Cash */}
+                <div className="space-y-3">
                   {showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url) && (
                     <div className="rounded-xl bg-white p-3.5 border border-emerald-100 shadow-2xs space-y-3">
                       <div className="flex items-center justify-between">
@@ -1589,7 +1995,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                               <img
                                 src={upiQrSrc}
                                 alt="Scan UPI QR Code"
-                                className="h-36 w-36 object-contain rounded-lg bg-white p-1 shadow-2xs"
+                                className="h-32 w-32 object-contain rounded-lg bg-white p-1 shadow-2xs"
                                 onError={(e) => {
                                   if (upiInfo.upi_id && !e.currentTarget.src.includes('api.qrserver.com')) {
                                     e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || 'SUBESH M LLC')}&cu=INR`)}`;
@@ -1641,12 +2047,23 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                           <p className="text-[11px] text-slate-500 pt-1">
                             Compatible with Google Pay, PhonePe, Paytm, BHIM, Cred, and mobile banking apps.
                           </p>
+
+                          {upiInfo.upi_id && !isPaid && (
+                            <div className="pt-2">
+                              <a
+                                href={`upi://pay?pa=${upiInfo.upi_id}&pn=${encodeURIComponent(upiInfo.payee_name || org?.name || 'QuoteFlow')}&am=${amountDueForUpi}&cu=INR&tn=${encodeURIComponent(`Quotation ${quotation.quotation_number}`)}`}
+                                className="w-full inline-flex items-center justify-center gap-2 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm transition-all active:scale-[0.98]"
+                              >
+                                <Smartphone className="h-4 w-4" />
+                                <span>⚡ Tap to Pay ₹{amountDueForUpi.toLocaleString()} via UPI App</span>
+                              </a>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
                   )}
 
-                  {/* 3. Crypto Payment Options */}
                   {showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url) && (
                     <div className="rounded-xl bg-white p-3.5 border border-amber-100 shadow-2xs space-y-3">
                       <div className="flex items-center justify-between">
@@ -1675,7 +2092,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                               <img
                                 src={cryptoQrSrc}
                                 alt="Scan Crypto QR Code"
-                                className="h-32 w-32 object-contain rounded-lg bg-white p-1 shadow-2xs"
+                                className="h-28 w-28 object-contain rounded-lg bg-white p-1 shadow-2xs"
                                 onError={(e) => {
                                   if (cryptoInfo.wallet_address && !e.currentTarget.src.includes('api.qrserver.com')) {
                                     e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(cryptoInfo.wallet_address)}`;
@@ -1683,7 +2100,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                                 }}
                               />
                               <span className="text-[10px] font-bold text-slate-600 text-center">
-                                Scan Wallet Address
+                                Scan Wallet
                               </span>
                             </div>
                           ) : null;
@@ -1723,7 +2140,6 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                     </div>
                   )}
 
-                  {/* 4. Cash Payment / Counter Handover */}
                   {showCash && cashInstructions && (
                     <div className="rounded-xl bg-white p-3.5 border border-amber-100 shadow-2xs space-y-2">
                       <div className="flex items-center justify-between">
@@ -1744,104 +2160,21 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                       </p>
                     </div>
                   )}
-
-                  {quotation.payment_terms_instructions && (
-                    <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed pt-1">
-                      {quotation.payment_terms_instructions}
-                    </p>
-                  )}
                 </div>
-              )}
-            </div>
-
-            <div className="w-full sm:w-5/12 space-y-2.5 rounded-xl bg-slate-50/70 p-5 border border-slate-200">
-              <div className="flex justify-between text-xs text-slate-600">
-                <span>{taxMode === 'inclusive' ? 'Subtotal (Taxable Amount)' : 'Subtotal'}</span>
-                <span className="font-semibold text-slate-800">
-                  {formatCurrency(displaySubtotal, quotation.currency)}
-                </span>
               </div>
 
-              {displayDiscount > 0 && (
-                <div className="flex justify-between text-xs text-rose-600">
-                  <span>
-                    Discount ({quotation.discount_type === 'PERCENTAGE' ? `${quotation.discount_value}%` : 'Fixed'})
-                  </span>
-                  <span className="font-semibold">
-                    -{formatCurrency(displayDiscount, quotation.currency)}
-                  </span>
-                </div>
-              )}
-
-              {displayTaxBreakdown.length > 0 ? (
-                displayTaxBreakdown.map((tb, idx) => (
-                  <div key={idx} className="flex justify-between text-xs text-slate-600">
-                    <span>{tb.label}</span>
-                    <span className="font-semibold text-slate-800">
-                      {formatCurrency(tb.amount, quotation.currency)}
-                    </span>
-                  </div>
-                ))
-              ) : displayTax > 0 ? (
-                <div className="flex justify-between text-xs text-slate-600">
-                  <span>
-                    {quotation.tax_name || org?.tax_label || 'Tax'} ({quotation.tax_rate}%{taxMode === 'inclusive' ? ' Included' : ''})
-                  </span>
-                  <span className="font-semibold text-slate-800">
-                    {formatCurrency(displayTax, quotation.currency)}
-                  </span>
-                </div>
-              ) : null}
-
-              <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
-                <span className="text-sm font-bold text-slate-900">Total Quotation Value</span>
-                <span className="text-xl font-extrabold text-indigo-700">
-                  {grandTotalFormatted}
-                </span>
-              </div>
-
-              {hasPaymentRecorded && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-200/80">
-                  <div className="flex justify-between text-xs text-emerald-700 font-semibold">
-                    <span>
-                      Amount Paid
-                      {quotation.advance_percentage ? ` (${quotation.advance_percentage}% Advance)` : ''}
-                    </span>
-                    <span>
-                      -{formatCurrency(
-                        quotation.paid_amount !== undefined
-                          ? quotation.paid_amount
-                          : (quotation.is_paid ? quotation.grand_total : 0),
-                        quotation.currency
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-baseline pt-1 border-t border-dashed border-slate-200 text-xs">
-                    <span className="font-bold text-slate-900">Remaining Balance Due</span>
-                    <span
-                      className={`font-black text-sm ${
-                        (quotation.balance_amount === 0 || quotation.is_paid)
-                          ? 'text-emerald-700'
-                          : 'text-amber-700'
-                      }`}
-                    >
-                      {formatCurrency(
-                        quotation.balance_amount !== undefined
-                          ? quotation.balance_amount
-                          : (quotation.is_paid ? 0 : quotation.grand_total),
-                        quotation.currency
-                      )}
-                    </span>
-                  </div>
-                </div>
+              {/* Harmonized Payment Terms Instruction at bottom of card */}
+              {harmonizedPaymentTerms && (
+                <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed pt-2 border-t border-slate-200/60">
+                  {harmonizedPaymentTerms}
+                </p>
               )}
             </div>
-          </div>
+          )}
 
-          {/* Payment Status, Official Receipt Download & Invoice Policy Card */}
+          {/* Payment Status & Commercial Tax Invoice Policy Card */}
           {hasPaymentRecorded && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4 shadow-xs">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3 shadow-xs">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div
@@ -1860,7 +2193,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   <div>
                     <h4 className="text-sm font-bold text-slate-900">
                       {isPaymentConfirmed
-                        ? 'Payment Confirmed by Company'
+                        ? 'Payment Confirmed by Company Finance'
                         : 'Payment Verification in Progress'}
                     </h4>
                     <p className="text-xs text-slate-500">
@@ -1868,27 +2201,21 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                         ? `Official payment of ${formatCurrency(
                             quotation.paid_amount || (quotation.is_paid ? quotation.grand_total : 0),
                             quotation.currency
-                          )} has been confirmed and verified by company finance.`
-                        : `Payment has been logged and is currently awaiting verification by company finance before official receipt download is unlocked.`}
+                          )} has been confirmed and verified.`
+                        : `Payment has been logged and is awaiting verification by company finance before official receipt download is unlocked.`}
                     </p>
                   </div>
                 </div>
 
                 {isPaymentConfirmed ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownloadReceipt}
-                    isLoading={isDownloadingReceipt}
-                    className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 shrink-0 font-medium"
-                  >
-                    <Download className="h-4 w-4 text-emerald-600" />
-                    <span>Download Payment Receipt</span>
-                  </Button>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold shrink-0">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    <span>Payment Verified</span>
+                  </div>
                 ) : (
                   <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 font-medium shrink-0 flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5" />
-                    <span>Receipt available after company verification</span>
+                    <span>Verification in progress</span>
                   </div>
                 )}
               </div>
@@ -1969,7 +2296,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           )}
 
           {/* Footer Note */}
-          <div className="pt-6 border-t border-slate-100 text-center text-xs text-slate-500">
+          <div className="pt-6 border-t border-slate-100 text-center text-xs text-slate-500 space-y-2">
             <p className="font-medium">
               {(() => {
                 const companyName = org?.name || 'our company';
@@ -1980,23 +2307,32 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               })()}
             </p>
             <p className="mt-1 text-[11px] text-slate-400">
-              Powered by QuoteFlow Digital Approval Platform
+              Powered by{' '}
+              <a
+                href="https://www.blendandbold.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-slate-500 hover:text-indigo-600 transition-colors underline decoration-slate-300 hover:decoration-indigo-500 underline-offset-2 inline-flex items-center gap-0.5 cursor-pointer"
+              >
+                QuoteFlow Digital Approval Platform
+                <ExternalLink className="h-2.5 w-2.5 ml-0.5 opacity-60 inline" />
+              </a>
             </p>
           </div>
         </div>
 
         {/* Bottom CTA ("down side") */}
         {canTakeAction ? (
-          <div className="rounded-2xl bg-indigo-600 p-6 text-white text-center shadow-xl space-y-4">
-            <h3 className="text-lg font-bold">Ready to approve this quotation?</h3>
-            <p className="text-xs sm:text-sm text-indigo-100 max-w-md mx-auto">
+          <div className="rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 p-7 sm:p-9 text-white text-center shadow-xl space-y-4">
+            <h3 className="text-xl sm:text-2xl font-black tracking-tight">Ready to approve this quotation?</h3>
+            <p className="text-xs sm:text-sm text-indigo-100 max-w-md mx-auto leading-relaxed">
               You can digitally sign with touch or mouse. No account creation or login required.
             </p>
-            <div className="flex flex-wrap justify-center gap-3">
+            <div className="flex flex-wrap justify-center items-center gap-3 pt-1">
               <Button
                 variant="outline"
                 onClick={openChatPopup}
-                className="relative bg-white/10 text-white border-white/20 hover:bg-white/20"
+                className="relative rounded-2xl bg-white/10 text-white border-white/20 hover:bg-white/20 font-bold text-xs px-4 py-2"
               >
                 <MessageSquare className="h-4 w-4 mr-1.5" />
                 Chat
@@ -2007,13 +2343,26 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                   </span>
                 )}
               </Button>
+
+              {!isIndia && showPaymentLink && paymentLinkUrl && !isPaid && (
+                <a
+                  href={paymentLinkUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm shadow-lg hover:shadow-xl transition-all cursor-pointer"
+                >
+                  <CreditCard className="h-4 w-4" />
+                  <span>Pay Now ({grandTotalFormatted})</span>
+                  <ExternalLink className="h-4 w-4 opacity-80" />
+                </a>
+              )}
+
               <Button
-                variant="success"
                 onClick={() => setIsApprovalOpen(true)}
-                className="font-bold text-sm px-6 shadow-lg"
+                className="gap-2 rounded-2xl bg-white text-indigo-700 hover:bg-white/95 font-black text-sm px-6 py-2.5 shadow-lg shadow-black/10 transition-all active:scale-95 cursor-pointer"
               >
-                <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                Sign & Approve Quotation
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                Sign &amp; Approve Quotation
               </Button>
             </div>
           </div>
@@ -2023,7 +2372,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               {isPaid
                 ? 'Quotation Settled & Fully Paid'
                 : isCompleted
-                  ? 'Quotation Scope Completed'
+                  ? 'Work is Done • Ready for Payment'
                   : quotation.status === 'IN_PROGRESS'
                     ? 'Work In Progress'
                     : isExpired
@@ -2038,7 +2387,7 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
               {isPaid
                 ? 'Your payment has been received and confirmed. Contact us anytime if you need receipts or assistance.'
                 : isCompleted
-                  ? 'This quotation lifecycle is completed and locked. Reach out to our team via chat anytime.'
+                  ? 'All deliverables for this quotation have been completed by our team! Please proceed with payment below to finalize settlement.'
                   : quotation.status === 'IN_PROGRESS'
                     ? 'This quotation is actively in progress. The team is fulfilling deliverables. Reach out via chat anytime.'
                     : isExpired
@@ -2047,7 +2396,32 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
                         ? 'This quotation has been officially approved. You can track progress, download documents, or chat with our team.'
                         : `Click Chat below to open the live chat box with ${org?.name || 'our team'}.`}
             </p>
-            <div className="flex justify-center">
+            <div className="flex flex-wrap justify-center items-center gap-3">
+              {paymentLinkUrl && !isPaid && (
+                <a
+                  href={paymentLinkUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm shadow-lg hover:shadow-xl transition-all cursor-pointer"
+                >
+                  <CreditCard className="h-4 w-4" />
+                  <span>Pay Now ({grandTotalFormatted})</span>
+                  <ExternalLink className="h-4 w-4 opacity-80" />
+                </a>
+              )}
+              {isCompleted && !isPaid && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const el = document.getElementById('payment-details-section') || document.getElementById('quotation-sheet');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700 font-bold px-5 shadow-md"
+                >
+                  <CreditCard className="h-4 w-4 mr-1.5" />
+                  <span>View Payment Details</span>
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={openChatPopup}
@@ -2065,6 +2439,11 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
             </div>
           </div>
         )}
+
+        {/* Page-level Portal Footer */}
+        <div className="mt-8 pt-4 pb-2 border-t border-slate-200/70 text-center text-xs text-slate-400 flex items-center justify-center">
+          <p className="text-[11px] font-medium text-slate-500">QuoteFlow 24/7 Digital Approval Platform</p>
+        </div>
       </div>
 
       {/* Compact Floating Chat Button (when popup is closed) */}
@@ -2120,6 +2499,18 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
           </div>
 
           <div className="p-3.5 space-y-2.5">
+            {businessWhatsAppUrl && (
+              <a
+                href={businessWhatsAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1.5 w-full py-1.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-semibold transition-all shadow-2xs"
+              >
+                <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Chat on Official WhatsApp</span>
+                <ExternalLink className="h-3 w-3 opacity-60 ml-0.5" />
+              </a>
+            )}
             <div className="h-64 overflow-y-auto space-y-2.5 rounded-xl bg-slate-50 p-3 border border-slate-100">
               {chatMessages.length === 0 ? (
                 <div className="py-12 text-center text-xs text-slate-400">
@@ -2307,11 +2698,12 @@ export function PublicQuoteView({ initialQuotation, allQuotations, token }: Publ
         grandTotalFormatted={grandTotalFormatted}
         token={currentToken}
         authMethod={authMethod}
-        customerName={customer?.name}
-        customerEmail={customer?.email}
-        customerPhone={customer?.phone}
-        phoneCountryCode={phoneCountryCode}
-        customerCompany={customer?.company_name}
+        customerName={customer?.name || ''}
+        customerEmail={customer?.email || ''}
+        customerPhone={customer?.phone || ''}
+        phoneCountryCode={phoneCountryCode || '+91'}
+        customerCompany={customer?.company_name || ''}
+        selectedOptionalItemIds={Array.from(selectedOptionalIds)}
         onApproved={handleApproved}
       />
 

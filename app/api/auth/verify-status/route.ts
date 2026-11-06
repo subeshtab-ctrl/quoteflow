@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Auth service unavailable' }, { status: 500 });
     }
 
-    const { data: listData, error } = await admin.auth.admin.listUsers();
+    const { data: listData, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
     if (error || !listData) {
       return NextResponse.json({ verified: false }, { status: 200 });
     }
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     );
 
     if (!matchedUser) {
-      return NextResponse.json({ exists: false, verified: false }, { status: 200 });
+      return NextResponse.json({ verified: false }, { status: 200 });
     }
 
     const isVerified = Boolean(
@@ -38,9 +38,7 @@ export async function GET(req: NextRequest) {
     );
 
     return NextResponse.json({
-      exists: true,
       verified: isVerified,
-      email: matchedUser.email,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

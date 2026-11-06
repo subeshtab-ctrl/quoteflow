@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf-generator';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { getSanitizedPdfFilename } from '@/lib/quotations/calculations';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -13,7 +14,10 @@ export async function GET(
   try {
     const { id } = await params;
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
 
     // 1. Try finding invoice by direct invoice ID
     let invoice = await store.getInvoiceById(id, orgId);
@@ -44,12 +48,23 @@ export async function GET(
     }
 
     const pdfBytes = await generateInvoicePdf(invoice);
+    const isIndia = Boolean(
+      (org?.business_country || '').toUpperCase() === 'IN' ||
+      (org?.country || '').toLowerCase() === 'india' ||
+      invoice.currency === 'INR'
+    );
+    const filename = getSanitizedPdfFilename(
+      invoice.document_type,
+      invoice.invoice_number,
+      invoice.status,
+      isIndia && org?.gst_registered !== false
+    );
 
     return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="Invoice-${invoice.invoice_number}.pdf"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'no-cache',
       },
     });

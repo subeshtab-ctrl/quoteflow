@@ -10,6 +10,32 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
+  // Strict Admin route protection
+  const isAdminApiRoute = pathname.startsWith('/api/admin/') && !pathname.startsWith('/api/admin/auth/');
+  const isDeveloperAdminPageRoute = pathname.startsWith('/developer-admin');
+
+  if (isAdminApiRoute || isDeveloperAdminPageRoute) {
+    const adminCookie = request.cookies.get('qf_dev_admin_session')?.value;
+    let isValidAdmin = false;
+    if (adminCookie) {
+      const parts = adminCookie.split(':');
+      if (parts.length >= 3) {
+        const ts = parseInt(parts[1], 10);
+        // Valid for up to 8 hours (active session)
+        if (!isNaN(ts) && Date.now() - ts < 8 * 60 * 60 * 1000) {
+          isValidAdmin = true;
+        }
+      }
+    }
+
+    if (!isValidAdmin) {
+      if (isAdminApiRoute) {
+        return NextResponse.json({ error: 'Unauthorized admin access.' }, { status: 401 });
+      }
+      return NextResponse.redirect(new URL('/admin', request.url));
+    }
+  }
+
   // Protected application paths that require valid user authentication
   const isProtectedPath =
     pathname.startsWith('/dashboard') ||
@@ -23,7 +49,6 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/settings') ||
     pathname.startsWith('/templates') ||
     pathname.startsWith('/test') ||
-    pathname.startsWith('/admin') ||
     pathname.startsWith('/billing');
 
   // Auth pages (login, register, forgot-password)
@@ -166,7 +191,6 @@ export const config = {
     '/settings/:path*',
     '/templates/:path*',
     '/test/:path*',
-    '/admin/:path*',
     '/billing/:path*',
     '/login',
     '/register',

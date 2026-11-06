@@ -8,7 +8,10 @@ export const revalidate = 0;
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || DEFAULT_ORG_ID;
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
 
     const nextInvoiceNumber = await store.peekNextInvoiceNumber(orgId);
 

@@ -17,12 +17,22 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') || undefined;
     const search = searchParams.get('search') || undefined;
+    const country = searchParams.get('country') || undefined;
+    const region = searchParams.get('region') || undefined;
+    const gateway = searchParams.get('gateway') || undefined;
+    const currency = searchParams.get('currency') || undefined;
+    const plan = searchParams.get('plan') || undefined;
     const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const limit = parseInt(searchParams.get('limit') || '50', 10);
 
     const result = await store.getAllSubscribers({
       status,
       search,
+      country,
+      region,
+      gateway,
+      currency,
+      plan,
       page,
       limit,
     });

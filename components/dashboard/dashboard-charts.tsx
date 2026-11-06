@@ -78,12 +78,12 @@ export function DashboardCharts({ monthlyData = [], currency = 'INR' }: Dashboar
     <div className="space-y-4">
       {/* Timeframe Filter Buttons */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-[11px] font-semibold">
+        <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800/80 text-[11px] font-semibold">
           {(['7D', '30D', '3M', '6M', '1Y'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTimeframe(t)}
-              className={`px-2.5 py-1 rounded-lg transition-all ${
+              className={`px-3 py-1.5 rounded-xl transition-all ${
                 timeframe === t
                   ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold'
                   : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -175,7 +175,7 @@ interface DonutChartProps {
   winRate: number;
 }
 
-const DONUT_COLORS = ['#10b981', '#f59e0b', '#94a3b8', '#f43f5e'];
+const DONUT_COLORS = ['#10b981', '#6366f1', '#0ea5e9', '#8b5cf6'];
 
 export function DashboardDonutChart({ distribution, totalCount, winRate }: DonutChartProps) {
   const data = [

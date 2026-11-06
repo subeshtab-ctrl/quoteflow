@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService } from '@/lib/billing/subscription-service';
+import { isOwnerOrAdminRole } from '@/types/staff';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,7 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (auth.role === 'STAFF') {
+    if (!isOwnerOrAdminRole(auth.role)) {
       return NextResponse.json(
         { error: 'Only account Owners and Admins can reactivate subscriptions' },
         { status: 403 }

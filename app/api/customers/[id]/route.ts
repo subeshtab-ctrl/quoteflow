@@ -10,7 +10,10 @@ interface RouteProps {
 
 export async function GET(req: NextRequest, { params }: RouteProps) {
   const auth = await getAuthenticatedUserContext();
-  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  if (!auth || !auth.orgId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const orgId = auth.orgId;
   const { id } = await params;
   const customer = await store.getCustomerById(id, orgId);
   if (!customer) {
@@ -22,10 +25,13 @@ export async function GET(req: NextRequest, { params }: RouteProps) {
 export async function PUT(req: NextRequest, { params }: RouteProps) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
     const body = await req.json();
-    const updated = await store.updateCustomer(id, { ...body, organization_id: orgId });
+    const updated = await store.updateCustomer(id, { ...body, organization_id: orgId }, orgId);
     return NextResponse.json({ success: true, customer: updated });
   } catch (err: any) {
     console.error('Error updating customer:', err);
@@ -39,7 +45,10 @@ export async function PUT(req: NextRequest, { params }: RouteProps) {
 export async function DELETE(req: NextRequest, { params }: RouteProps) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
     await store.deleteCustomer(id, orgId);
     return NextResponse.json({ success: true, message: 'Customer deleted successfully' });

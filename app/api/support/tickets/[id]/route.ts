@@ -85,7 +85,7 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}));
-    const { message, attachments } = body;
+    const { message, attachments, sendWhatsAppNotification } = body;
 
     if (!message?.trim()) {
       return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 });
@@ -103,7 +103,43 @@ export async function POST(
       attachments: attachments || [],
     });
 
-    return NextResponse.json({ success: true, message: newMsg });
+    let whatsappNotificationSent = false;
+    let whatsappMessageId: string | undefined;
+
+    if (isDeveloper && sendWhatsAppNotification) {
+      try {
+        const { sendAdminSupportWhatsAppMessage } = await import('@/lib/whatsapp/admin-whatsapp-service');
+        let recipientPhone = ticket.callback_phone || (ticket as any).business_phone;
+        if (!recipientPhone) {
+          const org = await store.getOrganization(ticket.business_id);
+          recipientPhone = (org as any)?.phone || (org as any)?.contact_phone || (org as any)?.billing_phone;
+        }
+
+        if (recipientPhone) {
+          const waRes = await sendAdminSupportWhatsAppMessage({
+            recipientPhone,
+            businessName: (ticket as any).business_name || 'Valued Business',
+            ticketNumber: ticket.ticket_number,
+            ticketId: ticket.id,
+            replyMessage: message.trim(),
+            useTemplate: false,
+          });
+          if (waRes.success) {
+            whatsappNotificationSent = true;
+            whatsappMessageId = waRes.messageId;
+          }
+        }
+      } catch (waErr) {
+        console.warn('[Support WhatsApp Notification] Failed to dispatch WhatsApp:', waErr);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: newMsg,
+      whatsappNotificationSent,
+      whatsappMessageId,
+    });
   } catch (err: any) {
     console.error('Error replying to ticket:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

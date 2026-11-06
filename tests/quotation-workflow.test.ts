@@ -84,9 +84,9 @@ describe('End-to-End Quotation Workflow & Audit Lifecycle', () => {
       store.updateQuotation(approved.id, { title: 'Modified Title After Approval' })
     ).rejects.toThrow('Approved quotation is immutable');
 
-    // 7. Revision Workflow: Create Revision V2
+    // 7. Revision Workflow: Create Revision REV1
     const revision = await store.createQuotationRevision(approved.id);
-    expect(revision.quotation_number).toBe(`${approved.quotation_number}-V2`);
+    expect(revision.quotation_number).toBe(`${approved.quotation_number}-REV1`);
     expect(revision.revision_number).toBe(2);
     expect(revision.status).toBe('DRAFT');
     expect(revision.original_quotation_id).toBe(approved.id);
@@ -94,6 +94,35 @@ describe('End-to-End Quotation Workflow & Audit Lifecycle', () => {
     // Original approved quote remains unchanged
     const originalAfterRevision = await store.getQuotationById(approved.id);
     expect(originalAfterRevision?.status).toBe('APPROVED');
+
+    // 7b. Modification Workflow: Modifying quotation rates or items automatically adds -REV
+    const quoteToEdit = await store.createQuotation({
+      customer_id: customer.id,
+      title: 'Original Project Setup',
+      issue_date: new Date().toISOString().split('T')[0],
+      valid_until: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      currency: 'INR',
+      items: [{ description: 'Item 1', quantity: 1, unit: 'hrs', unit_price: 1000 }],
+    });
+    expect(quoteToEdit.quotation_number).not.toContain('-REV');
+
+    const editedQuote = await store.updateQuotation(quoteToEdit.id, {
+      title: 'Updated Project Scope & Setup',
+      items: [
+        { description: 'Item 1', quantity: 1, unit: 'hrs', unit_price: 1000 },
+        { description: 'Item 2 Added', quantity: 2, unit: 'hrs', unit_price: 1500 },
+      ],
+    });
+    expect(editedQuote.quotation_number).toBe(`${quoteToEdit.quotation_number}-REV1`);
+    expect(editedQuote.revision_number).toBe(2);
+
+    // Second edit increments revision to REV2
+    const secondEditQuote = await store.updateQuotation(quoteToEdit.id, {
+      title: 'Finalized Project Scope',
+      discount_value: 500,
+    });
+    expect(secondEditQuote.quotation_number).toBe(`${quoteToEdit.quotation_number}-REV2`);
+    expect(secondEditQuote.revision_number).toBe(3);
 
     // 8. Rejection Workflow on another quotation
     const quoteForReject = await store.createQuotation({

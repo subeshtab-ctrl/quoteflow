@@ -20,6 +20,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { InvoicesFilterTabs } from '@/components/invoices/invoices-filter-tabs';
+import { InvoiceRowActions } from '@/components/invoices/invoice-row-actions';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 
 interface InvoicesPageProps {
@@ -33,11 +34,22 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
   const { status, search } = await searchParams;
   const auth = await getAuthenticatedUserContext();
   const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  const canManage = (auth?.role || 'ADMIN') === 'OWNER' || (auth?.role || 'ADMIN') === 'ADMIN';
 
   const organization = await store.getOrganization(orgId);
   const env = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';
 
-  const invoices = await store.getInvoices(orgId, { status, search, environment: env });
+  const allEnvInvoices = await store.getInvoices(orgId, { search, environment: env });
+  const draftCount = allEnvInvoices.filter((inv) => inv.status === 'DRAFT').length;
+
+  const rawInvoices =
+    status && status !== 'ALL'
+      ? allEnvInvoices.filter((inv) => inv.status === status)
+      : allEnvInvoices;
+  const invoices =
+    !status || status === 'ALL'
+      ? rawInvoices.filter((inv) => inv.status !== 'DRAFT')
+      : rawInvoices;
 
   return (
     <DashboardLayout>
@@ -68,7 +80,37 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
         <InvoicesFilterTabs
           currentStatus={status || 'ALL'}
           currentSearch={search || ''}
+          draftCount={draftCount}
         />
+
+        {/* Drafts Notice / Context Banner */}
+        {(!status || status === 'ALL') && draftCount > 0 && (
+          <div className="rounded-xl p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>
+                You have <strong>{draftCount}</strong> draft {draftCount === 1 ? 'invoice' : 'invoices'} in the <strong>Drafts</strong> tab. Issue a draft invoice to move it to your official Invoices list.
+              </span>
+            </div>
+            <Link
+              href="/invoices?status=DRAFT"
+              className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+            >
+              View Drafts ({draftCount}) →
+            </Link>
+          </div>
+        )}
+
+        {status === 'DRAFT' && (
+          <div className="rounded-xl p-3 bg-slate-100 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-700 dark:text-slate-300">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-indigo-500 shrink-0" />
+              <span>
+                <strong>Draft Invoices:</strong> Drafts include a <strong>DRAFT</strong> watermark when printed or downloaded. Click <strong>Issue Invoice</strong> on any draft to officially issue it and move it to Invoices.
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Invoices Table */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 shadow-sm overflow-hidden">
@@ -182,16 +224,13 @@ export default async function InvoicesPage({ searchParams }: InvoicesPageProps) 
                         <InvoiceStatusBadge status={inv.status} />
                       </td>
                       <td className="py-4 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Link href={`/invoices/${inv.id}`}>
-                            <button
-                              className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600"
-                              title="View Invoice & Print"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                          </Link>
-                        </div>
+                        <InvoiceRowActions
+                          invoiceId={inv.id}
+                          invoiceNumber={inv.invoice_number}
+                          status={inv.status}
+                          environment={inv.environment}
+                          canManage={canManage}
+                        />
                       </td>
                     </tr>
                   ))

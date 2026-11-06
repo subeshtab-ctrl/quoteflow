@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { generateQuotationPdf } from '@/lib/pdf/generator';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { getSanitizedPdfFilename } from '@/lib/quotations/calculations';
 
 export async function GET(req: NextRequest) {
   try {
@@ -172,12 +173,24 @@ export async function GET(req: NextRequest) {
     }
 
     const pdfBytes = await generateQuotationPdf(quote);
+    const org = quote.organization;
+    const isIndia = Boolean(
+      (org?.business_country || '').toUpperCase() === 'IN' ||
+      (org?.country || '').toLowerCase() === 'india' ||
+      quote.currency === 'INR'
+    );
+    const filename = getSanitizedPdfFilename(
+      (quote as any).document_type || 'quotation',
+      quote.quotation_number,
+      quote.status,
+      isIndia && org?.gst_registered !== false
+    );
 
     return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="Quotation-${quote.quotation_number}.pdf"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'no-cache',
       },
     });

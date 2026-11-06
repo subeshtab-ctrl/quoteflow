@@ -22,6 +22,8 @@ export default async function ProductsPage() {
       <ProductsClientView
         initialProducts={products}
         currency={organization?.default_currency || 'USD'}
+        organization={organization || undefined}
+        country={organization?.country || (organization as any)?.business_country || undefined}
       />
     </DashboardLayout>
   );

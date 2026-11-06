@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Quotation, Organization, Customer, TaxMode } from '@/types/database';
 import { formatCurrency, calculateQuotationTotals, isValidDocumentText } from '@/lib/quotations/calculations';
+import { getCountryProfile } from '@/lib/tax/country-config';
 import { INDIAN_STATES } from '@/lib/tax/india-gst';
 import { formatDate } from '@/lib/utils';
 import { Modal } from '@/components/ui/modal';
@@ -71,6 +72,19 @@ export function InvoiceModal({
 
   // Active view tab: 'preview' | 'edit'
   const [activeTab, setActiveTab] = useState<'preview' | 'edit'>('preview');
+
+  // Document Type: Tax Invoice, Proforma Invoice, Delivery Note
+  const [documentType, setDocumentType] = useState<'tax_invoice' | 'proforma_invoice' | 'delivery_note' | 'delivery_challan'>('tax_invoice');
+
+  const handleDocumentTypeChange = (newType: 'tax_invoice' | 'proforma_invoice' | 'delivery_note') => {
+    setDocumentType(newType);
+    setInvoiceNumber((prev) => {
+      const cleanNum = prev.replace(/^(INV|PI|DN|DC)-/, '');
+      if (newType === 'proforma_invoice') return `PI-${cleanNum}`;
+      if (newType === 'delivery_note') return `DN-${cleanNum}`;
+      return `INV-${cleanNum}`;
+    });
+  };
 
   // Editable Invoice Fields
   const [invoiceNumber, setInvoiceNumber] = useState(`INV-${quotation.quotation_number.replace(/^Q-/, '')}`);
@@ -186,6 +200,7 @@ export function InvoiceModal({
             const match = data.invoices.find((inv: any) => inv.quotation_id === quotation.id);
             if (match) {
               setInvoiceId(match.id);
+              if (match.document_type) setDocumentType(match.document_type);
               if (match.invoice_number) setInvoiceNumber(match.invoice_number);
               if (match.issue_date) setInvoiceDate(match.issue_date.split('T')[0]);
               if (match.due_date) setDueDate(match.due_date.split('T')[0]);
@@ -357,6 +372,33 @@ export function InvoiceModal({
     }
   }, [isOpen, quotation, customer, organization]);
 
+  const countryNameOrCode = organization?.country || organization?.business_country || '';
+
+  const isIndia = Boolean(
+    (organization?.business_country || '').toUpperCase() === 'IN' ||
+    (organization?.country || '').toLowerCase() === 'india' ||
+    (organization?.country || '').toUpperCase() === 'IN' ||
+    organization?.billing_region === 'INDIA' ||
+    currency === 'INR' ||
+    organization?.default_currency === 'INR'
+  );
+
+  const isUAE = Boolean(
+    (organization?.business_country || '').toUpperCase() === 'AE' ||
+    (organization?.country || '').toLowerCase().includes('emirates') ||
+    (organization?.country || '').toLowerCase() === 'uae' ||
+    currency === 'AED' ||
+    organization?.default_currency === 'AED'
+  );
+
+  const countryProfile = getCountryProfile(countryNameOrCode || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US')));
+
+  const effectiveTaxName = !isIndia
+    ? (quotation.tax_name && !quotation.tax_name.toUpperCase().includes('GST')
+        ? quotation.tax_name
+        : (isUAE ? 'VAT' : (organization?.tax_label && !organization?.tax_label.toUpperCase().includes('GST') ? organization.tax_label : 'Tax')))
+    : (quotation.tax_name || organization?.tax_label || 'GST');
+
   // Centralized Tax Calculations
   const calculated = calculateQuotationTotals(
     items.map((it) => ({
@@ -368,11 +410,10 @@ export function InvoiceModal({
     Number(discountValue) || 0,
     {
       taxMode,
-      taxName: quotation.tax_name || organization?.tax_label || 'GST',
-      isIndiaGst:
-        organization?.country === 'India' ||
-        currency === 'INR' ||
-        Boolean(organization?.gst_registered || organization?.gstin || organization?.gst_vat_number),
+      currency,
+      country: countryNameOrCode || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US')),
+      taxName: effectiveTaxName,
+      isIndiaGst: isIndia,
       businessState: organization?.business_state || organization?.state || null,
       placeOfSupply: placeOfSupply || customer?.place_of_supply || customer?.billing_state || customer?.state || null,
     }
@@ -381,6 +422,10 @@ export function InvoiceModal({
   const discountAmount = calculated.discount_amount;
   const taxAmount = calculated.tax_amount;
   const grandTotal = calculated.grand_total;
+
+  const goodsLabel = organization?.goods_classification_label || countryProfile.goodsClassificationLabel;
+  const serviceLabel = organization?.service_classification_label || countryProfile.serviceClassificationLabel;
+  const defaultRate = organization?.default_gst_rate ?? organization?.default_tax_rate ?? countryProfile.defaultTaxRate;
 
   // Item handlers
   const handleItemChange = (index: number, field: keyof InvoiceItem, val: any) => {
@@ -400,9 +445,9 @@ export function InvoiceModal({
         quantity: 1,
         unit: 'pcs',
         unit_price: 1000,
-        tax_rate: organization?.default_gst_rate ?? organization?.default_tax_rate ?? 18,
+        tax_rate: defaultRate,
         item_type: 'GOODS',
-        classification_type: 'HSN',
+        classification_type: isIndia ? 'HSN' : (isUAE ? 'HS' : goodsLabel),
         classification_code: '',
       },
     ]);
@@ -417,10 +462,10 @@ export function InvoiceModal({
         quantity: 1,
         unit: 'service',
         unit_price: 1000,
-        tax_rate: organization?.default_gst_rate ?? organization?.default_tax_rate ?? 18,
+        tax_rate: defaultRate,
         item_type: 'SERVICE',
-        classification_type: 'SAC',
-        classification_code: '998311',
+        classification_type: isIndia ? 'SAC' : (isUAE ? 'SERVICE' : serviceLabel),
+        classification_code: isIndia ? '998311' : (isUAE ? 'SRV-IT-5' : ''),
       },
     ]);
   };
@@ -500,9 +545,10 @@ export function InvoiceModal({
       setIsSaving(true);
       const payload = {
         organization_id: quotation.organization_id,
-        customer_id: quotation.customer_id,
+        customer_id: quotation.customer_id || quotation.customer?.id || customer?.id,
         quotation_id: quotation.id,
         invoice_number: invoiceNumber,
+        document_type: documentType,
         po_number: poNumber || null,
         status: isPaidState ? 'PAID' : 'ISSUED',
         issue_date: invoiceDate,
@@ -510,7 +556,7 @@ export function InvoiceModal({
         currency: currency,
         tax_mode: taxMode,
         tax_rate: calculated.effective_tax_rate,
-        tax_name: quotation.tax_name || organization?.tax_label || 'GST',
+        tax_name: effectiveTaxName,
         place_of_supply: placeOfSupply || null,
         customer_gstin: clientTaxId || null,
         subtotal: calculated.subtotal,
@@ -576,8 +622,13 @@ export function InvoiceModal({
     }
   };
 
-  // Business rule: Tax invoice is ONLY available when the quotation is APPROVED or COMPLETED and marked as PAID
-  if (!isOpen || (!['APPROVED', 'PAYMENT_COMPLETED', 'COMPLETED'].includes(quotation.status)) || !quotation.is_paid) {
+  // Business rule: Tax invoice is available for APPROVED, PAYMENT_COMPLETED, IN_PROGRESS, or COMPLETED quotations.
+  // For COMPLETED quotations, commercial tax invoices can be issued regardless of whether fully paid or partially paid.
+  if (
+    !isOpen ||
+    !['APPROVED', 'PAYMENT_COMPLETED', 'COMPLETED', 'IN_PROGRESS'].includes(quotation.status) ||
+    (!quotation.is_paid && quotation.status !== 'COMPLETED')
+  ) {
     return null;
   }
 
@@ -758,6 +809,52 @@ export function InvoiceModal({
                 <FileText className="h-4 w-4 text-indigo-600" />
                 <span>Invoice Particulars & Payment Terms</span>
               </div>
+
+              {/* Document Type Selector (Tax Invoice, Proforma Invoice, Delivery Challan) */}
+              <div className="space-y-1.5 pb-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Document Type
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDocumentTypeChange('tax_invoice')}
+                    className={cn(
+                      'p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer',
+                      documentType === 'tax_invoice'
+                        ? 'border-indigo-600 bg-indigo-50/90 text-indigo-700 shadow-xs ring-1 ring-indigo-500'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    )}
+                  >
+                    Tax Invoice (INV-)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDocumentTypeChange('proforma_invoice')}
+                    className={cn(
+                      'p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer',
+                      documentType === 'proforma_invoice'
+                        ? 'border-purple-600 bg-purple-50/90 text-purple-700 shadow-xs ring-1 ring-purple-500'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    )}
+                  >
+                    Proforma Invoice (PI-)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDocumentTypeChange('delivery_note')}
+                    className={cn(
+                      'p-2.5 rounded-xl border text-xs font-bold text-center transition-all cursor-pointer',
+                      (documentType === 'delivery_note' || documentType === 'delivery_challan')
+                        ? 'border-cyan-600 bg-cyan-50/90 text-cyan-700 shadow-xs ring-1 ring-cyan-500'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    )}
+                  >
+                    Delivery Note (DN-)
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
@@ -1008,7 +1105,7 @@ export function InvoiceModal({
                               onClick={() => {
                                 handleItemChange(idx, 'item_type', 'GOODS');
                                 if (item.unit === 'service' || item.unit === 'hrs') handleItemChange(idx, 'unit', 'pcs');
-                                handleItemChange(idx, 'classification_type', 'HSN');
+                                handleItemChange(idx, 'classification_type', isIndia ? 'HSN' : (isUAE ? 'HS' : goodsLabel));
                               }}
                               className={cn(
                                 'flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-md transition-colors',
@@ -1025,8 +1122,8 @@ export function InvoiceModal({
                               onClick={() => {
                                 handleItemChange(idx, 'item_type', 'SERVICE');
                                 if (item.unit === 'pcs') handleItemChange(idx, 'unit', 'service');
-                                handleItemChange(idx, 'classification_type', 'SAC');
-                                if (!item.classification_code) handleItemChange(idx, 'classification_code', '998311');
+                                handleItemChange(idx, 'classification_type', isIndia ? 'SAC' : (isUAE ? 'SERVICE' : serviceLabel));
+                                if (!item.classification_code) handleItemChange(idx, 'classification_code', isIndia ? '998311' : (isUAE ? 'SRV-IT-5' : ''));
                               }}
                               className={cn(
                                 'flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-md transition-colors',
@@ -1047,11 +1144,11 @@ export function InvoiceModal({
                               type="text"
                               value={item.classification_code || ''}
                               onChange={(e) => handleItemChange(idx, 'classification_code', e.target.value)}
-                              placeholder={isGoods ? 'HSN Code' : 'SAC Code (e.g. 998311)'}
+                              placeholder={isGoods ? (countryProfile.goodsPlaceholder || 'HS Code') : (countryProfile.servicePlaceholder || 'Service Category')}
                               className="h-7 w-40 px-2 pr-12 text-[11px] bg-white border border-slate-200 rounded-lg font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             />
                             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-slate-400 pointer-events-none uppercase">
-                              {item.classification_type || (isGoods ? 'HSN' : 'SAC')}
+                              {item.classification_type || (isGoods ? (isIndia ? 'HSN' : isUAE ? 'HS' : goodsLabel) : (isIndia ? 'SAC' : isUAE ? 'SERVICE' : serviceLabel))}
                             </span>
                           </div>
                           {items.length > 1 && (
@@ -1227,8 +1324,15 @@ export function InvoiceModal({
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-6 border-b border-slate-200">
               <div className="space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
-                  Commercial Tax Invoice
+                <span className={cn(
+                  "text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md border",
+                  documentType === 'proforma_invoice'
+                    ? "text-purple-700 bg-purple-50 border-purple-200"
+                    : (documentType === 'delivery_note' || documentType === 'delivery_challan')
+                    ? "text-cyan-700 bg-cyan-50 border-cyan-200"
+                    : "text-indigo-600 bg-indigo-50 border-indigo-100"
+                )}>
+                  {documentType === 'proforma_invoice' ? 'Proforma Invoice' : (documentType === 'delivery_note' || documentType === 'delivery_challan') ? 'Delivery Note' : 'Commercial Tax Invoice'}
                 </span>
                 <div className="flex items-center gap-3 mt-2 mb-1">
                   {(() => {
@@ -1287,7 +1391,7 @@ export function InvoiceModal({
                   </p>
                 )}
                 <p className="text-xs text-slate-500">
-                  Invoice Date:{' '}
+                  {documentType === 'proforma_invoice' ? 'Proforma Date' : (documentType === 'delivery_note' || documentType === 'delivery_challan') ? 'Delivery Note Date' : 'Invoice Date'}:{' '}
                   <span className="font-semibold text-slate-800">{formatDate(invoiceDate)}</span>
                 </p>
                 {paymentTerms !== 'Due on Receipt' && (
@@ -1402,11 +1506,11 @@ export function InvoiceModal({
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {item.item_type === 'SERVICE' ? (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0">
-                                Service{item.classification_code ? ` • SAC ${item.classification_code}` : ''}
+                                Service{item.classification_code ? ` • ${item.classification_type || (isIndia ? 'SAC' : isUAE ? 'SERVICE' : serviceLabel)} ${item.classification_code}` : ''}
                               </span>
                             ) : (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 shrink-0">
-                                Product{item.classification_code ? ` • HSN ${item.classification_code}` : ''}
+                                Product{item.classification_code ? ` • ${item.classification_type || (isIndia ? 'HSN' : isUAE ? 'HS' : goodsLabel)} ${item.classification_code}` : ''}
                               </span>
                             )}
                             <span>{item.description}</span>

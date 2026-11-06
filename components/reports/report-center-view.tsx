@@ -41,6 +41,7 @@ import {
   ReportResponseData,
   ReportRow,
 } from '@/lib/reports/report-types';
+import { exportGstr1Excel, exportGstr1Json } from '@/lib/reports/gstr1-export-builder';
 
 interface ReportCenterViewProps {
   initialData: ReportResponseData;
@@ -188,13 +189,116 @@ export function ReportCenterView({ initialData }: ReportCenterViewProps) {
   // Drill-down filter badge (e.g. clicked "Outstanding" or "Overdue")
   const [activeDrillDown, setActiveDrillDown] = useState<string | null>(null);
 
+  // Active statutory table inside India GSTR-1 view: 'b2b' (Table 4) | 'b2cs' (Table 7) | 'hsn' (Table 12) | 'docs' (Table 13)
+  const [activeGstrTable, setActiveGstrTable] = useState<'b2b' | 'b2cs' | 'hsn' | 'docs'>('b2b');
+
   const currency = data.metrics.currency || 'INR';
 
-  // Sub-reports list for the active category
+  // Computed GSTR-1 Statutory Data Breakdown
+  const gstrData = useMemo(() => {
+    const invoiceRows = data.rows.filter(
+      (r) => r.documentType === 'INVOICE' && r.status !== 'CANCELLED' && r.status !== 'VOIDED'
+    );
+
+    const b2b = invoiceRows.filter(
+      (r) => Boolean(r.customerTaxNumber && r.customerTaxNumber.trim().length >= 10)
+    );
+
+    const b2cs = invoiceRows.filter(
+      (r) => !r.customerTaxNumber || r.customerTaxNumber.trim().length < 10
+    );
+
+    const docNumbers = invoiceRows.map((r) => r.documentNumber).filter(Boolean);
+    const minDoc = docNumbers.length > 0 ? docNumbers[docNumbers.length - 1] : 'INV-0001';
+    const maxDoc = docNumbers.length > 0 ? docNumbers[0] : 'INV-0001';
+    const cancelledCount = data.rows.filter(
+      (r) => r.documentType === 'INVOICE' && (r.status === 'CANCELLED' || r.status === 'VOIDED')
+    ).length;
+
+    const b2bTaxable = b2b.reduce((s, r) => s + (r.subtotal || 0), 0);
+    const b2bTax = b2b.reduce((s, r) => s + (r.taxAmount || 0), 0);
+    const b2bTotal = b2b.reduce((s, r) => s + (r.grandTotal || 0), 0);
+
+    const b2csTaxable = b2cs.reduce((s, r) => s + (r.subtotal || 0), 0);
+    const b2csTax = b2cs.reduce((s, r) => s + (r.taxAmount || 0), 0);
+    const b2csTotal = b2cs.reduce((s, r) => s + (r.grandTotal || 0), 0);
+
+    return {
+      invoiceRows,
+      b2b,
+      b2cs,
+      minDoc,
+      maxDoc,
+      totalIssued: invoiceRows.length + cancelledCount,
+      cancelledCount,
+      netIssued: invoiceRows.length,
+      b2bTaxable,
+      b2bTax,
+      b2bTotal,
+      b2csTaxable,
+      b2csTax,
+      b2csTotal,
+    };
+  }, [data.rows]);
+
+  // Computed UAE VAT Form 201 Emirate Breakdown (Box 1a - 1g)
+  const uaeEmirateBreakdown = useMemo(() => {
+    if (!data.taxSummary.isUaeVat) return [];
+    const emirateMap: Record<string, { taxable: number; vat: number; count: number; box: string }> = {
+      'Abu Dhabi': { taxable: 0, vat: 0, count: 0, box: '1a' },
+      'Dubai': { taxable: 0, vat: 0, count: 0, box: '1b' },
+      'Sharjah': { taxable: 0, vat: 0, count: 0, box: '1c' },
+      'Ajman': { taxable: 0, vat: 0, count: 0, box: '1d' },
+      'Umm Al Quwain': { taxable: 0, vat: 0, count: 0, box: '1e' },
+      'Ras Al Khaimah': { taxable: 0, vat: 0, count: 0, box: '1f' },
+      'Fujairah': { taxable: 0, vat: 0, count: 0, box: '1g' },
+    };
+
+    const invoiceRows = data.rows.filter(
+      (r) => r.documentType === 'INVOICE' && r.status !== 'CANCELLED' && r.status !== 'VOIDED'
+    );
+
+    invoiceRows.forEach((r) => {
+      const match = Object.keys(emirateMap).find((em) =>
+        (r as any).placeOfSupply?.toLowerCase()?.includes(em.toLowerCase())
+      ) || 'Dubai';
+
+      emirateMap[match].taxable += r.subtotal || 0;
+      emirateMap[match].vat += r.taxAmount || 0;
+      emirateMap[match].count += 1;
+    });
+
+    return Object.entries(emirateMap).map(([emirate, vals]) => ({
+      emirate,
+      ...vals,
+    }));
+  }, [data.rows, data.taxSummary.isUaeVat]);
+
+  // Sub-reports list for the active category (strictly isolated per country profile)
   const activeSubReports = useMemo(() => {
     const cat = CATEGORIES.find((c) => c.id === category);
-    return cat ? cat.subReports : [];
-  }, [category]);
+    if (!cat) return [];
+    if (category === 'tax') {
+      if (data.taxSummary.isIndiaGst) {
+        return [
+          { id: 'tax-summary' as ReportType, label: 'Tax Summary' },
+          { id: 'india-gst-summary' as ReportType, label: 'India GST Summary' },
+          { id: 'india-hsn-sac' as ReportType, label: 'HSN / SAC Summary' },
+        ];
+      } else if (data.taxSummary.isUaeVat) {
+        return [
+          { id: 'tax-summary' as ReportType, label: 'Tax Summary' },
+          { id: 'gcc-vat-summary' as ReportType, label: 'GCC VAT Statement' },
+        ];
+      } else {
+        return [
+          { id: 'tax-summary' as ReportType, label: 'Tax Summary' },
+          { id: 'taxable-sales' as ReportType, label: 'Taxable Sales' },
+        ];
+      }
+    }
+    return cat.subReports;
+  }, [category, data.taxSummary.isIndiaGst, data.taxSummary.isUaeVat]);
 
   // Fetch report data on filter change
   const fetchReport = async (overrideParams?: Partial<ReportFilterState>) => {
@@ -243,6 +347,11 @@ export function ReportCenterView({ initialData }: ReportCenterViewProps) {
   const handleSubReportChange = (sub: ReportType) => {
     setReportType(sub);
     setActiveDrillDown(null);
+    if (sub === 'india-hsn-sac') {
+      setActiveGstrTable('hsn');
+    } else if (sub === 'india-gst-summary') {
+      setActiveGstrTable('b2b');
+    }
     fetchReport({ reportType: sub });
   };
 
@@ -658,370 +767,817 @@ export function ReportCenterView({ initialData }: ReportCenterViewProps) {
         )}
       </div>
 
-      {/* 4. KPI Summary Cards (Clickable Drill-downs) */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {/* Total Sales */}
-        <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs space-y-1">
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Sales</p>
-          <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 truncate">
-            {formatCurrency(data.metrics.totalSales, currency)}
-          </p>
-          <p className="text-[11px] text-slate-400 truncate">Quotes + Invoiced volume</p>
-        </div>
+      {/* 4 & 5: Commercial Analytics & Cash Flow (Hidden when in Tax & Compliance mode) */}
+      {category !== 'tax' && (
+        <>
+          {/* KPI Summary Cards (Clickable Drill-downs) */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {/* Total Sales */}
+            <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs space-y-1">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Sales</p>
+              <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 truncate">
+                {formatCurrency(data.metrics.totalSales, currency)}
+              </p>
+              <p className="text-[11px] text-slate-400 truncate">Quotes + Invoiced volume</p>
+            </div>
 
-        {/* Total Invoiced */}
-        <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs space-y-1">
-          <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Total Invoiced</p>
-          <p className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 truncate">
-            {formatCurrency(data.metrics.totalInvoiced, currency)}
-          </p>
-          <p className="text-[11px] text-slate-400 truncate">{data.metrics.invoiceCount} official invoices</p>
-        </div>
+            {/* Total Invoiced */}
+            <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs space-y-1">
+              <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Total Invoiced</p>
+              <p className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 truncate">
+                {formatCurrency(data.metrics.totalInvoiced, currency)}
+              </p>
+              <p className="text-[11px] text-slate-400 truncate">{data.metrics.invoiceCount} official invoices</p>
+            </div>
 
-        {/* Collected / Paid */}
-        <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs space-y-1">
-          <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Collected (Paid)</p>
-          <p className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 truncate">
-            {formatCurrency(data.metrics.totalPaid, currency)}
-          </p>
-          <p className="text-[11px] text-slate-400 truncate">Realized revenue</p>
-        </div>
+            {/* Collected / Paid */}
+            <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs space-y-1">
+              <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Collected (Paid)</p>
+              <p className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 truncate">
+                {formatCurrency(data.metrics.totalPaid, currency)}
+              </p>
+              <p className="text-[11px] text-slate-400 truncate">Realized revenue</p>
+            </div>
 
-        {/* Outstanding Balance (Click to drill down) */}
-        <button
-          type="button"
-          onClick={handleDrillDownOutstanding}
-          className="text-left rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/20 p-4 shadow-xs hover:border-amber-400 transition-colors group space-y-1"
-        >
-          <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Outstanding</span>
-            <ChevronRight className="w-3.5 h-3.5 text-amber-500 group-hover:translate-x-0.5 transition-transform" />
-          </p>
-          <p className="text-xl sm:text-2xl font-black text-amber-700 dark:text-amber-300 truncate">
-            {formatCurrency(data.metrics.totalOutstanding, currency)}
-          </p>
-          <p className="text-[11px] text-amber-600/80 truncate">Pending remittance (Click)</p>
-        </button>
+            {/* Outstanding Balance (Click to drill down) */}
+            <button
+              type="button"
+              onClick={handleDrillDownOutstanding}
+              className="text-left rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/20 p-4 shadow-xs hover:border-amber-400 transition-colors group space-y-1"
+            >
+              <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                <span>Outstanding</span>
+                <ChevronRight className="w-3.5 h-3.5 text-amber-500 group-hover:translate-x-0.5 transition-transform" />
+              </p>
+              <p className="text-xl sm:text-2xl font-black text-amber-700 dark:text-amber-300 truncate">
+                {formatCurrency(data.metrics.totalOutstanding, currency)}
+              </p>
+              <p className="text-[11px] text-amber-600/80 truncate">Pending remittance (Click)</p>
+            </button>
 
-        {/* Overdue (Click to drill down) */}
-        <button
-          type="button"
-          onClick={handleDrillDownOverdue}
-          className="text-left rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 p-4 shadow-xs hover:border-rose-400 transition-colors group space-y-1"
-        >
-          <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Overdue</span>
-            <ChevronRight className="w-3.5 h-3.5 text-rose-500 group-hover:translate-x-0.5 transition-transform" />
-          </p>
-          <p className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 truncate">
-            {formatCurrency(data.metrics.totalOverdue, currency)}
-          </p>
-          <p className="text-[11px] text-rose-500/80 truncate">Past payment due date (Click)</p>
-        </button>
-      </div>
-
-      {/* Multi-Currency Breakdown (when transactions span multiple currencies) */}
-      {data.currencyBreakdown && data.currencyBreakdown.length > 1 && (
-        <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 shadow-xs space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
-              Multi-Currency Financial Breakdown (Grouped by Currency)
-            </h3>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              Currencies are grouped separately without cross-currency summation
-            </span>
+            {/* Overdue (Click to drill down) */}
+            <button
+              type="button"
+              onClick={handleDrillDownOverdue}
+              className="text-left rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 p-4 shadow-xs hover:border-rose-400 transition-colors group space-y-1"
+            >
+              <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center justify-between">
+                <span>Overdue</span>
+                <ChevronRight className="w-3.5 h-3.5 text-rose-500 group-hover:translate-x-0.5 transition-transform" />
+              </p>
+              <p className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 truncate">
+                {formatCurrency(data.metrics.totalOverdue, currency)}
+              </p>
+              <p className="text-[11px] text-rose-500/80 truncate">Past payment due date (Click)</p>
+            </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {data.currencyBreakdown.map((cb) => (
-              <div
-                key={cb.currency}
-                className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-2xs space-y-2"
-              >
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
-                  <span className="text-xs font-black text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
-                    {cb.currency}
+
+          {/* Multi-Currency Breakdown (when transactions span multiple currencies) */}
+          {data.currencyBreakdown && data.currencyBreakdown.length > 1 && (
+            <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                  Multi-Currency Financial Breakdown (Grouped by Currency)
+                </h3>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Currencies are grouped separately without cross-currency summation
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {data.currencyBreakdown.map((cb) => (
+                  <div
+                    key={cb.currency}
+                    className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-2xs space-y-2"
+                  >
+                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                      <span className="text-xs font-black text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                        {cb.currency}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {cb.invoiceCount} inv • {cb.quoteCount} quotes
+                      </span>
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Invoiced:</span>
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          {formatCurrency(cb.totalInvoiced, cb.currency)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Received:</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatCurrency(cb.totalPaid, cb.currency)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Pending:</span>
+                        <span className="font-bold text-amber-600 dark:text-amber-400">
+                          {formatCurrency(cb.totalOutstanding, cb.currency)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Visual Charts Grid (Print: hidden) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 print:hidden">
+            {/* Sales / Invoicing Timeline Trend */}
+            <div className="lg:col-span-2 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-indigo-500" />
+                    <span>Invoicing & Revenue Velocity</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">Total invoiced vs collected revenue over period</p>
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-semibold">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500" /> Invoiced
                   </span>
-                  <span className="text-[11px] text-slate-400">
-                    {cb.invoiceCount} inv • {cb.quoteCount} quotes
+                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Collected
                   </span>
                 </div>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Invoiced:</span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(cb.totalInvoiced, cb.currency)}
-                    </span>
+              </div>
+
+              {/* CSS/SVG Bar Chart */}
+              {data.trendChart.length === 0 ? (
+                <div className="h-44 flex items-center justify-center text-xs text-slate-400">
+                  No trend data available for selected period.
+                </div>
+              ) : (
+                <div className="h-44 flex items-end gap-3 pt-6 px-2">
+                  {data.trendChart.map((pt, idx) => {
+                    const maxVal = Math.max(
+                      ...data.trendChart.map((p) => Math.max(p.invoiced, p.paid)),
+                      1
+                    );
+                    const invoicedHeight = Math.max(8, Math.round((pt.invoiced / maxVal) * 100));
+                    const paidHeight = Math.max(6, Math.round((pt.paid / maxVal) * 100));
+
+                    return (
+                      <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group">
+                        <div className="w-full flex items-end justify-center gap-1 h-32 relative">
+                          <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] rounded px-2 py-1 pointer-events-none whitespace-nowrap z-20 shadow-md">
+                            Invoiced: {formatCurrency(pt.invoiced, currency)} | Paid: {formatCurrency(pt.paid, currency)}
+                          </div>
+
+                          <div
+                            style={{ height: `${invoicedHeight}%` }}
+                            className="w-1/2 max-w-[16px] rounded-t-sm bg-indigo-500 hover:bg-indigo-600 transition-all"
+                          />
+                          <div
+                            style={{ height: `${paidHeight}%` }}
+                            className="w-1/2 max-w-[16px] rounded-t-sm bg-emerald-500 hover:bg-emerald-600 transition-all"
+                          />
+                        </div>
+                        <span className="text-[10px] text-slate-400 truncate max-w-full font-medium">
+                          {pt.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Invoice Aging & Collection Efficiency */}
+            <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  <span>Invoice Aging Analysis</span>
+                </h3>
+                <p className="text-xs text-slate-400">Aging brackets for outstanding invoices</p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs font-semibold mb-1">
+                    <span className="text-slate-600 dark:text-slate-300">Current (Not Due)</span>
+                    <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.current, currency)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Received:</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(cb.totalPaid, cb.currency)}
-                    </span>
+                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full"
+                      style={{ width: `${data.metrics.totalOutstanding > 0 ? (data.aging.current / data.metrics.totalOutstanding) * 100 : 0}%` }}
+                    />
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Pending:</span>
-                    <span className="font-bold text-amber-600 dark:text-amber-400">
-                      {formatCurrency(cb.totalOutstanding, cb.currency)}
-                    </span>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-semibold mb-1">
+                    <span className="text-amber-600 dark:text-amber-400">1 - 30 Days Overdue</span>
+                    <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.days1_30, currency)}</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 rounded-full"
+                      style={{ width: `${data.metrics.totalOutstanding > 0 ? (data.aging.days1_30 / data.metrics.totalOutstanding) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-semibold mb-1">
+                    <span className="text-orange-600 dark:text-orange-400">31 - 60 Days Overdue</span>
+                    <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.days31_60, currency)}</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full bg-orange-500 rounded-full"
+                      style={{ width: `${data.metrics.totalOutstanding > 0 ? (data.aging.days31_60 / data.metrics.totalOutstanding) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-semibold mb-1">
+                    <span className="text-rose-600 dark:text-rose-400">60+ Days Overdue</span>
+                    <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.days61_90 + data.aging.days90Plus, currency)}</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full bg-rose-500 rounded-full"
+                      style={{ width: `${data.metrics.totalOutstanding > 0 ? ((data.aging.days61_90 + data.aging.days90Plus) / data.metrics.totalOutstanding) * 100 : 0}%` }}
+                    />
                   </div>
                 </div>
               </div>
-            ))}
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500">
+                <span>Quote-to-Invoice Conversion:</span>
+                <span className="font-black text-indigo-600 dark:text-indigo-400">{data.metrics.conversionRate}%</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
-      {/* 5. Original Visual Charts Grid (Print: hidden) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 print:hidden">
-        {/* Sales / Invoicing Timeline Trend */}
-        <div className="lg:col-span-2 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-indigo-500" />
-                <span>Invoicing & Revenue Velocity</span>
-              </h3>
-              <p className="text-xs text-slate-400">Total invoiced vs collected revenue over period</p>
-            </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-semibold">
-                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500" /> Invoiced
-              </span>
-              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Collected
-              </span>
-            </div>
-          </div>
+      {/* 6. Country-Aware Tax & Compliance Section (Promoted when in Tax mode) */}
+      {category === 'tax' && (
+        <>
+          {data.taxSummary.isIndiaGst ? (
+            <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-5">
+              {/* Statutory Return Header Banner */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white shadow-2xs">
+                      India GST Return
+                    </span>
+                    <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                      <span>GSTR-1 Outward Supplies Statement</span>
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl">
+                    Official return breakdown for <strong>{data.dateRangeLabel}</strong>. Categorized according to India GST Council rules for Table 4 (B2B), Table 7 (B2CS), Table 12 (HSN/SAC), and Table 13 (Document Series).
+                  </p>
+                </div>
 
-          {/* CSS/SVG Bar Chart */}
-          {data.trendChart.length === 0 ? (
-            <div className="h-44 flex items-center justify-center text-xs text-slate-400">
-              No trend data available for selected period.
-            </div>
-          ) : (
-            <div className="h-44 flex items-end gap-3 pt-6 px-2">
-              {data.trendChart.map((pt, idx) => {
-                const maxVal = Math.max(
-                  ...data.trendChart.map((p) => Math.max(p.invoiced, p.paid)),
-                  1
-                );
-                const invoicedHeight = Math.max(8, Math.round((pt.invoiced / maxVal) * 100));
-                const paidHeight = Math.max(6, Math.round((pt.paid / maxVal) * 100));
-
-                return (
-                  <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group">
-                    <div className="w-full flex items-end justify-center gap-1 h-32 relative">
-                      {/* Tooltip on hover */}
-                      <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] rounded px-2 py-1 pointer-events-none whitespace-nowrap z-20 shadow-md">
-                        Invoiced: {formatCurrency(pt.invoiced, currency)} | Paid: {formatCurrency(pt.paid, currency)}
-                      </div>
-
-                      <div
-                        style={{ height: `${invoicedHeight}%` }}
-                        className="w-1/2 max-w-[16px] rounded-t-sm bg-indigo-500 hover:bg-indigo-600 transition-all"
-                      />
-                      <div
-                        style={{ height: `${paidHeight}%` }}
-                        className="w-1/2 max-w-[16px] rounded-t-sm bg-emerald-500 hover:bg-emerald-600 transition-all"
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-400 truncate max-w-full font-medium">
-                      {pt.label}
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+                    <span className="text-slate-400 font-medium">Your GSTIN: </span>
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                      {data.organization.taxNumber || 'Not Configured'}
                     </span>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
 
-        {/* Invoice Aging & Collection Efficiency */}
-        <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
-          <div>
-            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <Clock className="h-4 w-4 text-amber-500" />
-              <span>Invoice Aging Analysis</span>
-            </h3>
-            <p className="text-xs text-slate-400">Aging brackets for outstanding invoices</p>
-          </div>
+                  {/* 1-Click Exports */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        await exportGstr1Excel(data);
+                      } catch (e: any) {
+                        alert(e.message || 'Error exporting GSTR-1 Excel');
+                      }
+                    }}
+                    className="gap-1.5 text-xs font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-200 dark:border-emerald-700 shadow-2xs h-8.5"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />
+                    <span>Export GSTR-1 Excel (.xlsx)</span>
+                  </Button>
 
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between text-xs font-semibold mb-1">
-                <span className="text-slate-600 dark:text-slate-300">Current (Not Due)</span>
-                <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.current, currency)}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      try {
+                        exportGstr1Json(data);
+                      } catch (e: any) {
+                        alert(e.message || 'Error exporting GSTR-1 JSON');
+                      }
+                    }}
+                    className="gap-1.5 text-xs font-bold text-indigo-800 bg-indigo-100/90 hover:bg-indigo-200 border-indigo-300 dark:bg-indigo-900/60 dark:text-indigo-200 dark:border-indigo-700 shadow-2xs h-8.5"
+                  >
+                    <Download className="h-4 w-4 text-indigo-700 dark:text-indigo-300" />
+                    <span>Portal JSON (.json)</span>
+                  </Button>
+                </div>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <div
-                  className="h-full bg-emerald-500 rounded-full"
-                  style={{ width: `${data.metrics.totalOutstanding > 0 ? (data.aging.current / data.metrics.totalOutstanding) * 100 : 0}%` }}
-                />
+
+              {/* 5 Statutory GST Return Figures */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Taxable Turnover</span>
+                  <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 truncate">
+                    {formatCurrency(data.taxSummary.taxableSales, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-slate-400 mt-0.5">Assessable value</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">CGST Total</span>
+                  <p className="text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1 truncate">
+                    {formatCurrency(data.taxSummary.cgstTotal || 0, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-indigo-500/80 mt-0.5">Central GST</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-blue-50/40 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
+                  <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">SGST Total</span>
+                  <p className="text-base sm:text-lg font-black text-blue-600 dark:text-blue-400 mt-1 truncate">
+                    {formatCurrency(data.taxSummary.sgstTotal || 0, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-blue-500/80 mt-0.5">State / UT GST</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-purple-50/40 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40">
+                  <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">IGST Total</span>
+                  <p className="text-base sm:text-lg font-black text-purple-600 dark:text-purple-400 mt-1 truncate">
+                    {formatCurrency(data.taxSummary.igstTotal || 0, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-purple-500/80 mt-0.5">Integrated (Inter-state)</p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Total Output GST</span>
+                  <p className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300 mt-1 truncate">
+                    {formatCurrency(data.taxSummary.totalTaxCollected, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-emerald-600/80 mt-0.5">Net tax liability</p>
+                </div>
+              </div>
+
+              {/* Statutory Tables Navigation Tabs */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-100 dark:border-slate-800 pb-2">
+                  <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                    <button
+                      type="button"
+                      onClick={() => setActiveGstrTable('b2b')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                        activeGstrTable === 'b2b'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span>Table 4: B2B Invoices</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        activeGstrTable === 'b2b' ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      }`}>
+                        {gstrData.b2b.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveGstrTable('b2cs')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                        activeGstrTable === 'b2cs'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span>Table 7: B2CS (Consumer)</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        activeGstrTable === 'b2cs' ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      }`}>
+                        {gstrData.b2cs.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveGstrTable('hsn')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                        activeGstrTable === 'hsn'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span>Table 12: HSN / SAC Summary</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        activeGstrTable === 'hsn' ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      }`}>
+                        {data.taxSummary.hsnSummary?.length || 0}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveGstrTable('docs')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                        activeGstrTable === 'docs'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span>Table 13: Document Series</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        activeGstrTable === 'docs' ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      }`}>
+                        {gstrData.totalIssued}
+                      </span>
+                    </button>
+                  </div>
+
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
+                    {activeGstrTable === 'b2b' && 'Taxable supplies to registered GSTIN businesses (ITC eligible)'}
+                    {activeGstrTable === 'b2cs' && 'Supplies to unregistered / retail consumers'}
+                    {activeGstrTable === 'hsn' && 'Goods and services classification code summary'}
+                    {activeGstrTable === 'docs' && 'Serial number ranges of tax invoices issued'}
+                  </span>
+                </div>
+
+                {/* Table Content Switcher */}
+                {/* 1. Table 4: B2B Invoices */}
+                {activeGstrTable === 'b2b' && (
+                  <div className="space-y-2">
+                    {gstrData.b2b.length === 0 ? (
+                      <div className="p-8 text-center bg-slate-50 dark:bg-slate-850 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                        <ShieldCheck className="h-8 w-8 text-slate-300 dark:text-slate-600 mx-auto" />
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No B2B Invoices Found</p>
+                        <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                          Invoices issued to clients with a GSTIN will automatically be categorized under Table 4 for input tax credit (ITC).
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                              <th className="p-2.5">Recipient GSTIN</th>
+                              <th className="p-2.5">Receiver Name</th>
+                              <th className="p-2.5">Invoice #</th>
+                              <th className="p-2.5">Date</th>
+                              <th className="p-2.5 text-right">Taxable Value</th>
+                              <th className="p-2.5 text-right">Rate</th>
+                              <th className="p-2.5 text-right">CGST</th>
+                              <th className="p-2.5 text-right">SGST</th>
+                              <th className="p-2.5 text-right">IGST</th>
+                              <th className="p-2.5 text-right">Invoice Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {gstrData.b2b.map((r) => (
+                              <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-850/60">
+                                <td className="p-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                  {r.customerTaxNumber}
+                                </td>
+                                <td className="p-2.5 font-medium">{r.customerCompany || r.customerName}</td>
+                                <td className="p-2.5">
+                                  <Link href={r.linkHref} className="font-mono font-bold hover:underline text-slate-900 dark:text-slate-100">
+                                    {r.documentNumber}
+                                  </Link>
+                                </td>
+                                <td className="p-2.5 text-slate-500">{r.date}</td>
+                                <td className="p-2.5 text-right font-medium">{formatCurrency(r.subtotal, currency)}</td>
+                                <td className="p-2.5 text-right">{r.taxRate}%</td>
+                                <td className="p-2.5 text-right">{formatCurrency(r.cgstAmount || 0, currency)}</td>
+                                <td className="p-2.5 text-right">{formatCurrency(r.sgstAmount || 0, currency)}</td>
+                                <td className="p-2.5 text-right">{formatCurrency(r.igstAmount || 0, currency)}</td>
+                                <td className="p-2.5 text-right font-bold text-slate-900 dark:text-slate-100">
+                                  {formatCurrency(r.grandTotal, currency)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-slate-100/80 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                            <tr>
+                              <td colSpan={4} className="p-2.5 text-right uppercase text-[11px] text-slate-500">
+                                Table 4 Total ({gstrData.b2b.length} Invoices):
+                              </td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2bTaxable, currency)}</td>
+                              <td></td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2b.reduce((s, r) => s + (r.cgstAmount || 0), 0), currency)}</td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2b.reduce((s, r) => s + (r.sgstAmount || 0), 0), currency)}</td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2b.reduce((s, r) => s + (r.igstAmount || 0), 0), currency)}</td>
+                              <td className="p-2.5 text-right text-emerald-600">{formatCurrency(gstrData.b2bTotal, currency)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 2. Table 7: B2CS Invoices */}
+                {activeGstrTable === 'b2cs' && (
+                  <div className="space-y-2">
+                    {gstrData.b2cs.length === 0 ? (
+                      <div className="p-8 text-center bg-slate-50 dark:bg-slate-850 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                        <Users className="h-8 w-8 text-slate-300 dark:text-slate-600 mx-auto" />
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No B2C Invoices Found</p>
+                        <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                          Invoices issued to consumers without a GSTIN appear here as Table 7 B2CS.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                              <th className="p-2.5">Supply Type</th>
+                              <th className="p-2.5">Customer Name</th>
+                              <th className="p-2.5">Invoice #</th>
+                              <th className="p-2.5">Date</th>
+                              <th className="p-2.5 text-right">Taxable Value</th>
+                              <th className="p-2.5 text-right">Rate</th>
+                              <th className="p-2.5 text-right">CGST</th>
+                              <th className="p-2.5 text-right">SGST</th>
+                              <th className="p-2.5 text-right">IGST</th>
+                              <th className="p-2.5 text-right">Invoice Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {gstrData.b2cs.map((r) => (
+                              <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-850/60">
+                                <td className="p-2.5 font-mono text-[11px] text-slate-500">OE (Other)</td>
+                                <td className="p-2.5 font-medium">{r.customerName}</td>
+                                <td className="p-2.5">
+                                  <Link href={r.linkHref} className="font-mono font-bold hover:underline text-slate-900 dark:text-slate-100">
+                                    {r.documentNumber}
+                                  </Link>
+                                </td>
+                                <td className="p-2.5 text-slate-500">{r.date}</td>
+                                <td className="p-2.5 text-right font-medium">{formatCurrency(r.subtotal, currency)}</td>
+                                <td className="p-2.5 text-right">{r.taxRate}%</td>
+                                <td className="p-2.5 text-right">{formatCurrency(r.cgstAmount || 0, currency)}</td>
+                                <td className="p-2.5 text-right">{formatCurrency(r.sgstAmount || 0, currency)}</td>
+                                <td className="p-2.5 text-right">{formatCurrency(r.igstAmount || 0, currency)}</td>
+                                <td className="p-2.5 text-right font-bold text-slate-900 dark:text-slate-100">
+                                  {formatCurrency(r.grandTotal, currency)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-slate-100/80 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                            <tr>
+                              <td colSpan={4} className="p-2.5 text-right uppercase text-[11px] text-slate-500">
+                                Table 7 Total ({gstrData.b2cs.length} Invoices):
+                              </td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2csTaxable, currency)}</td>
+                              <td></td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2cs.reduce((s, r) => s + (r.cgstAmount || 0), 0), currency)}</td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2cs.reduce((s, r) => s + (r.sgstAmount || 0), 0), currency)}</td>
+                              <td className="p-2.5 text-right">{formatCurrency(gstrData.b2cs.reduce((s, r) => s + (r.igstAmount || 0), 0), currency)}</td>
+                              <td className="p-2.5 text-right text-emerald-600">{formatCurrency(gstrData.b2csTotal, currency)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. Table 12: HSN / SAC Summary */}
+                {activeGstrTable === 'hsn' && (
+                  <div className="space-y-2">
+                    {(!data.taxSummary.hsnSummary || data.taxSummary.hsnSummary.length === 0) ? (
+                      <div className="p-8 text-center bg-slate-50 dark:bg-slate-850 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                        <Package className="h-8 w-8 text-slate-300 dark:text-slate-600 mx-auto" />
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No HSN / SAC Code Data</p>
+                        <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                          Invoices with HSN or SAC codes will automatically be aggregated into Table 12.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                              <th className="p-2.5">HSN/SAC Code</th>
+                              <th className="p-2.5">Type</th>
+                              <th className="p-2.5">Description</th>
+                              <th className="p-2.5 text-right">Taxable Value</th>
+                              <th className="p-2.5 text-right">Rate</th>
+                              <th className="p-2.5 text-right">CGST</th>
+                              <th className="p-2.5 text-right">SGST</th>
+                              <th className="p-2.5 text-right">IGST</th>
+                              <th className="p-2.5 text-right">Total Tax</th>
+                              <th className="p-2.5 text-right">Total Value</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {data.taxSummary.hsnSummary.map((h, i) => (
+                              <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-850/60">
+                                <td className="p-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">{h.code}</td>
+                                <td className="p-2.5">{h.itemType}</td>
+                                <td className="p-2.5 text-slate-600 dark:text-slate-300">{h.description}</td>
+                                <td className="p-2.5 text-right font-medium">{formatCurrency(h.taxableAmount, currency)}</td>
+                                <td className="p-2.5 text-right">{h.taxRate}%</td>
+                                <td className="p-2.5 text-right">{formatCurrency(h.cgstAmount, currency)}</td>
+                                <td className="p-2.5 text-right">{formatCurrency(h.sgstAmount, currency)}</td>
+                                <td className="p-2.5 text-right">{formatCurrency(h.igstAmount, currency)}</td>
+                                <td className="p-2.5 text-right font-bold text-emerald-600">{formatCurrency(h.totalTax, currency)}</td>
+                                <td className="p-2.5 text-right font-bold text-slate-900 dark:text-slate-100">{formatCurrency(h.totalAmount, currency)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-slate-100/80 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                            <tr>
+                              <td colSpan={3} className="p-2.5 text-right uppercase text-[11px] text-slate-500">
+                                Table 12 Total ({data.taxSummary.hsnSummary.length} Codes):
+                              </td>
+                              <td className="p-2.5 text-right">{formatCurrency(data.taxSummary.hsnSummary.reduce((s, h) => s + h.taxableAmount, 0), currency)}</td>
+                              <td></td>
+                              <td className="p-2.5 text-right">{formatCurrency(data.taxSummary.hsnSummary.reduce((s, h) => s + h.cgstAmount, 0), currency)}</td>
+                              <td className="p-2.5 text-right">{formatCurrency(data.taxSummary.hsnSummary.reduce((s, h) => s + h.sgstAmount, 0), currency)}</td>
+                              <td className="p-2.5 text-right">{formatCurrency(data.taxSummary.hsnSummary.reduce((s, h) => s + h.igstAmount, 0), currency)}</td>
+                              <td className="p-2.5 text-right text-emerald-600">{formatCurrency(data.taxSummary.hsnSummary.reduce((s, h) => s + h.totalTax, 0), currency)}</td>
+                              <td className="p-2.5 text-right text-slate-900 dark:text-slate-100">{formatCurrency(data.taxSummary.hsnSummary.reduce((s, h) => s + h.totalAmount, 0), currency)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. Table 13: Documents Issued */}
+                {activeGstrTable === 'docs' && (
+                  <div className="space-y-3">
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+                          <tr>
+                            <th className="p-2.5">Nature of Document</th>
+                            <th className="p-2.5">Sr. No. From</th>
+                            <th className="p-2.5">Sr. No. To</th>
+                            <th className="p-2.5 text-right">Total Number</th>
+                            <th className="p-2.5 text-right">Cancelled</th>
+                            <th className="p-2.5 text-right">Net Issued</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-850/60 font-medium">
+                            <td className="p-2.5">Invoices for outward supply (Tax Invoices)</td>
+                            <td className="p-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">{gstrData.minDoc}</td>
+                            <td className="p-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">{gstrData.maxDoc}</td>
+                            <td className="p-2.5 text-right font-mono font-bold">{gstrData.totalIssued}</td>
+                            <td className="p-2.5 text-right font-mono text-rose-600">{gstrData.cancelledCount}</td>
+                            <td className="p-2.5 text-right font-mono font-black text-emerald-600">{gstrData.netIssued}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Mandatory Table 13 document serial series under Section 31 of CGST Act.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
+          ) : data.taxSummary.isUaeVat ? (
+            <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-5">
+              {/* UAE FTA Return Header Banner */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white shadow-2xs">
+                      UAE FTA Return
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                      PINT-AE Peppol Ready
+                    </span>
+                    <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                      <span>UAE VAT Return Form 201 & E-Invoicing Statement</span>
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl">
+                    Official tax breakdown for <strong>{data.dateRangeLabel}</strong> under UAE Federal Decree-Law No. (8) on VAT and Ministerial Decision No. 244 of 2025 on Electronic Invoicing.
+                  </p>
+                </div>
 
-            <div>
-              <div className="flex justify-between text-xs font-semibold mb-1">
-                <span className="text-amber-600 dark:text-amber-400">1 - 30 Days Overdue</span>
-                <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.days1_30, currency)}</span>
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 text-xs">
+                    <span className="text-slate-400 font-medium">Your TRN: </span>
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                      {data.organization.taxNumber || 'Not Configured'}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <div
-                  className="h-full bg-amber-500 rounded-full"
-                  style={{ width: `${data.metrics.totalOutstanding > 0 ? (data.aging.days1_30 / data.metrics.totalOutstanding) * 100 : 0}%` }}
-                />
+
+              {/* UAE Form 201 KPI Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Standard Rated (5%)</span>
+                  <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 truncate">
+                    {formatCurrency(data.taxSummary.taxableSales, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-slate-400 mt-0.5">Box 1 Taxable Supplies</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-800">
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Output VAT 5%</span>
+                  <p className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 truncate">
+                    {formatCurrency(data.taxSummary.totalTaxCollected, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-emerald-600/80 mt-0.5">Box 1 VAT Output</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Zero-Rated & Exempt</span>
+                  <p className="text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1 truncate">
+                    {formatCurrency(0, currency)}
+                  </p>
+                  <p className="text-[10.5px] text-indigo-500/80 mt-0.5">Box 2 & 3 Supplies</p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">E-Invoice Schema</span>
+                  <p className="text-base sm:text-lg font-mono font-bold text-slate-900 dark:text-slate-100 mt-1 truncate">
+                    PINT-AE XML
+                  </p>
+                  <p className="text-[10.5px] text-slate-400 mt-0.5">Peppol BIS Billing 3.0</p>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <div className="flex justify-between text-xs font-semibold mb-1">
-                <span className="text-orange-600 dark:text-orange-400">31 - 60 Days Overdue</span>
-                <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.days31_60, currency)}</span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <div
-                  className="h-full bg-orange-500 rounded-full"
-                  style={{ width: `${data.metrics.totalOutstanding > 0 ? (data.aging.days31_60 / data.metrics.totalOutstanding) * 100 : 0}%` }}
-                />
-              </div>
-            </div>
+              {/* UAE VAT Form 201: Box 1a - 1g Breakdown by Emirate */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    Box 1: Standard Rated Supplies by Emirate (FTA Form 201)
+                  </h4>
+                  <span className="text-[11px] text-slate-400">Mandatory breakdown for official UAE VAT return</span>
+                </div>
 
-            <div>
-              <div className="flex justify-between text-xs font-semibold mb-1">
-                <span className="text-rose-600 dark:text-rose-400">60+ Days Overdue</span>
-                <span className="text-slate-900 dark:text-slate-100">{formatCurrency(data.aging.days61_90 + data.aging.days90Plus, currency)}</span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                <div
-                  className="h-full bg-rose-500 rounded-full"
-                  style={{ width: `${data.metrics.totalOutstanding > 0 ? ((data.aging.days61_90 + data.aging.days90Plus) / data.metrics.totalOutstanding) * 100 : 0}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500">
-            <span>Quote-to-Invoice Conversion:</span>
-            <span className="font-black text-indigo-600 dark:text-indigo-400">{data.metrics.conversionRate}%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 6. Country-Aware Tax & Compliance Section */}
-      {data.taxSummary.isIndiaGst ? (
-        <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <div>
-              <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                <span>India Goods & Services Tax (GST) Statement</span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                Summary of Intra-State (CGST + SGST) and Inter-State (IGST) taxable commercial sales
-              </p>
-            </div>
-            <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">
-              GSTIN: {data.organization.taxNumber || 'Not Configured'}
-            </span>
-          </div>
-
-          {/* India GST KPI boxes */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Taxable Turnover</span>
-              <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">
-                {formatCurrency(data.taxSummary.taxableSales, currency)}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] font-bold text-indigo-500 uppercase">CGST Total</span>
-              <p className="text-base font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
-                {formatCurrency(data.taxSummary.cgstTotal || 0, currency)}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] font-bold text-blue-500 uppercase">SGST Total</span>
-              <p className="text-base font-black text-blue-600 dark:text-blue-400 mt-0.5">
-                {formatCurrency(data.taxSummary.sgstTotal || 0, currency)}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] font-bold text-purple-500 uppercase">IGST Total</span>
-              <p className="text-base font-black text-purple-600 dark:text-purple-400 mt-0.5">
-                {formatCurrency(data.taxSummary.igstTotal || 0, currency)}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] font-bold text-emerald-500 uppercase">Total GST Output</span>
-              <p className="text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
-                {formatCurrency(data.taxSummary.totalTaxCollected, currency)}
-              </p>
-            </div>
-          </div>
-
-          {/* HSN / SAC Summary Table if rows exist */}
-          {data.taxSummary.hsnSummary && data.taxSummary.hsnSummary.length > 0 && (
-            <div className="space-y-2 pt-2">
-              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300">HSN / SAC Code Breakdown</h4>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
-                  <thead className="bg-slate-100 dark:bg-slate-800 font-semibold text-slate-700 dark:text-slate-300">
-                    <tr>
-                      <th className="p-2">HSN/SAC Code</th>
-                      <th className="p-2">Type</th>
-                      <th className="p-2 text-right">Taxable Value</th>
-                      <th className="p-2 text-right">Rate</th>
-                      <th className="p-2 text-right">CGST</th>
-                      <th className="p-2 text-right">SGST</th>
-                      <th className="p-2 text-right">IGST</th>
-                      <th className="p-2 text-right">Total Tax</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {data.taxSummary.hsnSummary.map((h, i) => (
-                      <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-850">
-                        <td className="p-2 font-mono font-bold">{h.code}</td>
-                        <td className="p-2">{h.itemType}</td>
-                        <td className="p-2 text-right">{formatCurrency(h.taxableAmount, currency)}</td>
-                        <td className="p-2 text-right">{h.taxRate}%</td>
-                        <td className="p-2 text-right">{formatCurrency(h.cgstAmount, currency)}</td>
-                        <td className="p-2 text-right">{formatCurrency(h.sgstAmount, currency)}</td>
-                        <td className="p-2 text-right">{formatCurrency(h.igstAmount, currency)}</td>
-                        <td className="p-2 text-right font-bold text-emerald-600">{formatCurrency(h.totalTax, currency)}</td>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-2.5">Form 201 Box</th>
+                        <th className="p-2.5">Emirate (Place of Supply)</th>
+                        <th className="p-2.5 text-center">Invoices</th>
+                        <th className="p-2.5 text-right">Taxable Amount</th>
+                        <th className="p-2.5 text-right">Output VAT (5%)</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {uaeEmirateBreakdown.map((row) => (
+                        <tr key={row.box} className="hover:bg-slate-50 dark:hover:bg-slate-850/60">
+                          <td className="p-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            Box {row.box}
+                          </td>
+                          <td className="p-2.5 font-medium">{row.emirate}</td>
+                          <td className="p-2.5 text-center font-mono text-slate-500">{row.count}</td>
+                          <td className="p-2.5 text-right font-medium">{formatCurrency(row.taxable, currency)}</td>
+                          <td className="p-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(row.vat, currency)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-100/80 dark:bg-slate-800/80 font-bold border-t border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <td colSpan={3} className="p-2.5 text-right uppercase text-[11px] text-slate-500">
+                          Total Standard Rated Supplies (Box 1):
+                        </td>
+                        <td className="p-2.5 text-right">{formatCurrency(data.taxSummary.taxableSales, currency)}</td>
+                        <td className="p-2.5 text-right text-emerald-600">
+                          {formatCurrency(data.taxSummary.totalTaxCollected, currency)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* UAE E-Invoicing Peppol Compliance Notice */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50/70 to-emerald-50/70 dark:from-indigo-950/20 dark:to-emerald-950/20 border border-indigo-200/80 dark:border-indigo-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <h5 className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                    <span>E-Invoicing System (EIS) Peppol 5-Corner Architecture</span>
+                  </h5>
+                  <p className="text-slate-600 dark:text-slate-400 mt-0.5">
+                    Every UAE invoice in QuoteFlow can be downloaded in <strong>PINT-AE XML</strong> format from the invoice detail page for direct submission to your MoF-Accredited Service Provider (ASP).
+                  </p>
+                </div>
               </div>
             </div>
-          )}
-        </div>
-      ) : data.taxSummary.isUaeVat ? (
-        <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-            <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">GCC VAT Statement</h3>
-              <p className="text-xs text-slate-400">Standard 5% VAT supplies and reverse charges</p>
-            </div>
-            <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">
-              TRN: {data.organization.taxNumber || 'Not Configured'}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Taxable Supplies (AED)</span>
-              <p className="text-base font-black text-slate-900 dark:text-white">
-                {formatCurrency(data.taxSummary.taxableSales, currency)}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850">
-              <span className="text-[10px] font-bold text-emerald-500 uppercase">Output VAT 5%</span>
-              <p className="text-base font-black text-emerald-600 dark:text-emerald-400">
-                {formatCurrency(data.taxSummary.totalTaxCollected, currency)}
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
+          ) : null}
+        </>
+      )}
 
       {/* 7. Detailed Report Table */}
       <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs overflow-hidden">

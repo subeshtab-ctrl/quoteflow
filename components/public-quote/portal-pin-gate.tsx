@@ -76,14 +76,14 @@ export function PortalPinGate({
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen bg-[#f3f5f9] dark:bg-slate-900 flex flex-col items-center justify-center p-4 selection:bg-indigo-500 selection:text-white relative">
       {/* Background ambient gradient glow */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-80 h-80 bg-violet-600/10 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative w-full max-w-md bg-slate-850/90 dark:bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl text-center space-y-6">
+      <div className="relative w-full max-w-md bg-white/95 dark:bg-slate-900/90 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-indigo-950/10 backdrop-blur-xl text-center space-y-6">
         {/* Security Icon Badge */}
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 text-white shadow-lg shadow-indigo-500/25 ring-4 ring-indigo-500/10">
           <Lock className="h-6 w-6" />
@@ -91,24 +91,24 @@ export function PortalPinGate({
 
         {/* Header Info */}
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200/80 dark:border-indigo-500/20 text-indigo-600 dark:text-indigo-400">
             <ShieldCheck className="h-3.5 w-3.5" />
             <span>PIN-Protected Quotation</span>
           </div>
 
-          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Quotation {quotationNumber}
           </h1>
 
-          <p className="text-xs sm:text-sm text-slate-400 max-w-xs mx-auto leading-relaxed">
-            This proposal from <span className="text-slate-200 font-semibold">{companyName}</span> is protected with a security PIN. Enter the 4-digit PIN provided to view.
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
+            This proposal from <span className="text-slate-900 dark:text-slate-200 font-semibold">{companyName}</span> is protected with a security PIN. Enter the 4-digit PIN provided to view.
           </p>
         </div>
 
         {/* Error Alert */}
         {error && (
-          <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs flex items-center gap-2.5 text-left animate-in fade-in duration-150">
-            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+          <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-600 dark:text-rose-300 text-xs flex items-center gap-2.5 text-left animate-in fade-in duration-150">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-500" />
             <span className="leading-snug">{error}</span>
           </div>
         )}
@@ -127,7 +127,7 @@ export function PortalPinGate({
               placeholder="••••"
               disabled={loading || isLocked}
               autoFocus
-              className="w-full text-center tracking-[0.6em] font-mono text-2xl font-bold py-3.5 px-12 rounded-2xl bg-slate-800/80 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
+              className="w-full text-center tracking-[0.6em] font-mono text-2xl font-bold py-3.5 px-12 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 transition-all disabled:opacity-50"
             />
             <button
               type="button"

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,7 @@ interface ApprovalModalProps {
   customerPhone?: string;
   phoneCountryCode?: string;
   customerCompany?: string;
+  selectedOptionalItemIds?: string[];
   onApproved: (updatedQuote?: Quotation) => void;
 }
 
@@ -37,45 +38,59 @@ export function ApprovalModal({
   customerPhone = '',
   phoneCountryCode = '+91',
   customerCompany = '',
+  selectedOptionalItemIds,
   onApproved,
 }: ApprovalModalProps) {
   const isMobile = authMethod === 'MOBILE';
   const isBoth = authMethod === 'BOTH';
-  const [signerName, setSignerName] = useState(customerName);
-  const [signerEmail, setSignerEmail] = useState(customerEmail);
-  const [signerPhone, setSignerPhone] = useState(customerPhone);
-  const [signerCompany, setSignerCompany] = useState(customerCompany);
+  const [signerName, setSignerName] = useState(customerName || '');
+  const [signerEmail, setSignerEmail] = useState(customerEmail || '');
+  const [signerPhone, setSignerPhone] = useState(customerPhone || '');
+  const [signerCompany, setSignerCompany] = useState(customerCompany || '');
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [signatureType, setSignatureType] = useState<'DRAWN' | 'TYPED'>('DRAWN');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      setSignerName(customerName || '');
+      setSignerEmail(customerEmail || '');
+      setSignerPhone(customerPhone || '');
+      setSignerCompany(customerCompany || '');
+      setError(null);
+    }
+  }, [isOpen, customerName, customerEmail, customerPhone, customerCompany]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (!signerName.trim()) {
+    const cleanName = (signerName || '').trim();
+    const cleanEmail = (signerEmail || '').trim();
+    const cleanCompany = (signerCompany || '').trim();
+    const cleanPhone = (signerPhone || '').trim() ? cleanPhoneNumber(signerPhone, phoneCountryCode) : '';
+
+    if (!cleanName) {
       setError('Please enter your full legal name.');
       return;
     }
 
     if (isMobile) {
-      const cleanPhone = cleanPhoneNumber(signerPhone, phoneCountryCode);
       if (!cleanPhone || cleanPhone.length < 5) {
         setError('Please enter your mobile phone number without country code.');
         return;
       }
     } else if (isBoth) {
-      const cleanPhone = cleanPhoneNumber(signerPhone, phoneCountryCode);
-      const hasEmail = signerEmail.trim().includes('@');
+      const hasEmail = cleanEmail.includes('@');
       const hasPhone = cleanPhone && cleanPhone.length >= 5;
       if (!hasEmail && !hasPhone) {
         setError('Please provide at least a valid email address or mobile phone number.');
         return;
       }
     } else {
-      if (!signerEmail.trim() || !signerEmail.includes('@')) {
+      if (!cleanEmail || !cleanEmail.includes('@')) {
         setError('Please enter a valid email address.');
         return;
       }
@@ -93,19 +108,19 @@ export function ApprovalModal({
     setIsLoading(true);
 
     try {
-      const cleanPhone = signerPhone ? cleanPhoneNumber(signerPhone, phoneCountryCode) : undefined;
       const res = await fetch('/api/public/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
-          signer_name: signerName.trim(),
-          signer_email: signerEmail.trim() || undefined,
-          signer_phone: cleanPhone,
+          signer_name: cleanName,
+          signer_email: cleanEmail || undefined,
+          signer_phone: cleanPhone || undefined,
           phone_country_code: phoneCountryCode,
-          signer_company: signerCompany.trim() || undefined,
+          signer_company: cleanCompany || undefined,
           signature_data_url: signatureData,
           signature_type: signatureType,
+          selected_optional_item_ids: selectedOptionalItemIds,
           agree_terms: true,
         }),
       });
@@ -154,7 +169,7 @@ export function ApprovalModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input
             label="Your Full Legal Name *"
-            value={signerName}
+            value={signerName || ''}
             onChange={(e) => setSignerName(e.target.value)}
             placeholder="e.g. John Doe"
             required
@@ -172,7 +187,7 @@ export function ApprovalModal({
                 </span>
                 <input
                   type="tel"
-                  value={signerPhone}
+                  value={signerPhone || ''}
                   onChange={(e) => setSignerPhone(e.target.value.replace(/[^\d\s]/g, ''))}
                   placeholder="98765 43210 (without country code)"
                   required
@@ -184,7 +199,7 @@ export function ApprovalModal({
             <Input
               label={isBoth ? 'Email Address' : 'Email Address *'}
               type="email"
-              value={signerEmail}
+              value={signerEmail || ''}
               onChange={(e) => setSignerEmail(e.target.value)}
               placeholder="john@example.com"
               required={!isBoth}
@@ -197,7 +212,7 @@ export function ApprovalModal({
             <Input
               label="Email Address (Optional)"
               type="email"
-              value={signerEmail}
+              value={signerEmail || ''}
               onChange={(e) => setSignerEmail(e.target.value)}
               placeholder="client@example.com"
             />
@@ -213,7 +228,7 @@ export function ApprovalModal({
                 </span>
                 <input
                   type="tel"
-                  value={signerPhone}
+                  value={signerPhone || ''}
                   onChange={(e) => setSignerPhone(e.target.value.replace(/[^\d\s]/g, ''))}
                   placeholder="98765 43210"
                   className="w-full px-3 py-2 text-sm text-slate-900 bg-white focus:outline-none"
@@ -224,7 +239,7 @@ export function ApprovalModal({
             <Input
               label="Phone Number (Optional)"
               type="tel"
-              value={signerPhone}
+              value={signerPhone || ''}
               onChange={(e) => setSignerPhone(e.target.value)}
               placeholder="+91 98765 43210"
             />
@@ -232,7 +247,7 @@ export function ApprovalModal({
 
           <Input
             label="Company Name (Optional)"
-            value={signerCompany}
+            value={signerCompany || ''}
             onChange={(e) => setSignerCompany(e.target.value)}
             placeholder="Acme Corp"
           />
@@ -269,17 +284,16 @@ export function ApprovalModal({
 
         {/* Actions */}
         <div className="flex items-center justify-end gap-3 pt-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isLoading} className="rounded-2xl text-xs font-semibold px-4 py-2">
             Cancel
           </Button>
           <Button
             type="submit"
-            variant="primary"
             isLoading={isLoading}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2"
+            className="rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 px-6 py-2.5 shadow-md shadow-emerald-600/25 active:scale-95 transition-all cursor-pointer text-xs"
           >
             <CheckCircle2 className="h-4 w-4" />
-            <span>Confirm & Sign Quotation</span>
+            <span>Confirm &amp; Sign Quotation</span>
           </Button>
         </div>
       </form>

@@ -1,5 +1,6 @@
 import { CurrencyCode, DiscountType, QuotationItem, TaxMode } from '@/types/database';
-import { isInterstateSupply } from '@/lib/tax/india-gst';
+import { isInterstateSupply, findIndianState } from '@/lib/tax/india-gst';
+import { getCountryProfile } from '@/lib/tax/country-config';
 
 export interface LineItemInput {
   description: string;
@@ -15,6 +16,8 @@ export interface LineItemInput {
   item_type?: 'GOODS' | 'SERVICE';
   classification_type?: string | null;
   classification_code?: string | null;
+  is_optional?: boolean;
+  is_selected?: boolean;
 }
 
 export interface CalculatedLineItem extends LineItemInput {
@@ -38,6 +41,7 @@ export interface QuotationCalculationInput {
   discount_value?: number;
   tax_rate?: number;
   tax_mode?: TaxMode;
+  currency?: string;
   country?: string;
   supplier_state?: string | null;
   business_state?: string | null;
@@ -59,14 +63,70 @@ export interface QuotationCalculationOptions {
   taxRate?: number;
   taxName?: string;
   country?: string;
+  currency?: string;
 }
 
 export interface TaxBreakdownEntry {
   label: string;
-  name: string;
+  name?: string;
   rate: number;
   amount: number;
   is_inclusive?: boolean;
+}
+
+/**
+ * Sanitizes tax breakdown entries for non-India countries.
+ * Guarantees CGST, SGST, IGST, or Indian GST labels never appear for UAE or other foreign countries.
+ * Even if older quotations have CGST/SGST saved in the database, this collapses them into a single clean VAT/Tax line.
+ */
+export function sanitizeTaxBreakdown(
+  entries: Array<{ label?: string; name?: string; rate?: number; amount: number; is_inclusive?: boolean }> | undefined | null,
+  isIndia: boolean,
+  taxName: string = 'VAT',
+  totalTaxAmount: number = 0,
+  taxRate: number = 0
+): TaxBreakdownEntry[] {
+  if (isIndia) {
+    return (entries || []).map((e) => ({
+      ...e,
+      rate: e.rate ?? 0,
+      label: e.label || e.name || 'Tax',
+      name: e.name || e.label || 'Tax',
+    }));
+  }
+
+  // Filter out any entries mentioning CGST, SGST, IGST, or GST
+  const cleaned = (entries || [])
+    .filter((entry) => {
+      const l = (entry.label || entry.name || '').toUpperCase();
+      return !l.includes('CGST') && !l.includes('SGST') && !l.includes('IGST') && !l.includes('GST');
+    })
+    .map((e) => ({
+      ...e,
+      rate: e.rate ?? 0,
+      label: e.label || e.name || (taxName || 'Tax'),
+      name: e.name || e.label || (taxName || 'Tax'),
+    }));
+
+  if (cleaned.length > 0) {
+    return cleaned;
+  }
+
+  // If previous entries were all CGST/SGST and got stripped out, provide a unified VAT/Tax breakdown
+  if (totalTaxAmount > 0) {
+    const name = taxName || 'VAT';
+    const label = `${name}${taxRate > 0 ? ` ${taxRate}%` : ''}`;
+    return [
+      {
+        label,
+        name: label,
+        rate: taxRate,
+        amount: totalTaxAmount,
+      },
+    ];
+  }
+
+  return [];
 }
 
 export interface CalculatedQuotation {
@@ -244,13 +304,37 @@ export function calculateQuotationTotals(
       options = arg3 as QuotationCalculationOptions | undefined;
     }
 
-    const isIndiaOpt =
-      options?.isIndiaGst ??
-      options?.gstEnabled ??
-      (currency ? currency.toUpperCase() === 'INR' : true);
+    const resolvedCurrency = (currency || options?.currency || '').trim().toUpperCase();
+    const resolvedCountry = (options?.country || '').trim().toLowerCase();
+
+    let isIndiaOpt: boolean;
+    if (options?.isIndiaGst !== undefined) {
+      isIndiaOpt = options.isIndiaGst;
+    } else if (resolvedCountry === 'in' || resolvedCountry === 'india' || resolvedCountry.includes('india')) {
+      isIndiaOpt = true;
+    } else if (resolvedCountry !== '') {
+      // Explicit non-India country
+      isIndiaOpt = false;
+    } else if (resolvedCurrency === 'INR') {
+      isIndiaOpt = true;
+    } else if (resolvedCurrency !== '') {
+      // Explicit foreign currency (e.g. AED, USD, EUR, GBP)
+      isIndiaOpt = false;
+    } else if (options?.gstEnabled !== undefined) {
+      isIndiaOpt = options.gstEnabled;
+    } else {
+      isIndiaOpt = false;
+    }
+
+    const isUAE =
+      resolvedCountry === 'ae' ||
+      resolvedCountry === 'uae' ||
+      resolvedCountry.includes('emirates') ||
+      resolvedCurrency === 'AED';
 
     input = {
       items: inputOrItems,
+      currency: resolvedCurrency,
       tax_mode: options?.taxMode || 'exclusive',
       supplier_state: options?.businessState,
       business_state: options?.businessState,
@@ -259,13 +343,12 @@ export function calculateQuotationTotals(
       discount_value: discountValue !== undefined ? discountValue : options?.discountValue,
       tax_rate: options?.taxRate,
       tax_name:
-        options?.taxName ||
-        (currency && currency.toUpperCase() !== 'INR' && !isIndiaOpt ? 'Tax' : 'GST'),
+        options?.taxName && (!isIndiaOpt && options.taxName.toUpperCase().includes('GST'))
+          ? (isUAE ? 'VAT' : 'Tax')
+          : (options?.taxName || (isIndiaOpt ? 'GST' : (isUAE ? 'VAT' : 'Tax'))),
       country:
         options?.country ||
-        (!isIndiaOpt && !options?.businessState && !options?.placeOfSupply
-          ? currency?.toUpperCase() || 'US'
-          : 'IN'),
+        (isIndiaOpt ? 'IN' : (isUAE ? 'AE' : (resolvedCurrency || 'US'))),
       is_india_gst: isIndiaOpt,
     };
   } else {
@@ -273,17 +356,57 @@ export function calculateQuotationTotals(
   }
 
   const taxMode: TaxMode = input.tax_mode || 'exclusive';
-  const taxName = input.tax_name || 'GST';
   const supplierState = input.supplier_state ?? input.business_state;
+  const currencyClean = (input.currency || '').trim().toUpperCase();
+  const countryClean = (input.country || '').trim().toLowerCase();
 
-  // --- India GST Automatic Breakdown ---
-  const isIndia =
-    input.is_india_gst !== undefined
-      ? input.is_india_gst
-      : !input.country ||
-        input.country.toLowerCase() === 'india' ||
-        input.country.toUpperCase() === 'IN' ||
-        Boolean(supplierState || input.place_of_supply);
+  const isExplicitIndia =
+    countryClean === 'india' ||
+    countryClean === 'in' ||
+    countryClean.includes('india');
+
+  const isExplicitForeignCountry =
+    countryClean !== '' &&
+    !isExplicitIndia;
+
+  const isForeignCurrency =
+    currencyClean !== '' &&
+    currencyClean !== 'INR';
+
+  // Strict India GST determination:
+  let isIndia = false;
+  if (input.is_india_gst !== undefined) {
+    isIndia = input.is_india_gst;
+  } else if (isExplicitIndia) {
+    isIndia = true;
+  } else if (isExplicitForeignCountry || isForeignCurrency) {
+    isIndia = false;
+  } else if (currencyClean === 'INR') {
+    isIndia = true;
+  } else if (supplierState && findIndianState(supplierState)) {
+    isIndia = true;
+  } else {
+    isIndia = false;
+  }
+
+  const isUAE =
+    countryClean === 'ae' ||
+    countryClean === 'uae' ||
+    countryClean.includes('emirates') ||
+    currencyClean === 'AED';
+
+  const profile = getCountryProfile(input.country || input.currency || (isIndia ? 'IN' : 'AE'));
+
+  let taxName = input.tax_name;
+  if (!taxName || (!isIndia && (taxName.toUpperCase() === 'GST' || taxName.toUpperCase().includes('GST')))) {
+    if (isIndia) {
+      taxName = 'GST';
+    } else if (profile.taxSystem === 'VAT' || isUAE) {
+      taxName = 'VAT';
+    } else {
+      taxName = 'Tax';
+    }
+  }
 
   const isInterstate = isIndia
     ? isInterstateSupply({
@@ -300,6 +423,11 @@ export function calculateQuotationTotals(
   const discountValue = Math.max(0, Number(input.discount_value) || 0);
   const overallTaxRate = Math.max(0, Number(input.tax_rate) || 0);
 
+  // Filter out optional items that are explicitly unselected by the client
+  const includedItems = calculatedItems.filter(
+    (item) => !(item.is_optional && item.is_selected === false)
+  );
+
   let itemsSubtotal = 0;
   let overallDiscountAmount = 0;
   let taxableAmount = 0;
@@ -309,7 +437,7 @@ export function calculateQuotationTotals(
   if (taxMode === 'inclusive') {
     // Total of entered inclusive line items
     const rawInclusiveSum = roundCurrency(
-      calculatedItems.reduce((acc, item) => acc + item.line_total, 0)
+      includedItems.reduce((acc, item) => acc + item.line_total, 0)
     );
 
     if (discountType === 'PERCENTAGE') {
@@ -328,7 +456,7 @@ export function calculateQuotationTotals(
     } else {
       // If line items have individual tax rates, sum up their taxable and tax components
       const totalLineTax = roundCurrency(
-        calculatedItems.reduce((acc, item) => acc + item.tax_amount, 0)
+        includedItems.reduce((acc, item) => acc + item.tax_amount, 0)
       );
       if (overallDiscountAmount > 0 && rawInclusiveSum > 0) {
         const factor = grandTotal / rawInclusiveSum;
@@ -345,7 +473,7 @@ export function calculateQuotationTotals(
   } else {
     // Exclusive mode:
     itemsSubtotal = roundCurrency(
-      calculatedItems.reduce((acc, item) => acc + item.line_subtotal, 0)
+      includedItems.reduce((acc, item) => acc + item.line_subtotal, 0)
     );
 
     if (discountType === 'PERCENTAGE') {
@@ -361,7 +489,7 @@ export function calculateQuotationTotals(
       overallTaxAmount = roundCurrency((taxableAmount * overallTaxRate) / 100);
     } else {
       overallTaxAmount = roundCurrency(
-        calculatedItems.reduce((acc, item) => acc + item.tax_amount, 0)
+        includedItems.reduce((acc, item) => acc + item.tax_amount, 0)
       );
     }
 
@@ -481,6 +609,11 @@ export function calculateQuotationTotals(
 /**
  * Returns symbol for given currency code
  */
+/**
+ * Returns clean, print-safe symbol or code for given currency code.
+ * Replaces non-Latin Arabic glyphs with international ISO abbreviations
+ * so PDF engines (Helvetica) and thermal printers never output question marks or corrupted glyphs.
+ */
 export function getCurrencySymbol(currency: CurrencyCode | string = 'INR'): string {
   const curr = (currency || 'INR').toUpperCase();
   switch (curr) {
@@ -493,68 +626,307 @@ export function getCurrencySymbol(currency: CurrencyCode | string = 'INR'): stri
     case 'GBP':
       return '£';
     case 'AED':
-      return 'د.إ ';
+      return '⃃'; // Unicode U+20C3: UAE Dirham currency symbol
     case 'SAR':
-      return 'ر.س ';
+      return 'SAR';
     case 'KWD':
-      return 'د.ك ';
+      return 'KWD';
+    case 'QAR':
+      return 'QAR';
+    case 'OMR':
+      return 'OMR';
+    case 'BHD':
+      return 'BHD';
     case 'CAD':
       return 'C$';
     case 'AUD':
       return 'A$';
+    case 'SGD':
+      return 'S$';
+    case 'JPY':
+    case 'CNY':
+      return '¥';
+    case 'CHF':
+      return 'CHF';
+    case 'NZD':
+      return 'NZ$';
+    case 'BRL':
+      return 'R$';
+    case 'ZAR':
+      return 'R';
+    case 'SEK':
+    case 'NOK':
+    case 'DKK':
+      return 'kr';
+    case 'PLN':
+      return 'zł';
+    case 'TRY':
+      return '₺';
+    case 'RUB':
+      return '₽';
+    case 'MXN':
+      return 'Mex$';
+    case 'THB':
+      return '฿';
+    case 'MYR':
+      return 'RM';
+    case 'IDR':
+      return 'Rp';
+    case 'PHP':
+      return '₱';
+    case 'VND':
+      return '₫';
+    case 'PKR':
+    case 'LKR':
+    case 'NPR':
+      return 'Rs';
+    case 'BDT':
+      return '৳';
+    case 'EGP':
+      return 'E£';
+    case 'NGN':
+      return '₦';
+    case 'KES':
+      return 'KSh';
+    case 'GHS':
+      return 'GH₵';
+    case 'ILS':
+      return '₪';
+    case 'HKD':
+      return 'HK$';
+    case 'KRW':
+      return '₩';
+    case 'TWD':
+      return 'NT$';
     default:
-      return `${curr} `;
+      return curr;
   }
 }
 
 /**
  * Format currency with official symbols across all international documents.
- * Never outputs a plain number without currency symbol.
+ * Ensures consistent presentation across Preview, Print, PDF, WhatsApp, and Client Portal.
+ * Example outputs:
+ * - INR: ₹ 45,000.00
+ * - USD: $ 1,500.00
+ * - EUR: € 1,500.00
+ * - GBP: £ 1,500.00
+ * - AED: AED 1,500.00
  */
 export function formatCurrency(
   amount: number,
-  currency: CurrencyCode | string = 'INR'
+  currency: CurrencyCode | string = 'INR',
+  options?: { useAsciiRupee?: boolean }
 ): string {
   const num = Number(amount) || 0;
   const curr = (currency || 'INR').toUpperCase();
 
+  const standardFormatted = num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
   switch (curr) {
-    case 'INR':
-      return new Intl.NumberFormat('en-IN', {
-        style: 'currency',
-        currency: 'INR',
+    case 'INR': {
+      const inrFormatted = num.toLocaleString('en-IN', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      }).format(num);
+      });
+      const sym = options?.useAsciiRupee ? 'Rs.' : '₹';
+      return `${sym} ${inrFormatted}`;
+    }
     case 'USD':
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(num);
+      return `$ ${standardFormatted}`;
     case 'EUR':
-      return `€${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `€ ${standardFormatted}`;
     case 'GBP':
-      return new Intl.NumberFormat('en-GB', {
-        style: 'currency',
-        currency: 'GBP',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(num);
+      return `£ ${standardFormatted}`;
     case 'AED':
-      return `د.إ ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `⃃ ${standardFormatted}`; // Display Unicode U+20C3 for UAE businesses
     case 'SAR':
-      return `ر.س ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `SAR ${standardFormatted}`;
     case 'KWD':
-      return `د.ك ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `KWD ${standardFormatted}`;
+    case 'QAR':
+      return `QAR ${standardFormatted}`;
+    case 'OMR':
+      return `OMR ${standardFormatted}`;
+    case 'BHD':
+      return `BHD ${standardFormatted}`;
     case 'CAD':
-      return `C$ ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `C$ ${standardFormatted}`;
     case 'AUD':
-      return `A$ ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `A$ ${standardFormatted}`;
+    case 'SGD':
+      return `S$ ${standardFormatted}`;
     default: {
-      const sym = getCurrencySymbol(curr);
-      return `${sym}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const sym = getCurrencySymbol(curr).trim();
+      return `${sym} ${standardFormatted}`;
     }
   }
+}
+
+/**
+ * Resolves the canonical, legal title of any document based strictly on its
+ * explicit document_type and draft status.
+ *
+ * Rules:
+ * - proforma_invoice -> PROFORMA INVOICE
+ * - delivery_note / delivery_challan -> DELIVERY NOTE
+ * - quotation -> QUOTATION
+ * - estimate -> ESTIMATE
+ * - receipt -> PAYMENT RECEIPT
+ * - tax_invoice / invoice:
+ *     - if status === 'DRAFT' -> DRAFT INVOICE
+ *     - else if Indian GST registered business -> TAX INVOICE
+ *     - else -> INVOICE
+ */
+export function getDocumentTitle(
+  documentType?: string | null,
+  status?: string | null,
+  isIndiaGst: boolean = false
+): string {
+  const rawType = (documentType || 'tax_invoice').toLowerCase().trim();
+
+  if (rawType === 'proforma_invoice') {
+    return 'PROFORMA INVOICE';
+  }
+  if (rawType === 'delivery_note' || rawType === 'delivery_challan') {
+    return 'DELIVERY NOTE';
+  }
+  if (rawType === 'quotation') {
+    return 'QUOTATION';
+  }
+  if (rawType === 'estimate') {
+    return 'ESTIMATE';
+  }
+  if (rawType === 'receipt') {
+    return 'PAYMENT RECEIPT';
+  }
+
+  // Invoice types
+  if (status === 'DRAFT') {
+    return 'DRAFT INVOICE';
+  }
+  if (isIndiaGst) {
+    return 'TAX INVOICE';
+  }
+  return 'INVOICE';
+}
+
+/**
+ * Generates a clean, professional, sanitized filename for downloaded PDF documents.
+ * Examples:
+ * - Invoice_INV-2026-001.pdf
+ * - TaxInvoice_INV-2026-001.pdf
+ * - Quotation_QT-2026-0042.pdf
+ * - Estimate_EST-2026-0042.pdf
+ * - ProformaInvoice_PI-2026-0012.pdf
+ * - DeliveryNote_DN-2026-0018.pdf
+ * - Receipt_REC-2026-005.pdf
+ */
+export function getSanitizedPdfFilename(
+  documentType?: string | null,
+  documentNumber?: string | null,
+  status?: string | null,
+  isIndiaGst: boolean = false
+): string {
+  const title = getDocumentTitle(documentType, status, isIndiaGst);
+  const words = title.split(/[\s_-]+/);
+  let cleanPrefix = words
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join('');
+  if (cleanPrefix === 'PaymentReceipt') {
+    cleanPrefix = 'Receipt';
+  }
+  const cleanNumber = (documentNumber || 'Document').replace(/[^a-zA-Z0-9-_]/g, '_');
+  return `${cleanPrefix}_${cleanNumber}.pdf`;
+}
+
+/**
+ * Harmonizes payment terms instructions with the quotation's explicit advance_percentage.
+ * Prevents mismatches where the badge states "100% Advance Required" while stale text says "50% advance".
+ */
+export function harmonizePaymentTerms(
+  advancePercentage?: number | null,
+  rawPaymentTermsInstructions?: string | null
+): string {
+  const rawTerms = rawPaymentTermsInstructions?.trim() || '';
+
+  if (advancePercentage === 100) {
+    if (!rawTerms || /50%\s*advance/i.test(rawTerms)) {
+      return 'Payment terms: 100% advance required upon approval to commence work. Remit via Bank Transfer.';
+    }
+    return rawTerms.replace(/\b\d+%\s*advance/gi, '100% advance');
+  }
+
+  if (advancePercentage === 0 || advancePercentage === null) {
+    if (!rawTerms || /50%\s*advance/i.test(rawTerms)) {
+      return 'Payment terms: 100% full payment due upon project completion and delivery. Remit via Bank Transfer.';
+    }
+    return rawTerms.replace(/\b\d+%\s*advance/gi, '100% upon delivery');
+  }
+
+  if (advancePercentage !== undefined && advancePercentage !== null && advancePercentage > 0 && advancePercentage < 100) {
+    if (!rawTerms || /50%\s*advance/i.test(rawTerms)) {
+      return `Payment terms: ${advancePercentage}% advance to commence work, balance upon completion. Remit via Bank Transfer.`;
+    }
+    return rawTerms.replace(/\b\d+%\s*advance/gi, `${advancePercentage}% advance`);
+  }
+
+  return rawTerms || 'Payment terms: 100% payment upon agreement. Remit via Bank Transfer.';
+}
+
+/**
+ * Harmonizes Terms & Conditions text with the quotation's explicit advance_percentage.
+ * Eliminates contradictions such as "2. 50% advance required to commence work."
+ * when the quotation explicitly requires 75% or 100% advance.
+ */
+export function harmonizeTermsAndConditions(
+  advancePercentage?: number | null,
+  rawTermsConditions?: string | null
+): string {
+  if (!rawTermsConditions || !rawTermsConditions.trim()) {
+    if (advancePercentage === 100) {
+      return '1. Quotation valid as per date.\n2. 100% advance required to commence work.\n3. Taxes applicable as per local regulations.';
+    }
+    if (advancePercentage === 0) {
+      return '1. Quotation valid as per date.\n2. Full payment due upon completion / delivery.\n3. Taxes applicable as per local regulations.';
+    }
+    if (advancePercentage && advancePercentage > 0) {
+      return `1. Quotation valid as per date.\n2. ${advancePercentage}% advance required to commence work.\n3. Taxes applicable as per local regulations.`;
+    }
+    return '';
+  }
+
+  const terms = rawTermsConditions.trim();
+  if (advancePercentage === undefined) {
+    return terms;
+  }
+
+  // Target any phrase like "50% advance required to commence work", "50% advance to commence work", "50% advance required upon signature to commence onboarding", "50% advance required", "50% advance"
+  const advanceClauseRegex = /\b\d+%\s*advance(\s+(payment\s+)?(required|to\s+commence|upon|due)[^\n.,;]*)?/gi;
+
+  if (advancePercentage === 100) {
+    if (advanceClauseRegex.test(terms)) {
+      return terms.replace(advanceClauseRegex, '100% advance required to commence work');
+    }
+    return terms;
+  }
+
+  if (advancePercentage === 0 || advancePercentage === null) {
+    if (advanceClauseRegex.test(terms)) {
+      return terms.replace(advanceClauseRegex, 'Full payment due upon completion / delivery');
+    }
+    return terms;
+  }
+
+  if (advancePercentage > 0 && advancePercentage < 100) {
+    if (advanceClauseRegex.test(terms)) {
+      return terms.replace(advanceClauseRegex, `${advancePercentage}% advance required to commence work`);
+    }
+    return terms;
+  }
+
+  return terms;
 }

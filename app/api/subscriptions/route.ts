@@ -5,6 +5,7 @@ import { razorpayService } from '@/lib/billing/razorpay';
 import { syncCloudAdminConfig } from '@/lib/billing/dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 import { getTimezoneFromIp } from '@/lib/utils/ip-timezone';
+import { isOwnerOrAdminRole } from '@/types/staff';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -26,6 +27,23 @@ export async function GET(req: NextRequest) {
       undefined;
     const userTimezone = await getTimezoneFromIp(userIp);
 
+    // If subscription has expired or is nearing expiry, opportunistically sync with gateway
+    const currentSub = await store.getBusinessSubscription(auth.orgId);
+    const now = Date.now();
+    const isPastOrNearing = currentSub?.current_period_end
+      ? new Date(currentSub.current_period_end).getTime() <= now + 86400000
+      : false;
+    const shouldSync = Boolean(
+      req.nextUrl.searchParams.get('sync') === 'true' ||
+      (currentSub?.razorpay_subscription_id && isPastOrNearing)
+    );
+
+    if (shouldSync && currentSub?.razorpay_subscription_id) {
+      try {
+        await subscriptionService.syncBusinessSubscriptionWithGateway(auth.orgId);
+      } catch {}
+    }
+
     const [subscription, access, isEligibleForPromo, payments] = await Promise.all([
       store.getBusinessSubscription(auth.orgId),
       subscriptionService.getBusinessSubscriptionAccess(auth.orgId, userTimezone),
@@ -41,6 +59,12 @@ export async function GET(req: NextRequest) {
     const keyId = razorpayService.getKeyId();
     const isTestMode = Boolean(keyId && keyId.startsWith('rzp_test_'));
 
+    const org = await store.getOrganization(auth.orgId);
+    const rules = await store.getPaymentCountryRules();
+    const { getBillingDetailsForCountry } = await import('@/lib/billing/country-rules');
+    const rawCountry = org?.business_country || org?.country || 'IN';
+    const billingDetails = getBillingDetailsForCountry(rawCountry, rules);
+
     return NextResponse.json({
       success: true,
       subscription,
@@ -52,6 +76,10 @@ export async function GET(req: NextRequest) {
       isTestMode,
       keyId,
       userTimezone,
+      billingDetails,
+      userRole: auth.role,
+      orgName: org?.name || auth.organization?.name || 'Your Organization',
+      adminEmail: org?.email || auth.organization?.email || auth.email,
     });
   } catch (err: any) {
     console.error('Error fetching subscription details:', err);
@@ -67,7 +95,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Only Owner and Admin can subscribe
-    if (auth.role === 'STAFF') {
+    if (!isOwnerOrAdminRole(auth.role)) {
       return NextResponse.json(
         { error: 'Only account Owners and Admins can manage subscriptions' },
         { status: 403 }
@@ -93,8 +121,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('Error initiating subscription checkout:', err);
+    let message = err.message || 'Failed to start subscription';
+    if (message.toLowerCase().includes('authentication failed') || message.includes('401')) {
+      message = 'Razorpay payment gateway authentication failed. Please try again or contact support.';
+    }
     return NextResponse.json(
-      { error: err.message || 'Failed to start subscription' },
+      { error: message },
       { status: 500 }
     );
   }

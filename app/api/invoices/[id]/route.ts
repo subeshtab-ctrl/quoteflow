@@ -9,7 +9,10 @@ export async function GET(
 ) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
 
     const invoice = await store.getInvoiceById(id, orgId);
@@ -42,7 +45,10 @@ export async function PUT(
 ) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
     const body = await request.json();
 
@@ -73,7 +79,10 @@ export async function PATCH(
 ) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
     const { id } = await params;
     const body = await request.json();
 
@@ -161,16 +170,11 @@ export async function DELETE(
 ) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
-    const { id } = await params;
-
-    const userRole = auth?.role || 'ADMIN';
-    if (userRole === 'STAFF') {
-      return NextResponse.json(
-        { error: 'Staff members are not permitted to delete invoices.' },
-        { status: 403 }
-      );
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const orgId = auth.orgId;
+    const { id } = await params;
 
     const invoice = await store.getInvoiceById(id, orgId);
     if (!invoice) {
@@ -184,10 +188,18 @@ export async function DELETE(
       );
     }
 
-    // Live invoices CANNOT be permanently deleted
-    if (invoice.environment === 'live') {
+    const userRole = auth?.role || 'ADMIN';
+    if (invoice.status !== 'DRAFT' && userRole === 'STAFF') {
       return NextResponse.json(
-        { error: 'Live invoices cannot be permanently deleted. You can cancel or void the invoice instead.' },
+        { error: 'Staff members are not permitted to delete non-draft invoices.' },
+        { status: 403 }
+      );
+    }
+
+    // Issued live invoices CANNOT be permanently deleted, but DRAFT invoices CAN be deleted
+    if (invoice.environment === 'live' && invoice.status !== 'DRAFT') {
+      return NextResponse.json(
+        { error: 'Issued live invoices cannot be permanently deleted. Only draft or test invoices can be deleted; you can cancel or void the invoice instead.' },
         { status: 403 }
       );
     }
@@ -196,7 +208,7 @@ export async function DELETE(
 
     return NextResponse.json({
       success: true,
-      message: 'Test invoice deleted permanently.',
+      message: invoice.status === 'DRAFT' ? 'Draft invoice deleted permanently.' : 'Test invoice deleted permanently.',
     });
   } catch (err: any) {
     console.error('Error deleting invoice:', err);

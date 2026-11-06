@@ -14,52 +14,59 @@ import {
   SupportTicketPriority,
   SupportTicketStatus,
   SubscriptionStatus,
+  OrganizationEntitlement,
+  EntitlementStatus,
+  UserAccessCheck,
 } from '@/types/database';
 import { razorpayService } from './razorpay';
 import { getDeveloperAdminConfig, updateRazorpayPlansConfig, syncCloudAdminConfig } from './dev-admin-auth';
 import { store } from '@/lib/supabase/data-store';
 import { getDaysRemainingInTimezone } from '@/lib/utils/ip-timezone';
 import { sendEmail } from '@/lib/email/service';
+import { SUBSCRIPTION_CONFIG } from './subscription-config';
 
 export const DEFAULT_PLANS = {
   FREE_TRIAL: {
     id: 'e0000000-0000-0000-0000-000000000001',
     name: 'QuoteFlow Free Trial',
     slug: 'free_trial',
-    description: 'Complete full-access 30-day free trial for new businesses.',
+    description: `Complete full-access ${SUBSCRIPTION_CONFIG.TRIAL_DAYS}-day free trial for new businesses.`,
     amount: 0,
     currency: 'INR',
     billing_interval: 'month',
     billing_interval_count: 1,
-    trial_days: 30,
+    trial_days: SUBSCRIPTION_CONFIG.TRIAL_DAYS,
     is_active: true,
     is_public: true,
     razorpay_plan_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   } as SubscriptionPlan,
-  PRO_99: {
+  PRO_149: {
     id: 'e0000000-0000-0000-0000-000000000002',
-    name: 'QuoteFlow Pro',
-    slug: 'monthly_99',
-    description: 'Complete recurring monthly subscription at ₹99/month with full access to estimates, quotes, invoicing, and client portal.',
-    amount: 9900, // ₹99
+    name: SUBSCRIPTION_CONFIG.INDIA.name,
+    slug: SUBSCRIPTION_CONFIG.INDIA.slug,
+    description: SUBSCRIPTION_CONFIG.INDIA.description,
+    amount: SUBSCRIPTION_CONFIG.INDIA.amountPaise, // ₹149 (14900 paise)
     currency: 'INR',
     billing_interval: 'month',
     billing_interval_count: 1,
     trial_days: 0,
     is_active: true,
     is_public: true,
-    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_MONTHLY_99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_Tj1jndtNip44ci',
+    razorpay_plan_id: process.env.RAZORPAY_PLAN_ID_STANDARD_149 || process.env.RAZORPAY_PLAN_ID_MONTHLY_149 || process.env.RAZORPAY_PLAN_ID_MONTHLY_99 || process.env.RAZORPAY_PLAN_ID_PROMO_99 || 'plan_standard_149',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   } as SubscriptionPlan,
   // Backward-compatibility aliases
+  get PRO_99() {
+    return this.PRO_149;
+  },
   get PROMO_99() {
-    return this.PRO_99;
+    return this.PRO_149;
   },
   get STANDARD_199() {
-    return this.PRO_99;
+    return this.PRO_149;
   },
 };
 
@@ -84,7 +91,7 @@ export const DEFAULT_PROMOTION: Promotion = {
 
 export class SubscriptionService {
   /**
-   * Start 30-day Free Trial for a business
+   * Start 14-day Free Trial for a business
    */
   public async startFreeTrial(businessId: string): Promise<BusinessSubscription> {
     const existing = await store.getBusinessSubscription(businessId);
@@ -93,7 +100,7 @@ export class SubscriptionService {
     }
 
     const now = new Date();
-    const trialDays = 30;
+    const trialDays = SUBSCRIPTION_CONFIG.TRIAL_DAYS;
     const trialEnd = new Date(now.getTime() + trialDays * 86400000);
 
     const subscription: BusinessSubscription = {
@@ -145,8 +152,8 @@ export class SubscriptionService {
     // Notify business
     await store.addNotification({
       organizationId: businessId,
-      title: 'Welcome to QuoteFlow — 30-Day Free Trial Activated',
-      message: `Your 30-day full access free trial has started and ends on ${trialEnd.toLocaleDateString()}. Enjoy full features with zero charge.`,
+      title: 'Welcome to QuoteFlow — 14-Day Free Trial Activated',
+      message: `Your 14-day full access free trial has started and ends on ${trialEnd.toLocaleDateString()}. Enjoy full features with zero charge.`,
       type: 'VIEWED',
     });
 
@@ -173,21 +180,33 @@ export class SubscriptionService {
       sub.status = 'active';
       sub.last_payment_id = sub.last_payment_id || 'pay_ROXWv9m0b8cR6p';
       sub.razorpay_subscription_id = sub.razorpay_subscription_id || 'sub_ROXWls3W5Yq2x2';
-      sub.amount = 9900;
-      sub.plan = DEFAULT_PLANS.PRO_99;
+      sub.amount = SUBSCRIPTION_CONFIG.INDIA.amountPaise;
+      sub.plan = DEFAULT_PLANS.PRO_149;
     }
 
     const now = Date.now();
     const trialStart = sub.trial_start_at ? new Date(sub.trial_start_at).getTime() : new Date(sub.created_at).getTime();
-    const trialEnd = sub.trial_end_at ? new Date(sub.trial_end_at).getTime() : trialStart + 30 * 86400000;
+    const trialEnd = sub.trial_end_at ? new Date(sub.trial_end_at).getTime() : trialStart + SUBSCRIPTION_CONFIG.TRIAL_DAYS * 86400000;
 
     // Use IP-resolved timezone so a trial ending "today" isn't already expired for
     // someone in IST (+5:30) who still has hours left in their local day.
     const daysRemainingInTrial = getDaysRemainingInTimezone(trialEnd, userTimezone);
 
-    // Grace Period calculation: exactly 3 days after payment becomes due
-    const graceStart = sub.grace_period_start_at ? new Date(sub.grace_period_start_at).getTime() : trialEnd;
-    const graceEnd = sub.grace_period_end_at ? new Date(sub.grace_period_end_at).getTime() : trialEnd + 3 * 86400000;
+    // Paid subscription cycle expiry check
+    const periodEnd = sub.current_period_end ? new Date(sub.current_period_end).getTime() : 0;
+    const isPeriodExpired = Boolean(
+      businessId !== POZONE_ID &&
+      periodEnd > 0 &&
+      now > periodEnd
+    );
+
+    // Grace Period calculation: exactly 3 days after payment becomes due or period ends
+    const graceStart = sub.grace_period_start_at
+      ? new Date(sub.grace_period_start_at).getTime()
+      : (isPeriodExpired ? periodEnd : trialEnd);
+    const graceEnd = sub.grace_period_end_at
+      ? new Date(sub.grace_period_end_at).getTime()
+      : graceStart + 3 * 86400000;
     const graceDaysRemaining = graceEnd > now
       ? Math.max(0, Math.ceil((graceEnd - now) / 86400000))
       : 0;
@@ -200,6 +219,7 @@ export class SubscriptionService {
     );
 
     const isExplicitlyTroubled =
+      isPeriodExpired ||
       sub.status === 'grace_period' ||
       sub.status === 'payment_overdue' ||
       sub.status === 'past_due' ||
@@ -209,10 +229,10 @@ export class SubscriptionService {
 
     const hasConfirmedPayment = Boolean(
       (businessId === POZONE_ID ||
-      sub.last_payment_id ||
-      sub.status === 'active' ||
+      (sub.last_payment_id && !isPeriodExpired) ||
+      (sub.status === 'active' && !isPeriodExpired) ||
       hasCancelledGrace ||
-      (sub.promotional_cycles_completed && sub.promotional_cycles_completed > 0) ||
+      (sub.promotional_cycles_completed && sub.promotional_cycles_completed > 0 && !isPeriodExpired) ||
       sub.is_trial_prepaid) && !isExplicitlyTroubled
     );
 
@@ -220,7 +240,17 @@ export class SubscriptionService {
     let accountAccess: 'active' | 'restricted' = 'active';
     let isRestricted = false;
 
-    if (sub.status === 'grace_period') {
+    if (isPeriodExpired) {
+      if (now <= graceEnd) {
+        effectiveStatus = 'grace_period';
+        accountAccess = 'active';
+        isRestricted = false;
+      } else {
+        effectiveStatus = 'payment_overdue';
+        accountAccess = 'restricted';
+        isRestricted = true;
+      }
+    } else if (sub.status === 'grace_period') {
       if (now <= graceEnd) {
         effectiveStatus = 'grace_period';
         accountAccess = 'active';
@@ -271,15 +301,15 @@ export class SubscriptionService {
     }
 
     const isTrial = effectiveStatus === 'trialing';
-    const isPaid = effectiveStatus === 'active' || hasConfirmedPayment;
+    const isPaid = (effectiveStatus === 'active' || hasConfirmedPayment) && !isPeriodExpired;
     const isPastDue = effectiveStatus === 'past_due';
     const isGracePeriod = effectiveStatus === 'grace_period';
     const isExpired = effectiveStatus === 'expired' || isRestricted;
     const isHalted = effectiveStatus === 'halted';
     const isCancelled = effectiveStatus === 'cancelled';
     const isPaymentPending = effectiveStatus === 'payment_pending';
-    const isPaymentDue = daysRemainingInTrial === 0 && !hasConfirmedPayment;
-    const isPaymentOverdue = effectiveStatus === 'payment_overdue' || (daysRemainingInTrial === 0 && !hasConfirmedPayment && now > graceEnd);
+    const isPaymentDue = (daysRemainingInTrial === 0 && !hasConfirmedPayment) || isPeriodExpired;
+    const isPaymentOverdue = effectiveStatus === 'payment_overdue' || (isPeriodExpired && now > graceEnd) || (daysRemainingInTrial === 0 && !hasConfirmedPayment && now > graceEnd);
 
     // Access policy:
     // Trial: Full normal QuoteFlow access
@@ -289,24 +319,47 @@ export class SubscriptionService {
     // Read-only access to historical data & reports remains permanently available.
     const allowed = !isRestricted && (isTrial || isPaid || isGracePeriod || isPaymentPending);
 
+    const org = await store.getOrganization(businessId);
+    const countryCode = (org?.business_country || (sub as any).billing_country || org?.country || 'IN').toUpperCase();
+    const isIndia = countryCode === 'IN' || (org?.billing_currency || 'INR') === 'INR';
+    const priceDisplay = isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedPrice : SUBSCRIPTION_CONFIG.GLOBAL.formattedPrice;
+    const pricePerMonth = isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedMonthly : SUBSCRIPTION_CONFIG.GLOBAL.formattedMonthly;
+    const effectivePlanAmount = isIndia ? SUBSCRIPTION_CONFIG.INDIA.amountPaise : SUBSCRIPTION_CONFIG.GLOBAL.amountCents;
+
     let warningMessage: string | null = null;
+    const formattedPeriodEnd = sub.current_period_end
+      ? new Date(sub.current_period_end).toLocaleDateString(isIndia ? 'en-IN' : 'en-US', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })
+      : 'recently';
+
     if (isRestricted) {
-      warningMessage = '🔒 Billing Required: Your ₹99 subscription payment is overdue. Please complete payment to restore full QuoteFlow access.';
-    } else if (isGracePeriod) {
-      const overdueDay = Math.min(3, Math.max(1, 4 - graceDaysRemaining));
-      if (overdueDay === 1) {
-        warningMessage = '⚠️ Payment overdue: Your ₹99 QuoteFlow payment is overdue. Please complete payment to avoid interruption (grace period active).';
-      } else if (overdueDay === 2) {
-        warningMessage = '⚠️ Payment overdue: Your ₹99 payment is 2 days overdue. Please pay now to keep your account active (grace period active).';
+      if (isPeriodExpired) {
+        warningMessage = `🔒 QuoteFlow Pro Overdue: Your subscription expired on ${formattedPeriodEnd} and the 3-day grace period has ended. Please complete payment (${priceDisplay}) to restore full access.`;
       } else {
-        warningMessage = '🚨 Final payment reminder: Your ₹99 QuoteFlow payment is 3 days overdue. Please complete payment today to avoid account restrictions (grace period active).';
+        warningMessage = `🔒 Billing Required: Your ${priceDisplay} subscription payment is overdue. Please complete payment to restore full QuoteFlow access.`;
+      }
+    } else if (isGracePeriod) {
+      if (isPeriodExpired) {
+        warningMessage = `⚠️ Subscription Renewal Pending: Your QuoteFlow Pro subscription expired on ${formattedPeriodEnd}. Razorpay recurring auto-debit was not confirmed or is pending at your bank. Your account is in a 3-day grace period (${graceDaysRemaining} day(s) remaining). Please complete renewal to avoid interruption.`;
+      } else {
+        const overdueDay = Math.min(3, Math.max(1, 4 - graceDaysRemaining));
+        if (overdueDay === 1) {
+          warningMessage = `⚠️ Payment overdue: Your ${priceDisplay} QuoteFlow payment is overdue. Please complete payment to avoid interruption (grace period active).`;
+        } else if (overdueDay === 2) {
+          warningMessage = `⚠️ Payment overdue: Your ${priceDisplay} payment is 2 days overdue. Please pay now to keep your account active (grace period active).`;
+        } else {
+          warningMessage = `🚨 Final payment reminder: Your ${priceDisplay} QuoteFlow payment is 3 days overdue. Please complete payment today to avoid account restrictions (grace period active).`;
+        }
       }
     } else if (isExpired) {
       warningMessage = 'Your QuoteFlow free trial has expired. Please subscribe to restore access.';
     } else if (isTrial && daysRemainingInTrial <= 7) {
-      warningMessage = `⚠️ Your free trial ends in ${daysRemainingInTrial} ${daysRemainingInTrial === 1 ? 'day' : 'days'}. After your trial: ₹99/month.`;
+      warningMessage = `⚠️ Your free trial ends in ${daysRemainingInTrial} ${daysRemainingInTrial === 1 ? 'day' : 'days'}. After your trial: ${pricePerMonth}.`;
     } else if (hasCancelledGrace) {
-      const activeUntilFormatted = new Date(sub.current_period_end!).toLocaleDateString('en-IN', {
+      const activeUntilFormatted = new Date(sub.current_period_end!).toLocaleDateString(isIndia ? 'en-IN' : 'en-US', {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
@@ -325,6 +378,8 @@ export class SubscriptionService {
       } else {
         nextPaymentDue = sub.current_period_end || sub.next_charge_at || new Date(now + 30 * 86400000).toISOString();
       }
+    } else if (isPeriodExpired) {
+      nextPaymentDue = sub.current_period_end || new Date().toISOString();
     } else {
       nextPaymentDue = sub.trial_end_at || new Date(trialEnd).toISOString();
     }
@@ -350,7 +405,7 @@ export class SubscriptionService {
       trialEndsAt: sub.trial_end_at,
       nextPaymentDue: hasCancelledGrace ? null : nextPaymentDue,
       planName: isTrial && !hasConfirmedPayment ? 'QuoteFlow Free Trial' : (sub.plan?.name || 'QuoteFlow Pro'),
-      planAmount: 9900,
+      planAmount: effectivePlanAmount,
       promoActive: false,
       promoMonthsRemaining: 0,
       promotionalCyclesCompleted: hasConfirmedPayment ? 1 : 0,
@@ -358,12 +413,148 @@ export class SubscriptionService {
       planStartMode: sub.plan_start_mode || 'after_trial',
       autopayEnabled: Boolean(hasConfirmedPayment && !sub.cancel_at_period_end && sub.status !== 'cancelled' && !hasCancelledGrace),
       autopayNextDate: hasCancelledGrace ? null : nextPaymentDue,
-      autopayAmount: 9900,
+      autopayAmount: effectivePlanAmount,
       razorpaySubscriptionId: sub.razorpay_subscription_id || null,
       lastPaymentId: sub.last_payment_id || null,
       cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end || hasCancelledGrace),
       activeUntil: sub.current_period_end || null,
       warningMessage,
+      currency: isIndia ? 'INR' : 'USD',
+      priceDisplay,
+    } as any;
+  }
+
+  /**
+   * Authoritative Central Entitlement Resolver for Organizations / Businesses.
+   * Subscription and trial belong strictly to the Organization, never to staff accounts.
+   * Concept:
+   *   plan: PRO
+   *   status: TRIALING | ACTIVE | CANCELLED | EXPIRED
+   *   hasAccess: boolean
+   *   expiresAt: timestamp
+   */
+  public async getOrganizationEntitlement(
+    organizationId: string,
+    userTimezone = 'UTC'
+  ): Promise<OrganizationEntitlement> {
+    const access = await this.getBusinessSubscriptionAccess(organizationId, userTimezone);
+    const sub = await store.getBusinessSubscription(organizationId);
+
+    const now = Date.now();
+    let status: EntitlementStatus = 'EXPIRED';
+    let hasAccess = false;
+    let expiresAt: string | null = null;
+    let daysRemaining = 0;
+
+    // Check if subscription was cancelled with paid period remaining
+    const isCancelledPeriodActive = Boolean(
+      (sub?.cancel_at_period_end || sub?.status === 'cancelled' || sub?.cancelled_at) &&
+      sub?.current_period_end &&
+      new Date(sub.current_period_end).getTime() > now
+    );
+
+    if (isCancelledPeriodActive) {
+      status = 'CANCELLED';
+      hasAccess = true;
+      expiresAt = sub!.current_period_end;
+      daysRemaining = Math.max(0, Math.ceil((new Date(sub!.current_period_end!).getTime() - now) / 86400000));
+    } else if (access.isPaid && !access.isRestricted && !access.isExpired) {
+      status = 'ACTIVE';
+      hasAccess = true;
+      expiresAt = sub?.current_period_end || access.nextPaymentDue || null;
+      if (expiresAt) {
+        daysRemaining = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 86400000));
+      } else {
+        daysRemaining = 30;
+      }
+    } else if (access.isTrial && !access.isRestricted && !access.isExpired) {
+      status = 'TRIALING';
+      hasAccess = true;
+      expiresAt = access.trialEndsAt;
+      daysRemaining = access.daysRemainingInTrial;
+    } else if (access.isGracePeriod && !access.isRestricted) {
+      // Within 3-day grace period
+      status = 'ACTIVE';
+      hasAccess = true;
+      expiresAt = sub?.current_period_end
+        ? new Date(new Date(sub.current_period_end).getTime() + 3 * 86400000).toISOString()
+        : access.trialEndsAt;
+      daysRemaining = access.graceDaysRemaining;
+    } else {
+      status = 'EXPIRED';
+      hasAccess = false;
+      expiresAt = access.trialEndsAt || sub?.current_period_end || null;
+      daysRemaining = 0;
+    }
+
+    return {
+      plan: 'PRO',
+      status,
+      hasAccess,
+      expiresAt,
+      isTrial: status === 'TRIALING',
+      isPaid: status === 'ACTIVE' || status === 'CANCELLED',
+      isCancelled: status === 'CANCELLED',
+      daysRemaining,
+    };
+  }
+
+  /**
+   * Checks both User Active status and Organization Entitlement.
+   * Access check order:
+   * 1. Is user active in organization? -> If NO, block immediately.
+   * 2. Is organization subscription active? -> If NO, block Pro features.
+   */
+  public async checkUserAccess(
+    userId: string,
+    organizationId: string
+  ): Promise<UserAccessCheck> {
+    const entitlement = await this.getOrganizationEntitlement(organizationId);
+
+    // Verify membership in DB or memory
+    const { createAdminClient } = await import('@/lib/supabase/service-role');
+    const admin = createAdminClient();
+    if (admin) {
+      try {
+        const { data: member } = await admin
+          .from('organization_members')
+          .select('id, is_active, role')
+          .eq('organization_id', organizationId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (!member) {
+          return {
+            hasAccess: false,
+            reason: 'USER_NOT_FOUND',
+            entitlement,
+          };
+        }
+
+        if (member.is_active === false) {
+          return {
+            hasAccess: false,
+            reason: 'USER_DEACTIVATED',
+            entitlement,
+          };
+        }
+      } catch (err) {
+        console.warn('checkUserAccess query warning:', err);
+      }
+    }
+
+    if (!entitlement.hasAccess) {
+      return {
+        hasAccess: false,
+        reason: 'SUBSCRIPTION_EXPIRED',
+        entitlement,
+      };
+    }
+
+    return {
+      hasAccess: true,
+      reason: 'ACTIVE',
+      entitlement,
     };
   }
 
@@ -405,13 +596,15 @@ export class SubscriptionService {
     trialEndAt?: string | null;
     isMock?: boolean;
   }> {
-    const targetPlan = DEFAULT_PLANS.PRO_99;
+    const targetPlan = DEFAULT_PLANS.PRO_149;
     const isPromo = false;
 
     // 1. Resolve Razorpay Plan ID from Developer Admin config, environment, or target plan
     await syncCloudAdminConfig();
     const cfg = getDeveloperAdminConfig();
     let rzpPlanId =
+      process.env.RAZORPAY_PLAN_ID_STANDARD_149 ||
+      process.env.RAZORPAY_PLAN_ID_MONTHLY_149 ||
       cfg.razorpayPlanIdPromo99 ||
       process.env.RAZORPAY_PLAN_ID_MONTHLY_99 ||
       process.env.RAZORPAY_PLAN_ID_PROMO_99 ||
@@ -492,10 +685,19 @@ export class SubscriptionService {
       });
     } catch (createErr: any) {
       const errMsg = createErr?.message || '';
+      const isAuthError =
+        errMsg.includes('401') ||
+        errMsg.toLowerCase().includes('authentication failed');
+
+      if (isAuthError) {
+        throw new Error('Razorpay payment gateway authentication failed. Please try again or contact support.');
+      }
+
       const isInvalidPlanError =
-        errMsg.includes('invalid or could not be found') ||
-        errMsg.includes('400') ||
-        errMsg.includes('BAD_REQUEST_ERROR');
+        !isAuthError &&
+        (errMsg.includes('invalid or could not be found') ||
+          errMsg.includes('400') ||
+          (errMsg.includes('BAD_REQUEST_ERROR') && !errMsg.includes('401')));
 
       if (razorpayService.isConfigured() && isInvalidPlanError) {
         console.warn(`[QuoteFlow] Configured plan ID (${rzpPlanId}) was rejected by Razorpay. Auto-healing plan...`);
@@ -646,14 +848,18 @@ export class SubscriptionService {
       failure_reason: null,
       paid_at: now.toISOString(),
       created_at: now.toISOString(),
+      provider: 'razorpay',
     };
     await store.saveSubscriptionPayment(paymentRecord);
 
-    // 2. Lifecycle & Plan Update (QuoteFlow Pro ₹99/month)
-    sub.plan_id = DEFAULT_PLANS.PRO_99.id;
-    sub.amount = DEFAULT_PLANS.PRO_99.amount;
-    sub.plan = DEFAULT_PLANS.PRO_99;
+    // 2. Lifecycle & Plan Update (QuoteFlow Pro ₹149/month)
+    sub.plan_id = DEFAULT_PLANS.PRO_149.id;
+    sub.amount = DEFAULT_PLANS.PRO_149.amount;
+    sub.plan = DEFAULT_PLANS.PRO_149;
     sub.status = 'active';
+    sub.provider = 'razorpay';
+    (sub as any).payment_provider = 'RAZORPAY';
+    (sub as any).payment_status = 'paid';
     (sub as any).account_access = 'active';
     sub.last_payment_at = now.toISOString();
     sub.last_payment_id = params.paymentId;
@@ -699,6 +905,86 @@ export class SubscriptionService {
   }
 
   /**
+   * Real-time gateway status verification & sync.
+   * Checks with Razorpay API whether the subscription/autopay mandate was cancelled, halted, or charged.
+   * In India, if a customer cancels the UPI Autopay / e-Mandate directly inside Google Pay, PhonePe, or Netbanking,
+   * Razorpay marks the subscription as cancelled/halted. This method syncs that state back to QuoteFlow.
+   */
+  public async syncBusinessSubscriptionWithGateway(businessId: string): Promise<{
+    synced: boolean;
+    gatewayStatus?: string;
+    message: string;
+    subscription: BusinessSubscription;
+  }> {
+    let sub = await store.getBusinessSubscription(businessId);
+    if (!sub) {
+      sub = await this.startFreeTrial(businessId);
+      return { synced: false, message: 'Free trial initialized.', subscription: sub };
+    }
+
+    if (!sub.razorpay_subscription_id) {
+      return { synced: false, message: 'No Razorpay subscription associated.', subscription: sub };
+    }
+
+    try {
+      const rzpSub = await razorpayService.getSubscription(sub.razorpay_subscription_id);
+      if (!rzpSub || !rzpSub.status) {
+        return { synced: false, message: 'Unable to fetch status from gateway.', subscription: sub };
+      }
+
+      let updated = false;
+
+      // 1. Mandate cancelled by customer at bank/UPI or Razorpay
+      if (rzpSub.status === 'cancelled') {
+        if (sub.status !== 'cancelled') {
+          sub.status = 'cancelled';
+          sub.cancelled_at = sub.cancelled_at || new Date().toISOString();
+          sub.cancellation_reason = 'Autopay mandate cancelled by customer via bank or UPI app';
+          updated = true;
+        }
+      } else if (rzpSub.status === 'halted') {
+        if (sub.status !== 'halted') {
+          sub.status = 'halted';
+          sub.cancellation_reason = 'Recurring payment mandate halted by bank or gateway';
+          updated = true;
+        }
+      } else if (rzpSub.status === 'active') {
+        // If Razorpay reports active and current_end has advanced:
+        if (rzpSub.current_end) {
+          const rzpPeriodEndIso = new Date(rzpSub.current_end * 1000).toISOString();
+          if (sub.current_period_end && new Date(rzpPeriodEndIso).getTime() > new Date(sub.current_period_end).getTime()) {
+            sub.current_period_start = rzpSub.current_start ? new Date(rzpSub.current_start * 1000).toISOString() : sub.current_period_end;
+            sub.current_period_end = rzpPeriodEndIso;
+            sub.status = 'active';
+            sub.grace_period_start_at = null;
+            sub.grace_period_end_at = null;
+            sub.payment_failure_count = 0;
+            updated = true;
+          }
+        }
+      }
+
+      if (updated) {
+        sub.updated_at = new Date().toISOString();
+        await store.saveBusinessSubscription(sub);
+      }
+
+      return {
+        synced: true,
+        gatewayStatus: rzpSub.status,
+        message: `Gateway status verified: ${rzpSub.status}.`,
+        subscription: sub,
+      };
+    } catch (err: any) {
+      return {
+        synced: false,
+        message: `Gateway check skipped: ${err?.message || 'Gateway offline'}`,
+        subscription: sub,
+      };
+    }
+  }
+
+  /**
    * Process Controlled Billing Reminders with Deduplication (Requirements 11, 12, 16, 18, 47)
    * Schedule: 7, 5, 3, 1 days before trial ends, trial expiry / payment due, grace day 1, 2, 3
    */
@@ -707,8 +993,14 @@ export class SubscriptionService {
     const org = await store.getOrganization(businessId);
     const recipientEmail = org?.email;
     const companyName = org?.name || 'Your Company';
+    const countryCode = (org?.business_country || org?.country || 'IN').toUpperCase();
+    const isIndia = countryCode === 'IN' || (org?.billing_currency || 'INR') === 'INR';
+    const priceDisplay = isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedPrice : SUBSCRIPTION_CONFIG.GLOBAL.formattedPrice;
+    const pricePerMonth = isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedMonthly : SUBSCRIPTION_CONFIG.GLOBAL.formattedMonthly;
+    const locale = isIndia ? 'en-IN' : 'en-US';
+
     const trialEndDate = access.trialEndsAt
-      ? new Date(access.trialEndsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      ? new Date(access.trialEndsAt).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })
       : 'soon';
 
     // 1. Trial Reminders (7, 5, 3, 1 days before trial ends)
@@ -722,7 +1014,7 @@ export class SubscriptionService {
           await store.addNotification({
             organizationId: businessId,
             title: `⚠️ Free Trial Ends in ${days} ${days === 1 ? 'Day' : 'Days'}`,
-            message: `Your free trial ends in ${days} ${days === 1 ? 'day' : 'days'}. After your trial: ₹99/month. Subscribe anytime to keep your access uninterrupted.`,
+            message: `Your free trial ends in ${days} ${days === 1 ? 'day' : 'days'}. After your trial: ${pricePerMonth}. Subscribe anytime to keep your access uninterrupted.`,
             type: 'EXPIRING',
           });
 
@@ -734,7 +1026,11 @@ export class SubscriptionService {
               daysRemaining: days,
               trialEndDate,
               subscribeUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com'}/billing`,
-            });
+              planPrice: pricePerMonth,
+              currency: isIndia ? 'INR' : 'USD',
+              country: countryCode,
+              isIndia,
+            } as any);
             emailData.to = recipientEmail;
             await sendEmail(emailData).catch(console.error);
           }
@@ -751,8 +1047,8 @@ export class SubscriptionService {
       if (!alreadySent) {
         await store.addNotification({
           organizationId: businessId,
-          title: '⚠️ Payment Due — ₹99 Payment is Due',
-          message: `Your QuoteFlow 30-day free trial has concluded. ₹99 payment is due. Due date: ${trialEndDate}. Please pay now to continue using QuoteFlow.`,
+          title: `⚠️ Payment Due — ${priceDisplay} Payment is Due`,
+          message: `Your QuoteFlow 14-day free trial has concluded. ${priceDisplay} payment is due. Due date: ${trialEndDate}. Please pay now to continue using QuoteFlow.`,
           type: 'EXPIRING',
         });
 
@@ -762,7 +1058,8 @@ export class SubscriptionService {
             companyName,
             dueDate: trialEndDate,
             payUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com'}/billing`,
-          });
+            planPrice: priceDisplay,
+          } as any);
           emailData.to = recipientEmail;
           await sendEmail(emailData).catch(console.error);
         }
@@ -779,14 +1076,14 @@ export class SubscriptionService {
       const alreadySent = await store.isReminderSent(businessId, reminderKey);
       if (!alreadySent) {
         let title = `⚠️ Payment Overdue (Day ${overdueDay})`;
-        let msg = `Your ₹99 QuoteFlow payment is overdue. Please complete payment to avoid interruption.`;
+        let msg = `Your ${priceDisplay} QuoteFlow payment is overdue. Please complete payment to avoid interruption.`;
 
         if (overdueDay === 2) {
           title = `⚠️ Payment Overdue — 2 Days Overdue`;
-          msg = `Your ₹99 payment is 2 days overdue. Please pay now to keep your account active.`;
+          msg = `Your ${priceDisplay} payment is 2 days overdue. Please pay now to keep your account active.`;
         } else if (overdueDay === 3) {
           title = `🚨 Final Payment Reminder — 3 Days Overdue`;
-          msg = `Your ₹99 QuoteFlow payment is 3 days overdue. Please complete payment today to avoid account restrictions.`;
+          msg = `Your ${priceDisplay} QuoteFlow payment is 3 days overdue. Please complete payment today to avoid account restrictions.`;
         }
 
         await store.addNotification({
@@ -814,6 +1111,262 @@ export class SubscriptionService {
   }
 
   /**
+   * Dispatch On-Demand or Scheduled Trial Expiration Reminder for a specific business
+   */
+  public async sendTrialExpirationReminder(
+    businessId: string,
+    options?: {
+      daysRemaining?: number;
+      channel?: 'email' | 'whatsapp' | 'both';
+      force?: boolean;
+    }
+  ): Promise<{
+    success: boolean;
+    emailSent: boolean;
+    whatsappPrepared: boolean;
+    message: string;
+    waLink?: string;
+    daysRemaining: number;
+  }> {
+    const access = await this.getBusinessSubscriptionAccess(businessId);
+    const sub = await store.getBusinessSubscription(businessId);
+    const org = await store.getOrganization(businessId);
+    const channel = options?.channel || 'both';
+
+    const calculatedDays = access.daysRemainingInTrial ?? (sub?.trial_end_at ? Math.max(0, Math.ceil((new Date(sub.trial_end_at).getTime() - Date.now()) / 86400000)) : 7);
+    const daysRemaining = typeof options?.daysRemaining === 'number' ? Math.max(0, options.daysRemaining) : Math.max(0, calculatedDays);
+
+    const companyName = org?.name || (sub as any)?.business_name || 'Valued Business';
+    const recipientEmail = (org?.email || (org as any)?.contact_email || '').trim();
+    const recipientPhone = ((org as any)?.phone || (org as any)?.whatsapp_number || (org as any)?.contact_phone || (org as any)?.billing_phone || '').replace(/[^\d]/g, '');
+
+    const countryCode = (org?.business_country || (sub as any)?.billing_country || org?.country || 'IN').toUpperCase();
+    const isIndia = countryCode === 'IN' || (org?.billing_currency || 'INR') === 'INR';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
+    const renewUrl = `${appUrl}/billing`;
+
+    let emailSent = false;
+    let whatsappPrepared = false;
+    let waLink: string | undefined = undefined;
+
+    // 1. Dispatch Email Reminder
+    if (channel === 'email' || channel === 'both') {
+      if (recipientEmail && !recipientEmail.endsWith('@mobile.client') && !recipientEmail.endsWith('@client.local')) {
+        const reminderKey = `reminder_${businessId}_trial_${daysRemaining}d`;
+        const alreadySent = await store.isReminderSent(businessId, reminderKey);
+
+        if (!alreadySent || options?.force) {
+          const { generateTrialReminderEmail } = await import('@/lib/email/service');
+          const emailPayload = generateTrialReminderEmail({
+            companyName,
+            daysRemaining,
+            trialEndDate: access.trialEndsAt || sub?.trial_end_at || undefined,
+            trialEndsAt: access.trialEndsAt || sub?.trial_end_at || undefined,
+            subscribeUrl: renewUrl,
+            planPrice: isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedMonthly : SUBSCRIPTION_CONFIG.GLOBAL.formattedMonthly,
+            currency: isIndia ? 'INR' : 'USD',
+            country: countryCode,
+            isIndia,
+          });
+          emailPayload.to = recipientEmail;
+
+          const res = await sendEmail(emailPayload);
+          if (res.success) {
+            emailSent = true;
+            await store.recordReminderSent(businessId, reminderKey);
+          }
+        }
+      }
+    }
+
+    // 2. Prepare / Dispatch WhatsApp Reminder
+    if (channel === 'whatsapp' || channel === 'both') {
+      const priceText = isIndia ? '₹149 / month' : '$12 / month';
+      const reminderText = `⏳ *QuoteFlow Free Trial Reminder*\n\nHi ${companyName},\n\nYour QuoteFlow free trial ends in *${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'}*.\n\nPlease upgrade your account to keep creating AI quotations, sending professional invoices, and managing your clients without interruption.\n\n👉 *Renew Now:* ${renewUrl}\n\nSimple & Affordable Plan:\n• QuoteFlow Pro: ${priceText}\n\nNeed help? Contact support at hello@blendandbold.com.`;
+
+      const encodedMsg = encodeURIComponent(reminderText);
+      waLink = recipientPhone ? `https://wa.me/${recipientPhone}?text=${encodedMsg}` : `https://wa.me/?text=${encodedMsg}`;
+
+      if (recipientPhone) {
+        try {
+          const { sendAdminOutreachWhatsAppMessage } = await import('@/lib/whatsapp/admin-whatsapp-service');
+          const waRes = await sendAdminOutreachWhatsAppMessage({
+            recipientPhone,
+            businessName: companyName,
+            businessId,
+            message: reminderText,
+            portalLink: renewUrl,
+          });
+          if (waRes.success) {
+            whatsappPrepared = true;
+          }
+        } catch {
+          // WhatsApp direct dispatch silent fallback to link
+        }
+      }
+      whatsappPrepared = true;
+      const waReminderKey = `reminder_${businessId}_trial_wa_${daysRemaining}d`;
+      await store.recordReminderSent(businessId, waReminderKey);
+    }
+
+    // In-App Notification
+    await store.addNotification({
+      organizationId: businessId,
+      title: `⏳ Free Trial Reminder — ${daysRemaining} ${daysRemaining === 1 ? 'Day' : 'Days'} Remaining`,
+      message: `Your QuoteFlow free trial ends in ${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'}. Please renew your plan to ensure continuous access.`,
+      type: 'EXPIRING',
+    });
+
+    return {
+      success: emailSent || whatsappPrepared,
+      emailSent,
+      whatsappPrepared,
+      message: `Trial reminder (${daysRemaining} days remaining) processed. Email: ${emailSent ? 'Sent' : 'Skipped/Unavailable'}, WhatsApp: ${whatsappPrepared ? 'Ready' : 'Unavailable'}.`,
+      waLink,
+      daysRemaining,
+    };
+  }
+
+  /**
+   * Process Automated Trial Expiration Reminders across all registered businesses
+   * Evaluates milestone days (7, 5, 3, 2, 1, 0 days remaining) with deduplication.
+   */
+  public async processAllAutomatedTrialReminders(options?: {
+    forceMilestoneDays?: number[];
+    simulateOnly?: boolean;
+  }): Promise<{
+    success: boolean;
+    totalBusinessesEvaluated: number;
+    trialBusinessesFound: number;
+    remindersDispatched: number;
+    remindersSkippedAlreadySent: number;
+    details: Array<{
+      businessId: string;
+      businessName: string;
+      email: string;
+      daysRemaining: number;
+      action: 'dispatched' | 'skipped_already_sent' | 'no_email' | 'not_milestone';
+      reminderKey?: string;
+    }>;
+  }> {
+    const milestones = options?.forceMilestoneDays || [7, 5, 3, 2, 1, 0];
+    const { subscribers } = await store.getAllSubscribers({ limit: 10000 });
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://www.blendandbold.com';
+
+    let trialBusinessesFound = 0;
+    let remindersDispatched = 0;
+    let remindersSkippedAlreadySent = 0;
+    const details: any[] = [];
+
+    for (const sub of subscribers) {
+      try {
+        const businessId = sub.business_id;
+        const access = await this.getBusinessSubscriptionAccess(businessId);
+
+        // Only evaluate businesses currently on free trial and not paid
+        if (!access.isTrial || access.isPaid) {
+          continue;
+        }
+
+        trialBusinessesFound++;
+        const org = await store.getOrganization(businessId);
+        const recipientEmail = (org?.email || (org as any)?.contact_email || '').trim();
+        const businessName = org?.name || (sub as any).business_name || 'Valued Business';
+        const daysRemaining = access.daysRemainingInTrial ?? 0;
+
+        if (!milestones.includes(daysRemaining)) {
+          details.push({
+            businessId,
+            businessName,
+            email: recipientEmail,
+            daysRemaining,
+            action: 'not_milestone',
+          });
+          continue;
+        }
+
+        if (!recipientEmail || recipientEmail.endsWith('@mobile.client') || recipientEmail.endsWith('@client.local')) {
+          details.push({
+            businessId,
+            businessName,
+            email: recipientEmail || 'None',
+            daysRemaining,
+            action: 'no_email',
+          });
+          continue;
+        }
+
+        const reminderKey = `reminder_${businessId}_trial_${daysRemaining}d`;
+        const alreadySent = await store.isReminderSent(businessId, reminderKey);
+
+        if (alreadySent) {
+          remindersSkippedAlreadySent++;
+          details.push({
+            businessId,
+            businessName,
+            email: recipientEmail,
+            daysRemaining,
+            action: 'skipped_already_sent',
+            reminderKey,
+          });
+          continue;
+        }
+
+        if (!options?.simulateOnly) {
+          const countryCode = (org?.business_country || (sub as any)?.billing_country || org?.country || 'IN').toUpperCase();
+          const isIndia = countryCode === 'IN' || (org?.billing_currency || 'INR') === 'INR';
+          const { generateTrialReminderEmail } = await import('@/lib/email/service');
+
+          const emailPayload = generateTrialReminderEmail({
+            companyName: businessName,
+            daysRemaining,
+            trialEndDate: access.trialEndsAt || sub.trial_end_at || undefined,
+            trialEndsAt: access.trialEndsAt || sub.trial_end_at || undefined,
+            subscribeUrl: `${appUrl}/billing`,
+            planPrice: isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedMonthly : SUBSCRIPTION_CONFIG.GLOBAL.formattedMonthly,
+            currency: isIndia ? 'INR' : 'USD',
+            country: countryCode,
+            isIndia,
+          });
+          emailPayload.to = recipientEmail;
+
+          await sendEmail(emailPayload);
+
+          await store.addNotification({
+            organizationId: businessId,
+            title: `⏳ Free Trial Reminder — ${daysRemaining} ${daysRemaining === 1 ? 'Day' : 'Days'} Remaining`,
+            message: `Your QuoteFlow free trial concludes in ${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'}. Please renew your subscription to maintain uninterrupted access.`,
+            type: 'EXPIRING',
+          });
+
+          await store.recordReminderSent(businessId, reminderKey);
+        }
+
+        remindersDispatched++;
+        details.push({
+          businessId,
+          businessName,
+          email: recipientEmail,
+          daysRemaining,
+          action: 'dispatched',
+          reminderKey,
+        });
+      } catch (err) {
+        console.error(`[Automated Trial Reminders] Error processing business ${sub.business_id}:`, err);
+      }
+    }
+
+    return {
+      success: true,
+      totalBusinessesEvaluated: subscribers.length,
+      trialBusinessesFound,
+      remindersDispatched,
+      remindersSkippedAlreadySent,
+      details,
+    };
+  }
+
+  /**
    * Apply Admin Offer to a Business (Requirements 27, 28, 44)
    * Types: Percentage discount, Fixed amount discount, Free months, Special monthly rate
    * Safety check: Applies to future billing cycles only! Never modifies past captured payments.
@@ -836,11 +1389,11 @@ export class SubscriptionService {
 
     if (params.offerType === 'percentage') {
       const discountPct = Math.min(100, Math.max(1, params.value));
-      adjustedAmount = Math.round(9900 * (1 - discountPct / 100));
+      adjustedAmount = Math.round(SUBSCRIPTION_CONFIG.INDIA.amountPaise * (1 - discountPct / 100));
       description = `${discountPct}% off for ${duration} month(s)`;
     } else if (params.offerType === 'fixed') {
       const discountPaise = params.value * 100;
-      adjustedAmount = Math.max(0, 9900 - discountPaise);
+      adjustedAmount = Math.max(0, SUBSCRIPTION_CONFIG.INDIA.amountPaise - discountPaise);
       description = `₹${params.value} off for ${duration} month(s)`;
     } else if (params.offerType === 'free_months') {
       adjustedAmount = 0;
@@ -918,16 +1471,30 @@ export class SubscriptionService {
       sub = await this.startFreeTrial(params.businessId);
     }
 
+    const org = await store.getOrganization(params.businessId);
+    const countryCode = (org?.business_country || (sub as any).billing_country || org?.country || 'IN').toUpperCase();
+    const isIndia = countryCode === 'IN' || (org?.billing_currency || 'INR') === 'INR';
+    const amount = isIndia ? SUBSCRIPTION_CONFIG.INDIA.amountPaise : SUBSCRIPTION_CONFIG.GLOBAL.monthlyPrice;
+    const currency = isIndia ? 'INR' : 'USD';
+    const plan = isIndia ? DEFAULT_PLANS.PRO_149 : ((DEFAULT_PLANS as any).PRO_USD_12 || {
+      id: 'plan_international_usd_12',
+      name: SUBSCRIPTION_CONFIG.GLOBAL.name,
+      amount: SUBSCRIPTION_CONFIG.GLOBAL.monthlyPrice,
+      currency: 'USD',
+      interval: 'month',
+    });
+
     const now = new Date();
     const durationDays = params.durationDays && params.durationDays > 0 ? params.durationDays : 30;
     const periodEnd = new Date(now.getTime() + durationDays * 86400000);
     const payRef = params.paymentReference?.trim() || `pay_manual_${Date.now().toString(36)}`;
 
-    sub.plan = DEFAULT_PLANS.PRO_99;
-    sub.plan_id = DEFAULT_PLANS.PRO_99.id;
-    sub.amount = 9900;
-    sub.currency = 'INR';
+    sub.plan = plan;
+    sub.plan_id = plan.id;
+    sub.amount = amount;
+    sub.currency = currency;
     sub.status = 'active';
+    (sub as any).payment_status = 'paid';
     sub.is_trial_prepaid = false;
     sub.plan_start_mode = 'immediate';
     sub.current_period_start = now.toISOString();
@@ -935,7 +1502,11 @@ export class SubscriptionService {
     sub.next_charge_at = periodEnd.toISOString();
     sub.last_payment_id = payRef;
     sub.last_payment_at = now.toISOString();
-    (sub as any).payment_provider = 'razorpay_manual_activation';
+    (sub as any).payment_provider = 'manual';
+    (sub as any).provider = 'manual';
+    (sub as any).billing_currency = currency;
+    (sub as any).billing_region = isIndia ? 'INDIA' : 'INTERNATIONAL';
+    (sub as any).billing_country = countryCode;
     sub.updated_at = now.toISOString();
 
     await store.saveBusinessSubscription(sub);
@@ -945,16 +1516,18 @@ export class SubscriptionService {
       id: crypto.randomUUID(),
       business_id: params.businessId,
       subscription_id: sub.id,
-      razorpay_payment_id: payRef,
+      razorpay_payment_id: isIndia ? payRef : undefined,
+      provider_payment_id: payRef,
       razorpay_subscription_id: sub.razorpay_subscription_id || null,
       razorpay_invoice_id: `inv_manual_${Date.now().toString(36)}`,
-      amount: 9900,
-      currency: 'INR',
+      amount: amount,
+      currency: currency,
       status: 'captured',
       payment_method: 'manual_verification',
       failure_reason: null,
       paid_at: now.toISOString(),
       created_at: now.toISOString(),
+      provider: 'manual',
     };
     await store.saveSubscriptionPayment(payment);
 
@@ -969,23 +1542,29 @@ export class SubscriptionService {
       metadata: {
         business_id: params.businessId,
         payment_reference: payRef,
-        reason: params.reason || 'Manual activation via Developer Dashboard (Razorpay network issue / manual verification)',
+        country: countryCode,
+        currency,
+        amount,
+        reason: params.reason || 'Manual activation via Developer Dashboard (manual verification)',
         duration_days: durationDays,
       },
       created_at: now.toISOString(),
     });
 
+    const priceLabel = isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedMonthly : SUBSCRIPTION_CONFIG.GLOBAL.formattedMonthly;
+    const dateFormatted = periodEnd.toLocaleDateString(isIndia ? 'en-IN' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+
     // Notify business
     await store.addNotification({
       organizationId: params.businessId,
       title: 'QuoteFlow Pro Activated!',
-      message: `Your QuoteFlow Pro subscription (₹99/month) has been activated successfully by support engineering. Valid until ${periodEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+      message: `Your QuoteFlow Pro subscription (${priceLabel}) has been activated successfully by support engineering. Valid until ${dateFormatted}.`,
       type: 'APPROVED',
     });
 
     return {
       success: true,
-      message: `QuoteFlow Pro successfully activated for business until ${periodEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+      message: `QuoteFlow Pro successfully activated for business until ${dateFormatted}.`,
       sub,
     };
   }
@@ -1341,19 +1920,29 @@ export class SubscriptionService {
 
       if (params.senderType === 'business') {
         // Send email to Developer Admin
-        await sendEmail({
-          to: 'm.subesh@outlook.com',
-          subject: `[QuoteFlow Support] New message on Ticket #${ticket.ticket_number}: ${ticket.subject}`,
-          html: `<div style="font-family: sans-serif; line-height: 1.6; color: #1e293b;">
-            <h2>Support Ticket Update: #${ticket.ticket_number}</h2>
-            <p><strong>Business:</strong> ${ticket.business_name || 'Customer'} (${recipientEmail || 'no-email'})</p>
-            <p><strong>Subject:</strong> ${ticket.subject}</p>
-            <div style="background: #f8fafc; border-left: 4px solid #4f46e5; padding: 12px 16px; margin: 16px 0;">
-              ${params.message.replace(/\n/g, '<br/>')}
-            </div>
-            <p><a href="https://www.blendandbold.com/admin" style="display: inline-block; background: #4f46e5; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold;">View in Developer Admin</a></p>
-          </div>`,
-        }).catch((e) => console.warn('Email dispatch to dev error:', e));
+        const { getDeveloperAdminEmail } = await import('@/lib/billing/dev-admin-auth');
+        const { escapeHtml } = await import('@/lib/utils/html-escape');
+        const adminRecipient = getDeveloperAdminEmail() || process.env.ADMIN_EMAIL;
+        if (adminRecipient) {
+          const safeBizName = escapeHtml(ticket.business_name || 'Customer');
+          const safeSubject = escapeHtml(ticket.subject || '');
+          const safeMessage = escapeHtml(params.message || '').replace(/\n/g, '<br/>');
+          const safeRecipientEmail = escapeHtml(recipientEmail || 'no-email');
+
+          await sendEmail({
+            to: adminRecipient,
+            subject: `[QuoteFlow Support] New message on Ticket #${ticket.ticket_number}: ${ticket.subject}`,
+            html: `<div style="font-family: sans-serif; line-height: 1.6; color: #1e293b;">
+              <h2>Support Ticket Update: #${ticket.ticket_number}</h2>
+              <p><strong>Business:</strong> ${safeBizName} (${safeRecipientEmail})</p>
+              <p><strong>Subject:</strong> ${safeSubject}</p>
+              <div style="background: #f8fafc; border-left: 4px solid #4f46e5; padding: 12px 16px; margin: 16px 0;">
+                ${safeMessage}
+              </div>
+              <p><a href="https://www.blendandbold.com/admin" style="display: inline-block; background: #4f46e5; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold;">View in Developer Admin</a></p>
+            </div>`,
+          }).catch((e) => console.warn('Email dispatch to dev error:', e));
+        }
       } else if (params.senderType === 'developer' && recipientEmail) {
         // Send email to Customer
         await sendEmail({

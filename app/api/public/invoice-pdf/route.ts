@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { generateInvoicePdf } from '@/lib/pdf/invoice-pdf-generator';
+import { getSanitizedPdfFilename } from '@/lib/quotations/calculations';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -57,12 +58,24 @@ export async function GET(req: NextRequest) {
     }
 
     const pdfBytes = await generateInvoicePdf(invoice);
+    const org = invoice.organization;
+    const isIndia = Boolean(
+      (org?.business_country || '').toUpperCase() === 'IN' ||
+      (org?.country || '').toLowerCase() === 'india' ||
+      invoice.currency === 'INR'
+    );
+    const filename = getSanitizedPdfFilename(
+      invoice.document_type,
+      invoice.invoice_number,
+      invoice.status,
+      isIndia && org?.gst_registered !== false
+    );
 
     return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="Invoice-${invoice.invoice_number}.pdf"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'no-cache',
       },
     });

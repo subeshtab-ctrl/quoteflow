@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { runAutoTable, loadPdfLogoImage, ensurePdfFontsLoaded, registerPdfFonts } from '@/lib/pdf/font-loader';
 import { Quotation } from '@/types/database';
 import { formatCurrency } from '@/lib/quotations/calculations';
 import { format } from 'date-fns';
@@ -13,6 +13,10 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
     unit: 'mm',
     format: 'a4',
   });
+
+  await ensurePdfFontsLoaded();
+  const fontsLoaded = registerPdfFonts(doc);
+  const fontName = fontsLoaded ? 'Roboto' : 'helvetica';
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -47,6 +51,11 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   };
 
   const currency = quotation.currency || 'INR';
+  const isIndia = Boolean(
+    (quotation.organization?.business_country || org?.country || '').toUpperCase() === 'IN' ||
+    (quotation.organization?.country || org?.country || '').toLowerCase() === 'india' ||
+    quotation.currency === 'INR'
+  );
   const grandTotal = Number(quotation.grand_total) || 0;
   const paidAmount = quotation.paid_amount !== undefined
     ? Number(quotation.paid_amount)
@@ -64,16 +73,9 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   let compY = 18;
   if (org.logo_url) {
     try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const rawPath = org.logo_url.split(/[?#]/)[0];
-      const cleanUrl = rawPath.startsWith('/') ? rawPath.substring(1) : rawPath;
-      const logoPath = path.join(process.cwd(), 'public', cleanUrl);
-      if (fs.existsSync(logoPath)) {
-        const imgBuffer = fs.readFileSync(logoPath);
-        const ext = logoPath.endsWith('.png') ? 'PNG' : 'JPEG';
-        const base64Img = `data:image/${ext.toLowerCase()};base64,${imgBuffer.toString('base64')}`;
-        doc.addImage(base64Img, ext, margin, compY - 4, 28, 12);
+      const logoData = await loadPdfLogoImage(org.logo_url);
+      if (logoData?.base64) {
+        doc.addImage(logoData.base64, 'PNG', margin, compY - 4, 28, 12);
         compY += 14;
       }
     } catch {
@@ -81,13 +83,13 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
     }
   }
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(16);
   doc.setTextColor(30, 41, 59);
   doc.text(org.name || 'QuoteFlow Organization', margin, compY);
   compY += 5;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
   const compLines: string[] = [
@@ -103,12 +105,12 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   });
 
   // 3. Document Title & Details (Right aligned)
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(20);
   doc.setTextColor(5, 150, 105); // Emerald-600
   doc.text('PAYMENT RECEIPT', pageWidth - margin, 18, { align: 'right' });
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
 
@@ -126,10 +128,10 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   ];
 
   metaLines.forEach(([label, val]) => {
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     doc.setTextColor(100, 116, 139);
     doc.text(label, pageWidth - margin - 35, rightY);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.setTextColor(30, 41, 59);
     doc.text(val, pageWidth - margin, rightY, { align: 'right' });
     rightY += 4.5;
@@ -142,13 +144,13 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
 
   // 5. Received From (Customer Info)
   let custY = headerBottomY + 7;
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
   doc.text('RECEIVED FROM:', margin, custY);
   custY += 4.5;
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
   const clientTitle = customer.company_name
@@ -157,7 +159,7 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   doc.text(clientTitle, margin, custY);
   custY += 4.5;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
   const custAddress = [customer.billing_address, customer.city, customer.state, customer.postal_code]
@@ -178,10 +180,13 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
 
   // 6. Payment Breakdown Table
   const tableStartY = custY + 4;
-  autoTable(doc, {
+  runAutoTable(doc, {
     startY: tableStartY,
     margin: { left: margin, right: margin },
     theme: 'grid',
+    styles: {
+      font: fontName,
+    },
     headStyles: {
       fillColor: [248, 250, 252],
       textColor: [51, 65, 85],
@@ -205,8 +210,8 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
     body: [
       {
         desc: `Remittance for Quotation ${quotation.quotation_number}\n"${quotation.title}"`,
-        method: quotation.payment_method || 'Electronic Bank Remittance',
-        ref: quotation.payment_notes || 'Confirmed Bank Transfer / UPI',
+        method: quotation.payment_method || (isIndia ? 'Electronic Bank Remittance / UPI' : 'Electronic Remittance / Card'),
+        ref: quotation.payment_notes || (isIndia ? 'Confirmed Bank Transfer / UPI' : 'Confirmed Electronic Remittance'),
         amount: formatCurrency(paidAmount, currency),
       },
     ],
@@ -227,16 +232,16 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   doc.roundedRect(sumBoxX, finalTableY, 85, 34, 3, 3, 'FD');
 
   let sumY = finalTableY + 7;
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
   doc.text('Total Quotation Value:', sumBoxX + 5, sumY);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setTextColor(30, 41, 59);
   doc.text(formatCurrency(grandTotal, currency), sumBoxX + 80, sumY, { align: 'right' });
 
   sumY += 7;
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setTextColor(5, 150, 105);
   doc.text('Total Amount Received:', sumBoxX + 5, sumY);
   doc.text(formatCurrency(paidAmount, currency), sumBoxX + 80, sumY, { align: 'right' });
@@ -245,7 +250,7 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   doc.setDrawColor(226, 232, 240);
   doc.line(sumBoxX + 5, sumY - 2, sumBoxX + 80, sumY - 2);
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   if (balanceAmount <= 0) {
     doc.setTextColor(5, 150, 105);
     doc.text('Remaining Balance Due:', sumBoxX + 5, sumY + 3);
@@ -261,12 +266,12 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   doc.setDrawColor(187, 247, 208);
   doc.roundedRect(margin, finalTableY, 90, 34, 3, 3, 'FD');
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.setFontSize(9);
   doc.setTextColor(22, 101, 52);
   doc.text('OFFICIAL VERIFICATION & RECEIPT SEAL', margin + 5, finalTableY + 7);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   doc.setTextColor(21, 128, 61);
   doc.text(
@@ -280,7 +285,7 @@ export async function generatePaymentReceiptPdf(quotation: Quotation): Promise<U
   doc.setDrawColor(226, 232, 240);
   doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184);
   doc.text(

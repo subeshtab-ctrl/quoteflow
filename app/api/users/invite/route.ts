@@ -74,6 +74,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { subscriptionService } = await import('@/lib/billing/subscription-service');
+    const entitlement = await subscriptionService.getOrganizationEntitlement(auth.orgId);
+    if (!entitlement.hasAccess) {
+      return NextResponse.json(
+        { error: 'Your QuoteFlow Pro subscription has expired. Please renew your subscription to manage team members.' },
+        { status: 402 }
+      );
+    }
+
     const body = await req.json();
     const { fullName, email, role = 'STAFF' } = body;
 

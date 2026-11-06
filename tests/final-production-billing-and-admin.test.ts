@@ -22,13 +22,13 @@ describe('FINAL Production Billing, Developer Dashboard & Life-cycle Tests (51 R
     const start = new Date(sub.trial_start_at!).getTime();
     const end = new Date(sub.trial_end_at!).getTime();
     const days = Math.round((end - start) / 86400000);
-    expect(days).toBe(30);
+    expect(days).toBe(14);
 
     const access = await subscriptionService.getBusinessSubscriptionAccess(orgId);
     expect(access.allowed).toBe(true);
     expect(access.isTrial).toBe(true);
     expect(access.isPaid).toBe(false);
-    expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(29);
+    expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(13);
   });
 
   // 2. Trial Immutable Source of Truth
@@ -49,13 +49,13 @@ describe('FINAL Production Billing, Developer Dashboard & Life-cycle Tests (51 R
   });
 
   // 3. Plan Selection vs Plan Activation
-  it('Scenario 3: Clicking ₹99/mo plan creates checkout but does NOT activate plan immediately', async () => {
+  it('Scenario 3: Clicking ₹149/mo plan creates checkout but does NOT activate plan immediately', async () => {
     const orgId = `test_org_click_${Date.now()}`;
     await subscriptionService.startFreeTrial(orgId);
 
     const checkout = await subscriptionService.createSubscriptionCheckout({ businessId: orgId });
-    expect(checkout.amount).toBe(9900); // ₹99
-    expect(checkout.planSlug).toBe('monthly_99');
+    expect(checkout.amount).toBe(14900); // ₹149
+    expect(checkout.planSlug).toBe('monthly_149');
 
     // Subscription status MUST remain trialing or pending, NEVER active before payment!
     const sub = await store.getBusinessSubscription(orgId);
@@ -88,13 +88,13 @@ describe('FINAL Production Billing, Developer Dashboard & Life-cycle Tests (51 R
     const updated = await subscriptionService.handleSuccessfulPayment({
       subscriptionId: checkout.subscriptionId,
       paymentId: `pay_test_${Date.now()}`,
-      amount: 9900,
+      amount: 14900,
       currency: 'INR',
       businessId: orgId,
     });
 
     expect(updated.status).toBe('active');
-    expect(updated.amount).toBe(9900);
+    expect(updated.amount).toBe(14900);
     expect(updated.last_payment_id).toBeTruthy();
 
     const access = await subscriptionService.getBusinessSubscriptionAccess(orgId);
@@ -353,7 +353,7 @@ describe('FINAL Production Billing, Developer Dashboard & Life-cycle Tests (51 R
 
     expect(res.success).toBe(true);
     const sub = await store.getBusinessSubscription(orgId);
-    expect(sub?.amount).toBe(7425); // ₹74.25 (25% off ₹99)
+    expect(sub?.amount).toBe(11175); // ₹111.75 (25% off ₹149)
     expect((sub as any)?.admin_offer?.type).toBe('percentage');
     expect((sub as any)?.admin_offer?.duration_months).toBe(3);
   });

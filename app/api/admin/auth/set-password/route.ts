@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    setDeveloperAdminPassword(newPassword);
+    await setDeveloperAdminPassword(newPassword);
 
     await store.logAdminAudit({
       id: crypto.randomUUID(),

@@ -72,7 +72,10 @@ function computeDateRange(params: ExportParams): {
 
 async function handleExport(params: ExportParams) {
   const auth = await getAuthenticatedUserContext();
-  const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+  if (!auth || !auth.orgId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const orgId = auth.orgId;
 
   const organization = await store.getOrganization(orgId);
   const activeEnv = (organization?.mode === 'test' ? 'test' : 'live') as 'live' | 'test';

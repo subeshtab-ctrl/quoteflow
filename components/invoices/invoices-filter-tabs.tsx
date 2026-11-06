@@ -8,10 +8,12 @@ import { Search, X } from 'lucide-react';
 export function InvoicesFilterTabs({
   currentStatus = 'ALL',
   currentSearch = '',
+  draftCount = 0,
 }: {
   currentStatus: string;
   currentSearch?: string;
   currentEnvironment?: string;
+  draftCount?: number;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -25,7 +27,7 @@ export function InvoicesFilterTabs({
     { label: 'All Invoices', value: 'ALL' },
     { label: 'Issued / Unpaid', value: 'ISSUED' },
     { label: 'Paid', value: 'PAID' },
-    { label: 'Drafts', value: 'DRAFT' },
+    { label: 'Drafts', value: 'DRAFT', count: draftCount },
     { label: 'Overdue', value: 'OVERDUE' },
     { label: 'Cancelled / Void', value: 'CANCELLED' },
   ];
@@ -70,13 +72,25 @@ export function InvoicesFilterTabs({
                 key={tab.value}
                 onClick={() => handleSelectStatus(tab.value)}
                 className={cn(
-                  'px-3.5 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors',
+                  'px-3.5 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors inline-flex items-center gap-1.5 cursor-pointer',
                   isActive
                     ? 'bg-[var(--brand-color,#4f46e5)] text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
                 )}
               >
-                {tab.label}
+                <span>{tab.label}</span>
+                {typeof tab.count === 'number' && tab.count > 0 && (
+                  <span
+                    className={cn(
+                      'px-1.5 py-0.2 rounded-full text-[10px] font-bold',
+                      isActive
+                        ? 'bg-white/20 text-white'
+                        : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                )}
               </button>
             );
           })}

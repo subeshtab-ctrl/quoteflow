@@ -45,6 +45,10 @@ import {
   LifeBuoy,
   Crop,
   Banknote,
+  Search,
+  MessageSquare,
+  Bell,
+  Brain,
 } from 'lucide-react';
 import { IOSSwitch } from '@/components/ui/ios-switch';
 import { extractDominantColor } from '@/lib/utils/color-extractor';
@@ -60,10 +64,20 @@ import {
 } from '@/lib/utils/logo';
 import { COUNTRIES, getCountryProfile } from '@/lib/tax/country-config';
 import { INDIAN_STATES, validateGstin, getStateCodeByName, getStateNameByCode } from '@/lib/tax/india-gst';
+import { UAE_EMIRATES, isValidUaeTrn, sanitizeUaeTrn } from '@/lib/tax/uae-tax';
+import { isGccCountry, DocumentLanguage } from '@/lib/tax/gcc-translations';
+import { formatCurrency, getCurrencySymbol, roundCurrency } from '@/lib/quotations/calculations';
+import { COUNTRY_CODES } from '@/lib/country-codes';
+import { DEFAULT_WHATSAPP_TEMPLATES } from '@/lib/whatsapp/automation';
 import { TrainingGuideModal } from '@/components/training/training-guide-modal';
 import { SupportView } from '@/components/support/support-view';
 import { AppearanceSettingsView } from '@/components/settings/appearance-settings-view';
 import { LogoEditorModal } from '@/components/settings/logo-editor-modal';
+import { WhatsAppIntegrationView } from '@/components/settings/whatsapp-integration-view';
+import { NotificationSettingsView } from '@/components/settings/notification-settings-view';
+import { StaffManagementView } from '@/components/settings/staff/staff-management-view';
+import { BusinessMemorySettingsView } from '@/components/settings/ai/business-memory-settings-view';
+import { isOwnerOrAdminRole } from '@/types/staff';
 
 export function SettingsClientView({
   initialOrganization,
@@ -79,25 +93,55 @@ export function SettingsClientView({
   initialTab?: string;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'support'>(
-    initialTab === 'support'
+  const [activeTab, setActiveTab] = useState<'general' | 'team' | 'appearance' | 'support' | 'integrations' | 'notifications' | 'ai-memory'>(
+    initialTab === 'team'
+      ? 'team'
+      : initialTab === 'support'
       ? 'support'
       : initialTab === 'appearance'
       ? 'appearance'
+      : initialTab === 'integrations' || initialTab === 'whatsapp'
+      ? 'integrations'
+      : initialTab === 'notifications'
+      ? 'notifications'
+      : initialTab === 'ai-memory' || initialTab === 'ai'
+      ? 'ai-memory'
       : 'general'
   );
 
   useEffect(() => {
-    if (initialTab === 'support') {
+    if (initialTab === 'team') {
+      setActiveTab('team');
+    } else if (initialTab === 'support') {
       setActiveTab('support');
     } else if (initialTab === 'appearance') {
       setActiveTab('appearance');
-    } else if (initialTab === 'general') {
+    } else if (initialTab === 'ai-memory' || initialTab === 'ai') {
+      setActiveTab('ai-memory');
+    } else if (initialTab === 'integrations' || initialTab === 'whatsapp') {
+      setActiveTab('integrations');
+    } else if (initialTab === 'notifications') {
+      setActiveTab('notifications');
+    } else {
       setActiveTab('general');
     }
   }, [initialTab]);
 
-  const [org, setOrg] = useState<Organization>(initialOrganization);
+  const [org, setOrg] = useState<Organization>(() => ({
+    ...initialOrganization,
+    default_tax_mode: initialOrganization.default_tax_mode || 'exclusive',
+    default_currency: initialOrganization.default_currency || 'INR',
+  }));
+  const [savedOrgSnapshot, setSavedOrgSnapshot] = useState<string>(() =>
+    JSON.stringify({
+      ...initialOrganization,
+      default_tax_mode: initialOrganization.default_tax_mode || 'exclusive',
+      default_currency: initialOrganization.default_currency || 'INR',
+    })
+  );
+  const [justSaved, setJustSaved] = useState(false);
+  const hasUnsavedChanges = JSON.stringify(org) !== savedOrgSnapshot;
+
   const initialParsed = parseLogoUrl(initialOrganization.logo_url);
   const [logoShape, setLogoShape] = useState<LogoShape>(initialParsed.shape);
   const [logoFit, setLogoFit] = useState<LogoFit>(initialParsed.fit);
@@ -106,19 +150,7 @@ export function SettingsClientView({
   const [isExtractingColor, setIsExtractingColor] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [users, setUsers] = useState<any[]>([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Staff creation state (Direct Password Setup)
-  const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
-  const [isAddingStaff, setIsAddingStaff] = useState(false);
-  const [newStaffName, setNewStaffName] = useState('');
-  const [newStaffEmail, setNewStaffEmail] = useState('');
-  const [newStaffPassword, setNewStaffPassword] = useState('');
-  const [newStaffRole, setNewStaffRole] = useState<'STAFF' | 'ADMIN'>('STAFF');
-  const [staffError, setStaffError] = useState<string | null>(null);
 
   // Logged-in user password change state
   const [myNewPassword, setMyNewPassword] = useState('');
@@ -129,6 +161,55 @@ export function SettingsClientView({
 
   const [isUploadingDefaultUpiQr, setIsUploadingDefaultUpiQr] = useState(false);
   const [isUploadingDefaultCryptoQr, setIsUploadingDefaultCryptoQr] = useState(false);
+
+  // Automated GSTIN / Tax ID Verification & Auto-fill
+  const [isFetchingGst, setIsFetchingGst] = useState(false);
+  const [gstFetchSuccess, setGstFetchSuccess] = useState<string | null>(null);
+  const [gstFetchError, setGstFetchError] = useState<string | null>(null);
+
+  const handleFetchGstDetails = async (taxNumToFetch?: string) => {
+    const query = (taxNumToFetch || org.gstin || org.gst_vat_number || '').trim().toUpperCase();
+    if (!query) {
+      setGstFetchError('Please enter a GSTIN or Tax ID first.');
+      return;
+    }
+    setIsFetchingGst(true);
+    setGstFetchError(null);
+    setGstFetchSuccess(null);
+    try {
+      const res = await fetch(
+        `/api/lookup/tax-id?query=${encodeURIComponent(query)}&country=${encodeURIComponent(org.country || '')}`
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to verify Tax ID');
+
+      setOrg((prev) => ({
+        ...prev,
+        gst_vat_number: data.taxNumber || query,
+        gstin: data.country === 'India' ? (data.taxNumber || query) : prev.gstin,
+        gst_registered: data.country === 'India' ? true : prev.gst_registered,
+        name: data.companyName || prev.name,
+        business_type: data.entityType || prev.business_type,
+        state: data.state || prev.state,
+        business_state: data.state || prev.business_state,
+        state_code: data.stateCode || prev.state_code,
+        city: data.city || prev.city,
+        address_line1: data.address || prev.address_line1,
+        postal_code: data.postalCode || prev.postal_code,
+      }));
+
+      setGstFetchSuccess(
+        data.companyName
+          ? `✓ Verified from portal: ${data.companyName} (${data.state || data.country})`
+          : `✓ State identified: ${data.state || data.country} (Code ${data.stateCode || ''})`
+      );
+      setTimeout(() => setGstFetchSuccess(null), 6000);
+    } catch (err: any) {
+      setGstFetchError(err.message || 'Lookup failed. You can still fill details manually.');
+    } finally {
+      setIsFetchingGst(false);
+    }
+  };
 
   // Interactive Training & Workflow Guides
   const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
@@ -332,25 +413,6 @@ export function SettingsClientView({
     }
   }, [org.brand_color]);
 
-  const fetchUsers = async () => {
-    try {
-      setIsLoadingUsers(true);
-      const res = await fetch('/api/users');
-      const data = await res.json();
-      if (data.users) {
-        setUsers(data.users);
-      }
-    } catch (err) {
-      console.error('Failed to load users:', err);
-    } finally {
-      setIsLoadingUsers(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   const handleUpdateOwnPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordChangeError(null);
@@ -385,109 +447,6 @@ export function SettingsClientView({
       setPasswordChangeError(err.message || 'Error updating password');
     } finally {
       setIsChangingMyPassword(false);
-    }
-  };
-
-  const handleDirectCreateStaff = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStaffError(null);
-
-    if (!newStaffName.trim() || !newStaffEmail.trim() || !newStaffPassword) {
-      setStaffError('Please fill out all fields.');
-      return;
-    }
-
-    if (newStaffPassword.length < 6) {
-      setStaffError('Password must be at least 6 characters.');
-      return;
-    }
-
-    try {
-      setIsAddingStaff(true);
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: newStaffName.trim(),
-          email: newStaffEmail.trim(),
-          password: newStaffPassword,
-          role: newStaffRole,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create team member');
-
-      setSuccessMsg(
-        `Team account "${newStaffEmail}" created! They can log in with the temporary password and set their own password.`
-      );
-      setIsAddStaffOpen(false);
-      setNewStaffName('');
-      setNewStaffEmail('');
-      setNewStaffPassword('');
-      setNewStaffRole('STAFF');
-      fetchUsers();
-      setTimeout(() => setSuccessMsg(null), 4500);
-    } catch (err: any) {
-      setStaffError(err.message || 'Error creating staff member');
-    } finally {
-      setIsAddingStaff(false);
-    }
-  };
-
-  const handleResetStaffPassword = async (userId: string, email: string) => {
-    const tempPassword = window.prompt(
-      `Enter a new Temporary Password (at least 6 characters) for ${email}:`,
-      '123456'
-    );
-    if (!tempPassword) return;
-    if (tempPassword.length < 6) {
-      alert('Temporary password must be at least 6 characters.');
-      return;
-    }
-
-    try {
-      setDeletingUserId(userId);
-      const res = await fetch(`/api/users/${userId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: tempPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to set temporary password');
-
-      setSuccessMsg(
-        `Temporary password set for ${email}! They can now log in with "${tempPassword}" and set their own password.`
-      );
-      fetchUsers();
-      setTimeout(() => setSuccessMsg(null), 5000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error setting temporary password');
-    } finally {
-      setDeletingUserId(null);
-    }
-  };
-
-  const handleDeleteUser = async (userId: string, email: string) => {
-    if (!confirm(`Are you sure you want to delete user account "${email}"? This will permanently remove their access from this company.`)) {
-      return;
-    }
-
-    setDeletingUserId(userId);
-    try {
-      const res = await fetch(`/api/users/${userId}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to delete user');
-
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
-      setSuccessMsg(`User ${email} deleted successfully.`);
-      setTimeout(() => setSuccessMsg(null), 3500);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error deleting user');
-    } finally {
-      setDeletingUserId(null);
     }
   };
 
@@ -667,41 +626,73 @@ export function SettingsClientView({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveSettingsPayload = async () => {
     setIsLoading(true);
     setSuccessMsg(null);
     setErrorMsg(null);
+    setJustSaved(false);
 
     try {
+      const payload = {
+        ...org,
+        default_tax_mode: org.default_tax_mode || 'exclusive',
+        default_currency: org.default_currency || 'INR',
+      };
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(org),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update settings');
+      if (!res.ok) throw new Error(data.error || "Settings couldn't be saved.");
 
-      setOrg(data.organization);
-      if (data.organization?.brand_color) {
-        document.documentElement.style.setProperty('--brand-color', data.organization.brand_color);
+      const savedOrg: Organization = {
+        ...org,
+        ...(data.organization || {}),
+        default_tax_mode:
+          data.organization?.default_tax_mode || org.default_tax_mode || 'exclusive',
+        default_currency:
+          data.organization?.default_currency || org.default_currency || 'INR',
+      };
+
+      setOrg(savedOrg);
+      setSavedOrgSnapshot(JSON.stringify(savedOrg));
+      setJustSaved(true);
+
+      if (savedOrg.brand_color) {
+        document.documentElement.style.setProperty('--brand-color', savedOrg.brand_color);
         const root = document.getElementById('quoteflow-dashboard-root');
         if (root) {
-          root.style.setProperty('--brand-color', data.organization.brand_color);
+          root.style.setProperty('--brand-color', savedOrg.brand_color);
         }
         try {
-          localStorage.setItem('quoteflow_brand_color', data.organization.brand_color);
+          localStorage.setItem('quoteflow_brand_color', savedOrg.brand_color);
         } catch {}
       }
-      setSuccessMsg('Company settings successfully updated.');
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent('quoteflow:org-settings-updated', { detail: savedOrg })
+        );
+      } catch {}
+
+      setSuccessMsg('✓ Settings saved');
       router.refresh();
-      setTimeout(() => setSuccessMsg(null), 3500);
+      setTimeout(() => {
+        setSuccessMsg(null);
+        setJustSaved(false);
+      }, 3500);
     } catch (err: any) {
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || "Settings couldn't be saved.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveSettingsPayload();
   };
 
   const colorPresets = [
@@ -715,55 +706,154 @@ export function SettingsClientView({
     { name: 'Dark Slate', hex: '#334155' },
   ];
 
+  const previewTaxRate = Number(org.default_tax_rate) > 0 ? Number(org.default_tax_rate) : 5;
+  const previewBaseAmount = 5000;
+  const exclusiveTaxPreview = roundCurrency((previewBaseAmount * previewTaxRate) / 100);
+  const exclusiveTotalPreview = roundCurrency(previewBaseAmount + exclusiveTaxPreview);
+  const inclusiveTaxablePreview = roundCurrency(previewBaseAmount / (1 + previewTaxRate / 100));
+  const inclusiveTaxPreview = roundCurrency(previewBaseAmount - inclusiveTaxablePreview);
+
   return (
     <div className="space-y-6 max-w-4xl transition-colors">
-      {/* Top Tab Switcher */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('general');
-            router.push('/settings?tab=general', { scroll: false });
-          }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'general'
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Building className="h-4 w-4" />
-          <span>Organization & Defaults</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('appearance');
-            router.push('/settings?tab=appearance', { scroll: false });
-          }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'appearance'
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Sparkles className="h-4 w-4" />
-          <span>Appearance & Themes</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('support');
-            router.push('/settings?tab=support', { scroll: false });
-          }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'support'
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <LifeBuoy className="h-4 w-4" />
-          <span>Help & Support</span>
-        </button>
+      {/* Top Tab Switcher — only actual Settings categories */}
+      <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('general');
+              router.push('/settings?tab=general', { scroll: false });
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'general'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Building className="h-4 w-4" />
+            <span>Organization & Defaults</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('appearance');
+              router.push('/settings?tab=appearance', { scroll: false });
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'appearance'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Sparkles className="h-4 w-4" />
+            <span>Appearance & Themes</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('team');
+              router.push('/settings?tab=team', { scroll: false });
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'team'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <UsersIcon className="h-4 w-4" />
+            <span>Team & Staff</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('integrations');
+              router.push('/settings?tab=integrations', { scroll: false });
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'integrations'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <MessageSquare className="h-4 w-4" />
+            <span>WhatsApp Business</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('notifications');
+              router.push('/settings?tab=notifications', { scroll: false });
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'notifications'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Bell className="h-4 w-4" />
+            <span>Notifications &amp; AI Alerts</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('ai-memory');
+              router.push('/settings?tab=ai-memory', { scroll: false });
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'ai-memory'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Brain className="h-4 w-4" />
+            <span>QuoteFlow AI (Memory)</span>
+          </button>
+        </div>
+
+        {/* Status Indicator */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+
+        {activeTab === 'general' && isOwnerOrAdminRole(currentUserRole) && (
+          <div className="flex items-center gap-2.5">
+            {hasUnsavedChanges ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Unsaved changes
+              </span>
+            ) : justSaved ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                Settings saved
+              </span>
+            ) : null}
+
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              isLoading={isLoading}
+              onClick={saveSettingsPayload}
+              className="gap-1.5 shadow-xs text-xs font-bold"
+            >
+              {justSaved && !hasUnsavedChanges ? (
+                <>
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Saved</span>
+                </>
+              ) : (
+                <>
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save Changes</span>
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+        </div>
       </div>
 
       {activeTab === 'support' ? (
@@ -772,33 +862,70 @@ export function SettingsClientView({
         </div>
       ) : activeTab === 'appearance' ? (
         <div className="space-y-6">
-          <AppearanceSettingsView />
+          <AppearanceSettingsView
+            initialBrandColor={org.brand_color || undefined}
+            onBrandColorChange={(newColor) => setOrg((prev) => ({ ...prev, brand_color: newColor }))}
+          />
+        </div>
+      ) : activeTab === 'team' ? (
+        <div className="space-y-6">
+          <StaffManagementView
+            currentUserRole={currentUserRole}
+            currentUserId={currentUserId}
+          />
+        </div>
+      ) : activeTab === 'integrations' ? (
+        <div className="space-y-6">
+          <WhatsAppIntegrationView
+            organization={org}
+            userRole={currentUserRole}
+          />
+        </div>
+      ) : activeTab === 'notifications' ? (
+        <div className="space-y-6">
+          <NotificationSettingsView />
+        </div>
+      ) : activeTab === 'ai-memory' ? (
+        <div className="space-y-6">
+          <BusinessMemorySettingsView />
         </div>
       ) : (
         <>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100">
-              Organization & Quotation Settings
-            </h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Customize your company profile, brand logo & theme color, team members, currency, and defaults.
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100">
+                Organization & Quotation Settings
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Customize your company profile, brand logo & theme color, team members, currency, and tax defaults.
+              </p>
+            </div>
           </div>
 
           {successMsg && (
-            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-4 text-xs font-semibold text-emerald-800 dark:text-emerald-300 animate-fadeIn">
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-3.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 animate-fadeIn">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
               <span>{successMsg}</span>
             </div>
           )}
 
           {errorMsg && (
-            <div className="rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-4 text-xs font-semibold text-rose-700 dark:text-rose-300">
-              {errorMsg}
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 p-3.5 text-xs font-semibold text-rose-700 dark:text-rose-300">
+              <span>Settings couldn&apos;t be saved: {errorMsg}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={saveSettingsPayload}
+                isLoading={isLoading}
+                className="h-7 px-3 text-xs border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-900/50 shrink-0"
+              >
+                Try Again
+              </Button>
             </div>
           )}
 
-          {currentUserRole === 'STAFF' && (
+          {!isOwnerOrAdminRole(currentUserRole) && (
             <div className="flex items-center gap-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-4 text-xs font-medium text-amber-800 dark:text-amber-300">
               <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
               <div>
@@ -811,132 +938,6 @@ export function SettingsClientView({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Help & Support Quick Card */}
-            <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-slate-50 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <LifeBuoy className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                    Help & Support
-                  </h3>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Submit support inquiries, check ticket status, and chat directly with developer engineers.
-                </p>
-              </div>
-              <Button
-                type="button"
-                onClick={() => {
-                  setActiveTab('support');
-                  router.push('/settings?tab=support', { scroll: false });
-                }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs gap-1.5 shadow-xs shrink-0"
-              >
-                <span>Open Help & Support</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-
-        {/* Operating Environment Mode Card */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                <span>Operating Environment & Workflow Training</span>
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Your workspace operates strictly in Live Production Mode. All documents issued are legally binding commercial records.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                Live Production Mode
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <span>Live Commercial Documents & Audit Continuity</span>
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl leading-relaxed">
-                All invoices and quotations issued are official commercial records adhering to sequential continuity (e.g. INV-000001) and immutable audit rules. Live invoices cannot be deleted once issued, only cancelled or voided with complete audit records.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsTrainingModalOpen(true)}
-                className="gap-2 border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 font-medium"
-              >
-                <GraduationCap className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Training & Guides</span>
-              </Button>
-              <Link href="/training">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
-                >
-                  <BookOpen className="h-3.5 w-3.5" />
-                  <span>Full Course</span>
-                  <ArrowRight className="h-3 w-3" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-            <button
-              type="button"
-              onClick={() => setIsTrainingModalOpen(true)}
-              className="text-left p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 transition-colors group"
-            >
-              <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>1. Make a Quote</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
-                Learn line items, taxes, discounts, and generating custom PDF proposals.
-              </p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsTrainingModalOpen(true)}
-              className="text-left p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 transition-colors group"
-            >
-              <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>2. Create an Invoice</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
-                1-click conversion from quotes, sequential numbering, and due dates.
-              </p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsTrainingModalOpen(true)}
-              className="text-left p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 transition-colors group"
-            >
-              <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                <span>3. Client Portal Link</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
-                Instant sharing links, client mobile view, 1-click approvals, and live chat.
-              </p>
-            </button>
-          </div>
-        </div>
 
 
         {/* Brand & Logo Card */}
@@ -1088,8 +1089,85 @@ export function SettingsClientView({
             <span>Company Information</span>
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-1 space-y-1">
+          {/* 1-Click GSTIN / Tax ID Auto-Fetch Bar */}
+          {(() => {
+            const countryClean = (org.country || org.business_country || '').trim().toLowerCase();
+            const currencyClean = (org.default_currency || '').trim().toUpperCase();
+            const isExplicitIndia = countryClean === 'india' || countryClean === 'in' || countryClean.includes('india');
+            const isExplicitForeign = countryClean !== '' && !isExplicitIndia;
+            const isForeignCurrency = currencyClean !== '' && currencyClean !== 'INR';
+            const isIndia = isExplicitIndia || (!isExplicitForeign && !isForeignCurrency && (org.billing_region === 'INDIA' || currencyClean === 'INR'));
+
+            return (
+              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50/70 to-purple-50/70 dark:from-indigo-950/40 dark:to-purple-950/40 border border-indigo-100 dark:border-indigo-900/60 space-y-2">
+                <div className="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+                  <div className="flex-1 w-full space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200">
+                        {isIndia
+                          ? 'GSTIN (GOODS & SERVICES TAX - INDIA ONLY)'
+                          : (org.tax_id_label || 'TAX IDENTIFICATION NUMBER (VAT / TRN)')}
+                      </label>
+                      <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                        {isIndia
+                          ? 'Enter 15-character GSTIN first to auto-fill company details'
+                          : 'Enter Tax ID / VAT number to auto-fill details'}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={org.gstin || org.gst_vat_number || ''}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase();
+                          setOrg({ ...org, gst_vat_number: val, gstin: val });
+                          if (val.length === 15 && isIndia) {
+                            handleFetchGstDetails(val);
+                          }
+                        }}
+                        placeholder={
+                          isIndia
+                            ? 'e.g. 32AABCU9603R1ZM (15-character Indian GSTIN)'
+                            : (org.tax_id_label ? `e.g. ${org.tax_id_label}` : 'e.g. TRN or VAT number')
+                        }
+                        className="h-10 w-full rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-mono font-bold text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => handleFetchGstDetails()}
+                    disabled={isFetchingGst}
+                    className="h-10 px-4 font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 gap-1.5 shadow-xs"
+                  >
+                    {isFetchingGst ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    <span>{isFetchingGst ? 'Verifying...' : 'Auto-Fetch Details'}</span>
+                  </Button>
+                </div>
+
+
+                {gstFetchSuccess && (
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5 animate-fadeIn">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>{gstFetchSuccess}</span>
+                  </p>
+                )}
+                {gstFetchError && (
+                  <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                    {gstFetchError}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+            <div className="sm:col-span-4 space-y-1">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                 Country *
               </label>
@@ -1106,25 +1184,59 @@ export function SettingsClientView({
                   setOrg((prev) => ({
                     ...prev,
                     country: profile.name,
-                    default_currency: profile.defaultCurrency,
+                    default_currency: profile.defaultCurrency as CurrencyCode,
                     tax_system: profile.taxSystem,
                     tax_id_label: profile.taxLabel,
                     goods_classification_label: profile.goodsClassificationLabel,
                     service_classification_label: profile.serviceClassificationLabel,
                     default_tax_rate: profile.defaultTaxRate,
+                    default_gst_rate: profile.defaultTaxRate,
                   }));
                 }}
                 className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               >
                 {COUNTRIES.map((c) => (
                   <option key={c.code} value={c.code}>
-                    {c.flag} {c.name}
+                    {c.flag} {c.name} ({c.defaultCurrency})
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-3 space-y-1">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                Business Currency *
+              </label>
+              <select
+                value={org.default_currency || 'INR'}
+                onChange={(e) =>
+                  setOrg({ ...org, default_currency: e.target.value as CurrencyCode })
+                }
+                className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              >
+                <option value="INR">INR (₹) - Indian Rupee</option>
+                <option value="USD">USD ($) - US Dollar</option>
+                <option value="EUR">EUR (€) - Euro</option>
+                <option value="GBP">GBP (£) - British Pound</option>
+                <option value="AED">AED (د.إ) - UAE Dirham</option>
+                <option value="SAR">SAR (ر.س) - Saudi Riyal</option>
+                <option value="KWD">KWD (د.ك) - Kuwaiti Dinar</option>
+                <option value="CAD">CAD (C$) - Canadian Dollar</option>
+                <option value="AUD">AUD (A$) - Australian Dollar</option>
+                <option value="SGD">SGD (S$) - Singapore Dollar</option>
+                <option disabled>──────────</option>
+                {Array.from(new Set(COUNTRIES.map((c) => c.defaultCurrency).filter(Boolean)))
+                  .sort()
+                  .filter((c) => !['INR', 'USD', 'EUR', 'GBP', 'AED', 'SAR', 'KWD', 'CAD', 'AUD', 'SGD'].includes(c))
+                  .map((curr) => (
+                    <option key={curr} value={curr}>
+                      {curr} ({getCurrencySymbol(curr).trim()})
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-5">
               <Input
                 label="Company Name *"
                 value={org.name}
@@ -1140,12 +1252,18 @@ export function SettingsClientView({
               value={org.business_type || ''}
               onChange={(e) => setOrg({ ...org, business_type: e.target.value })}
             />
-            <Input
-              label={org.tax_id_label || 'Tax Registration / GST Number'}
-              placeholder="e.g. GSTIN, TRN, or Tax ID"
-              value={org.gst_vat_number || ''}
-              onChange={(e) => setOrg({ ...org, gst_vat_number: e.target.value })}
-            />
+            {(() => {
+              const countryClean = (org.country || org.business_country || '').trim().toLowerCase();
+              const isIndia = countryClean === 'india' || countryClean === 'in' || countryClean.includes('india') || org.default_currency === 'INR';
+              return (
+                <Input
+                  label={isIndia ? 'GSTIN (India Only)' : (org.tax_id_label || 'Tax Registration / VAT Number')}
+                  placeholder={isIndia ? 'e.g. 32AABCU9603R1ZM' : 'e.g. TRN, VAT, or Tax ID'}
+                  value={org.gst_vat_number || ''}
+                  onChange={(e) => setOrg({ ...org, gst_vat_number: e.target.value, gstin: e.target.value })}
+                />
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1189,93 +1307,131 @@ export function SettingsClientView({
           />
         </div>
 
+
+
         {/* Country-Adaptive Tax, Calculation Mode & India GST Configuration */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-5">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Receipt className="h-5 w-5 text-indigo-500" />
-                <span>Tax Settings & GST Breakdown ({org.country || 'India'})</span>
+                <span>
+                  {(() => {
+                    const countryClean = (org.country || org.business_country || '').trim().toLowerCase();
+                    const currencyClean = (org.default_currency || '').trim().toUpperCase();
+                    const isExplicitIndia = countryClean === 'india' || countryClean === 'in' || countryClean.includes('india');
+                    const isExplicitForeign = countryClean !== '' && !isExplicitIndia;
+                    const isForeignCurrency = currencyClean !== '' && currencyClean !== 'INR';
+                    const isIndia = isExplicitIndia || (!isExplicitForeign && !isForeignCurrency && (org.billing_region === 'INDIA' || currencyClean === 'INR'));
+                    const profile = getCountryProfile(org.country || org.business_country || (isIndia ? 'IN' : 'AE'));
+                    return isIndia
+                      ? `Tax Settings & India GST Breakdown (${org.country || 'India'})`
+                      : `${profile.name} ${profile.taxSystem} Settings (${org.country || 'International'})`;
+                  })()}
+                </span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Configure Tax Exclusive vs Tax Inclusive calculation mode, India GST state rules, and item classification codes.
+                Configure Tax Exclusive vs Tax Inclusive calculation mode, registration details, and classification codes.
               </p>
             </div>
           </div>
 
-          {/* 1. Tax Calculation Mode: Exclusive vs Inclusive */}
-          <div className="space-y-2.5">
+          {/* 1. Tax Calculation Mode: Compact Exclusive vs Inclusive Selection Cards */}
+          <div className="space-y-2">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Default Tax Calculation Mode
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setOrg({ ...org, default_tax_mode: 'exclusive' })}
-                className={`text-left p-4 rounded-xl border-2 transition-all ${
-                  (org.default_tax_mode || 'exclusive') === 'exclusive'
-                    ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                    Tax Exclusive (Add Tax on Top)
-                  </span>
-                  <span
-                    className={`h-4 w-4 rounded-full border flex items-center justify-center ${
-                      (org.default_tax_mode || 'exclusive') === 'exclusive'
-                        ? 'border-indigo-600 bg-indigo-600'
-                        : 'border-slate-300 dark:border-slate-600'
-                    }`}
-                  >
-                    {(org.default_tax_mode || 'exclusive') === 'exclusive' && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                    )}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Tax is calculated on top of the entered item rate.
-                </p>
-                <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-800 text-[11px] font-mono text-slate-600 dark:text-slate-300 space-y-0.5">
-                  <div>Entered ₹5,000 + 5% Tax:</div>
-                  <div>Subtotal: ₹5,000.00 | Tax: ₹250.00 | <span className="font-bold text-indigo-600 dark:text-indigo-400">Total: ₹5,250.00</span></div>
-                </div>
-              </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
+              {(() => {
+                const isExclusive = (org.default_tax_mode || 'exclusive') === 'exclusive';
+                const isInclusive = org.default_tax_mode === 'inclusive';
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setOrg((prev) => ({ ...prev, default_tax_mode: 'exclusive' }))}
+                      className={`text-left px-3.5 py-2.5 rounded-xl border transition-all ${
+                        isExclusive
+                          ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/35 ring-1 ring-indigo-600/30 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-4 w-4 rounded flex items-center justify-center text-[11px] font-bold transition-colors ${
+                              isExclusive
+                                ? 'bg-indigo-600 text-white'
+                                : 'border border-slate-300 dark:border-slate-600 text-transparent'
+                            }`}
+                          >
+                            ✓
+                          </span>
+                          <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
+                            Tax Exclusive
+                          </span>
+                        </div>
+                        {isExclusive && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-6">
+                        Tax added to price
+                      </p>
+                      <div className="mt-1.5 pt-1.5 pl-6 border-t border-slate-200/60 dark:border-slate-800 text-[10px] font-mono text-slate-600 dark:text-slate-300">
+                        {formatCurrency(previewBaseAmount, org.default_currency)} + {previewTaxRate}% ={' '}
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                          {formatCurrency(exclusiveTotalPreview, org.default_currency)}
+                        </span>
+                      </div>
+                    </button>
 
-              <button
-                type="button"
-                onClick={() => setOrg({ ...org, default_tax_mode: 'inclusive' })}
-                className={`text-left p-4 rounded-xl border-2 transition-all ${
-                  org.default_tax_mode === 'inclusive'
-                    ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 shadow-xs'
-                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                    Tax Inclusive (Tax Included in Price)
-                  </span>
-                  <span
-                    className={`h-4 w-4 rounded-full border flex items-center justify-center ${
-                      org.default_tax_mode === 'inclusive'
-                        ? 'border-indigo-600 bg-indigo-600'
-                        : 'border-slate-300 dark:border-slate-600'
-                    }`}
-                  >
-                    {org.default_tax_mode === 'inclusive' && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                    )}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Entered item amount already includes tax; final total remains unchanged.
-                </p>
-                <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-800 text-[11px] font-mono text-slate-600 dark:text-slate-300 space-y-0.5">
-                  <div>Entered ₹5,000 (5% Inclusive):</div>
-                  <div>Taxable: ₹4,761.90 | Tax: ₹238.10 | <span className="font-bold text-emerald-600 dark:text-emerald-400">Total: ₹5,000.00</span></div>
-                </div>
-              </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrg((prev) => ({ ...prev, default_tax_mode: 'inclusive' }))}
+                      className={`text-left px-3.5 py-2.5 rounded-xl border transition-all ${
+                        isInclusive
+                          ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/35 ring-1 ring-indigo-600/30 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-4 w-4 rounded flex items-center justify-center text-[11px] font-bold transition-colors ${
+                              isInclusive
+                                ? 'bg-indigo-600 text-white'
+                                : 'border border-slate-300 dark:border-slate-600 text-transparent'
+                            }`}
+                          >
+                            ✓
+                          </span>
+                          <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
+                            Tax Inclusive
+                          </span>
+                        </div>
+                        {isInclusive && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-6">
+                        Tax included in price
+                      </p>
+                      <div className="mt-1.5 pt-1.5 pl-6 border-t border-slate-200/60 dark:border-slate-800 text-[10px] font-mono text-slate-600 dark:text-slate-300">
+                        {formatCurrency(inclusiveTaxablePreview, org.default_currency)} +{' '}
+                        {formatCurrency(inclusiveTaxPreview, org.default_currency)} ({previewTaxRate}%) ={' '}
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                          {formatCurrency(previewBaseAmount, org.default_currency)}
+                        </span>
+                      </div>
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -1311,143 +1467,412 @@ export function SettingsClientView({
             />
           </div>
 
-          {/* India GST Automatic Breakdown Settings */}
-          {((org.country || 'India').toLowerCase() === 'india' || (org.tax_system || 'GST') === 'GST') && (
-            <div className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                    <span>🇮🇳 India GST Automatic Breakdown (CGST / SGST / IGST)</span>
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Automatically splits GST into CGST + SGST for intra-state supply or IGST for inter-state supply based on Place of Supply.
-                  </p>
-                </div>
-                <IOSSwitch
-                  checked={org.gst_registered ?? true}
-                  onChange={(checked) => setOrg({ ...org, gst_registered: checked })}
-                />
-              </div>
+          {/* India GST Automatic Breakdown Settings OR Country Tax/VAT Settings */}
+          {(() => {
+            const countryClean = (org.country || org.business_country || '').trim().toLowerCase();
+            const currencyClean = (org.default_currency || '').trim().toUpperCase();
+            const isExplicitIndia = countryClean === 'india' || countryClean === 'in' || countryClean.includes('india');
+            const isExplicitForeign = countryClean !== '' && !isExplicitIndia;
+            const isForeignCurrency = currencyClean !== '' && currencyClean !== 'INR';
+            const isIndia = isExplicitIndia || (!isExplicitForeign && !isForeignCurrency && (org.billing_region === 'INDIA' || currencyClean === 'INR'));
+            const profile = getCountryProfile(org.country || org.business_country || (isIndia ? 'IN' : 'AE'));
 
-              {(org.gst_registered ?? true) && (
-                <div className="space-y-4 pt-2 border-t border-indigo-100 dark:border-indigo-900/50">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            if (isIndia) {
+              return (
+                <div className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 space-y-4">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <Input
-                        label="Company GSTIN (15-Char)"
-                        placeholder="27AAPFU0939F1ZV"
-                        value={org.gstin || org.gst_vat_number || ''}
-                        onChange={(e) => {
-                          const upper = e.target.value.toUpperCase().replace(/\s+/g, '');
-                          const code = upper.length >= 2 ? upper.slice(0, 2) : '';
-                          const stateName = code ? getStateNameByCode(code) : undefined;
-                          setOrg({
-                            ...org,
-                            gstin: upper,
-                            gst_vat_number: upper,
-                            ...(stateName
-                              ? {
-                                  business_state: stateName,
-                                  state: stateName,
-                                  state_code: code,
-                                }
-                              : {}),
-                          });
-                        }}
-                      />
-                      {(org.gstin || org.gst_vat_number) &&
-                        !validateGstin(org.gstin || org.gst_vat_number).valid && (
-                          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-                            {validateGstin(org.gstin || org.gst_vat_number).error}
-                          </p>
-                        )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        Business State (Origin)
-                      </label>
-                      <select
-                        value={org.business_state || org.state || ''}
-                        onChange={(e) => {
-                          const st = e.target.value;
-                          const code = getStateCodeByName(st) || '';
-                          setOrg({
-                            ...org,
-                            business_state: st,
-                            state: st,
-                            state_code: code,
-                          });
-                        }}
-                        className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                      >
-                        <option value="">Select Business State...</option>
-                        {INDIAN_STATES.map((st) => (
-                          <option key={st.code} value={st.name}>
-                            {st.name} ({st.code})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <Input
-                      label="State Code"
-                      placeholder="e.g. 27"
-                      value={org.state_code || getStateCodeByName(org.business_state || org.state) || ''}
-                      onChange={(e) => setOrg({ ...org, state_code: e.target.value })}
-                    />
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        Default GST Rate
-                      </label>
-                      <select
-                        value={org.default_gst_rate ?? org.default_tax_rate ?? 18}
-                        onChange={(e) => {
-                          const r = parseFloat(e.target.value) || 0;
-                          setOrg({ ...org, default_gst_rate: r, default_tax_rate: r });
-                        }}
-                        className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                      >
-                        <option value={0}>0% (Nil Rated / Exempt)</option>
-                        <option value={5}>5% GST</option>
-                        <option value={12}>12% GST</option>
-                        <option value={18}>18% GST (Standard)</option>
-                        <option value={28}>28% GST</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2">
-                    <div>
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        Enable HSN / SAC Code Columns on Documents
-                      </span>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Displays HSN/SAC classification codes on quotations, invoices, and PDFs.
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                        <span>🇮🇳 India GST Automatic Breakdown (CGST / SGST / IGST)</span>
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Automatically splits GST into CGST + SGST for intra-state supply or IGST for inter-state supply based on Place of Supply.
                       </p>
                     </div>
                     <IOSSwitch
-                      checked={org.hsn_sac_enabled ?? true}
-                      onChange={(checked) => setOrg({ ...org, hsn_sac_enabled: checked })}
+                      checked={org.gst_registered ?? true}
+                      onChange={(checked) => setOrg({ ...org, gst_registered: checked })}
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px] text-indigo-900 dark:text-indigo-200 bg-white/70 dark:bg-slate-900/70 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
-                    <div>
-                      <span className="font-bold text-indigo-700 dark:text-indigo-300">• Intra-State Supply (Same State):</span>{' '}
-                      Customer Place of Supply matches {org.business_state || org.state || 'Business State'} → Splits 50/50 into <span className="font-semibold">CGST + SGST</span>.
+                  {(org.gst_registered ?? true) && (
+                    <div className="space-y-4 pt-2 border-t border-indigo-100 dark:border-indigo-900/50">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div>
+                          <Input
+                            label="Company GSTIN (15-Char)"
+                            placeholder="27AAPFU0939F1ZV"
+                            value={org.gstin || org.gst_vat_number || ''}
+                            onChange={(e) => {
+                              const upper = e.target.value.toUpperCase().replace(/\s+/g, '');
+                              const code = upper.length >= 2 ? upper.slice(0, 2) : '';
+                              const stateName = code ? getStateNameByCode(code) : undefined;
+                              setOrg({
+                                ...org,
+                                gstin: upper,
+                                gst_vat_number: upper,
+                                ...(stateName
+                                  ? {
+                                      business_state: stateName,
+                                      state: stateName,
+                                      state_code: code,
+                                    }
+                                  : {}),
+                              });
+                            }}
+                          />
+                          {(org.gstin || org.gst_vat_number) &&
+                            !validateGstin(org.gstin || org.gst_vat_number).valid && (
+                              <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                                {validateGstin(org.gstin || org.gst_vat_number).error}
+                              </p>
+                            )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            Business State (Origin)
+                          </label>
+                          <select
+                            value={org.business_state || org.state || ''}
+                            onChange={(e) => {
+                              const st = e.target.value;
+                              const code = getStateCodeByName(st) || '';
+                              setOrg({
+                                ...org,
+                                business_state: st,
+                                state: st,
+                                state_code: code,
+                              });
+                            }}
+                            className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          >
+                            <option value="">Select Business State...</option>
+                            {INDIAN_STATES.map((st) => (
+                              <option key={st.code} value={st.name}>
+                                {st.name} ({st.code})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <Input
+                          label="State Code"
+                          placeholder="e.g. 27"
+                          value={org.state_code || getStateCodeByName(org.business_state || org.state) || ''}
+                          onChange={(e) => setOrg({ ...org, state_code: e.target.value })}
+                        />
+
+                        <div className="space-y-1">
+                          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            Default GST Rate
+                          </label>
+                          <select
+                            value={org.default_gst_rate ?? org.default_tax_rate ?? 18}
+                            onChange={(e) => {
+                              const r = parseFloat(e.target.value) || 0;
+                              setOrg({ ...org, default_gst_rate: r, default_tax_rate: r });
+                            }}
+                            className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          >
+                            <option value={0}>0% (Nil Rated / Exempt)</option>
+                            <option value={5}>5% GST</option>
+                            <option value={12}>12% GST</option>
+                            <option value={18}>18% GST (Standard)</option>
+                            <option value={28}>28% GST</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2">
+                        <div>
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            Enable HSN / SAC Code Columns on Documents
+                          </span>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Displays HSN/SAC classification codes on quotations, invoices, and PDFs.
+                          </p>
+                        </div>
+                        <IOSSwitch
+                          checked={org.hsn_sac_enabled ?? true}
+                          onChange={(checked) => setOrg({ ...org, hsn_sac_enabled: checked })}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px] text-indigo-900 dark:text-indigo-200 bg-white/70 dark:bg-slate-900/70 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
+                        <div>
+                          <span className="font-bold text-indigo-700 dark:text-indigo-300">• Intra-State Supply (Same State):</span>{' '}
+                          Customer Place of Supply matches {org.business_state || org.state || 'Business State'} → Splits 50/50 into <span className="font-semibold">CGST + SGST</span>.
+                        </div>
+                        <div>
+                          <span className="font-bold text-indigo-700 dark:text-indigo-300">• Inter-State Supply (Different State):</span>{' '}
+                          Customer Place of Supply differs from {org.business_state || org.state || 'Business State'} → Applies full <span className="font-semibold">IGST</span>.
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <span className="font-bold text-indigo-700 dark:text-indigo-300">• Inter-State Supply (Different State):</span>{' '}
-                      Customer Place of Supply differs from {org.business_state || org.state || 'Business State'} → Applies full <span className="font-semibold">IGST</span>.
-                    </div>
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+              );
+            }
+
+            return (
+              <div className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <span>{profile.flag} {profile.name} {profile.taxSystem} Settings ({profile.taxLabel.split('(')[0].trim()})</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Configure business {profile.taxSystem} registration, business location, and default tax rate for {profile.name}. Indian CGST/SGST rules are strictly disabled.
+                    </p>
+                  </div>
+                  <IOSSwitch
+                    checked={org.gst_registered ?? true}
+                    onChange={(checked) => setOrg({ ...org, gst_registered: checked })}
+                  />
+                </div>
+
+                {(org.gst_registered ?? true) && (
+                  <div className="space-y-4 pt-2 border-t border-indigo-100 dark:border-indigo-900/50">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div>
+                        <Input
+                          label={profile.taxLabel}
+                          placeholder={profile.isUaeVat ? 'e.g. 100234567800003' : 'e.g. Tax / VAT ID'}
+                          value={org.gst_vat_number || org.gstin || ''}
+                          onChange={(e) => {
+                            const val = profile.isUaeVat ? sanitizeUaeTrn(e.target.value) : e.target.value.trim();
+                            setOrg({
+                              ...org,
+                              gst_vat_number: val,
+                              gstin: val,
+                            });
+                          }}
+                        />
+                        {profile.isUaeVat && Boolean(org.gst_vat_number || org.gstin) && !isValidUaeTrn(org.gst_vat_number || org.gstin) && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                            UAE TRN must be exactly 15 digits (e.g. 100234567800003). Currently {(org.gst_vat_number || org.gstin || '').length} digits.
+                          </p>
+                        )}
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+                          Printed on customer invoices and quotations as your official {profile.taxSystem} registration number.
+                        </p>
+                      </div>
+
+                      {profile.isUaeVat ? (
+                        <div className="space-y-1">
+                          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            Emirate (Origin / Place of Supply)
+                          </label>
+                          <select
+                            value={org.business_state || org.state || ''}
+                            onChange={(e) =>
+                              setOrg({
+                                ...org,
+                                business_state: e.target.value,
+                                state: e.target.value,
+                              })
+                            }
+                            className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          >
+                            <option value="">Select Emirate...</option>
+                            {UAE_EMIRATES.map((em) => (
+                              <option key={em.code} value={em.name}>
+                                {em.name} (Form 201 Box {em.boxIndex})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <Input
+                          label="Business Location (City / Emirate / State)"
+                          placeholder="e.g. London, California, Berlin"
+                          value={org.business_state || org.state || ''}
+                          onChange={(e) =>
+                            setOrg({
+                              ...org,
+                              business_state: e.target.value,
+                              state: e.target.value,
+                            })
+                          }
+                        />
+                      )}
+
+                      <div className="space-y-1">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                          Default {profile.taxSystem} Rate
+                        </label>
+                        <select
+                          value={org.default_tax_rate ?? org.default_gst_rate ?? profile.defaultTaxRate}
+                          onChange={(e) => {
+                            const r = parseFloat(e.target.value) || 0;
+                            setOrg({ ...org, default_tax_rate: r, default_gst_rate: r });
+                          }}
+                          className="h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        >
+                          {profile.taxRates.map((tr) => (
+                            <option key={tr.label} value={tr.rate}>
+                              {tr.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      <div>
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          Enable {profile.goodsClassificationLabel} / {profile.serviceClassificationLabel} Columns on Documents
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Displays international item classification codes on quotations, invoices, and PDFs.
+                        </p>
+                      </div>
+                      <IOSSwitch
+                        checked={org.hsn_sac_enabled ?? true}
+                        onChange={(checked) => setOrg({ ...org, hsn_sac_enabled: checked })}
+                      />
+                    </div>
+
+                    {profile.isUaeVat ? (
+                      <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/30 p-3.5 space-y-2 text-xs">
+                        <div className="flex items-center gap-2 font-bold text-emerald-900 dark:text-emerald-200">
+                          <span>🇦🇪 UAE E-Invoicing System (EIS) & Peppol PINT-AE Readiness</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100 font-semibold uppercase tracking-wide">
+                            Compliant
+                          </span>
+                        </div>
+                        <p className="text-emerald-800 dark:text-emerald-300 leading-relaxed text-[11px]">
+                          QuoteFlow generates compliant 15-digit TRN invoices, Box 1a–1g Emirate breakdowns for UAE VAT Form 201, and structured Peppol PINT-AE UBL 2.1 XML files ready for FTA-accredited ASP e-delivery.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px] text-indigo-900 dark:text-indigo-200 bg-white/70 dark:bg-slate-900/70 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
+                        <div>
+                          <span className="font-bold text-indigo-700 dark:text-indigo-300">• Clean International Invoicing:</span>{' '}
+                          Quotes and invoices display a single clean <span className="font-semibold">{profile.taxSystem} {org.default_tax_rate ?? profile.defaultTaxRate}%</span> line. Indian dual GST components (CGST/SGST/IGST) are strictly excluded.
+                        </div>
+                        <div>
+                          <span className="font-bold text-indigo-700 dark:text-indigo-300">• Classification Codes:</span>{' '}
+                          Classification headers automatically adapt to <span className="font-semibold">{profile.goodsClassificationLabel}</span> and <span className="font-semibold">{profile.serviceClassificationLabel}</span> across all client views.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
+
+        {/* GCC Document Language Selection (Arabic / English / Both) */}
+        {isGccCountry(org.country || org.business_country, org.default_currency) && (
+          <div className="rounded-2xl border border-sky-200/80 dark:border-sky-900/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-sky-600 dark:text-sky-400" />
+                  <span>Document Display Language / لغة عرض المستندات (GCC)</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Select how quotations, tax invoices, and client portals display in GCC markets (Saudi Arabia, UAE, Qatar, Kuwait, Bahrain, Oman).
+                </p>
+              </div>
+              <span className="self-start sm:self-auto text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                GCC Compliance
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+              {/* Both (Bilingual English / Arabic) */}
+              <button
+                type="button"
+                onClick={() => setOrg({ ...org, document_language: 'both' })}
+                className={`p-4 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                  (org.document_language || 'both') === 'both'
+                    ? 'border-sky-500 bg-sky-50/40 dark:bg-sky-950/30 ring-2 ring-sky-500/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <span>🌐 Both (Bilingual)</span>
+                    </span>
+                    {(org.document_language || 'both') === 'both' && (
+                      <CheckCircle2 className="h-5 w-5 text-sky-600 dark:text-sky-400 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-sky-700 dark:text-sky-300">English &amp; العربية</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                    Dual side-by-side labels (e.g. <em>Tax Invoice / فاتورة ضريبية</em>). Fully compliant with Saudi ZATCA and UAE FTA e-invoicing standards.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-200/60 dark:border-slate-800 text-[10px] font-medium text-sky-600 dark:text-sky-400">
+                  Recommended for GCC
+                </div>
+              </button>
+
+              {/* English Only */}
+              <button
+                type="button"
+                onClick={() => setOrg({ ...org, document_language: 'en' })}
+                className={`p-4 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                  org.document_language === 'en'
+                    ? 'border-sky-500 bg-sky-50/40 dark:bg-sky-950/30 ring-2 ring-sky-500/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <span>🇬🇧 English Only</span>
+                    </span>
+                    {org.document_language === 'en' && (
+                      <CheckCircle2 className="h-5 w-5 text-sky-600 dark:text-sky-400 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">English</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                    Displays invoices, estimates, and emails strictly with English titles and terminology. Suitable for international multinational accounts.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-200/60 dark:border-slate-800 text-[10px] font-medium text-slate-500">
+                  International standard
+                </div>
+              </button>
+
+              {/* Arabic Only */}
+              <button
+                type="button"
+                onClick={() => setOrg({ ...org, document_language: 'ar' })}
+                className={`p-4 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                  org.document_language === 'ar'
+                    ? 'border-sky-500 bg-sky-50/40 dark:bg-sky-950/30 ring-2 ring-sky-500/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <span>🇸🇦 العربية (Arabic Only)</span>
+                    </span>
+                    {org.document_language === 'ar' && (
+                      <CheckCircle2 className="h-5 w-5 text-sky-600 dark:text-sky-400 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">العربية فقط</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                    Renders titles, line item headers, VAT summaries, and terms solely in formal Arabic. Ideal for domestic public and government tenders.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-200/60 dark:border-slate-800 text-[10px] font-medium text-slate-500">
+                  Domestic Arabic
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Quotation Numbering & Defaults */}
         <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
@@ -1486,6 +1911,9 @@ export function SettingsClientView({
                 <option value="AED">AED (د.إ)</option>
                 <option value="SAR">SAR (ر.س)</option>
                 <option value="KWD">KWD (د.ك)</option>
+                <option value="CAD">CAD (CA$)</option>
+                <option value="AUD">AUD (A$)</option>
+                <option value="SGD">SGD (S$)</option>
               </select>
             </div>
 
@@ -1538,81 +1966,98 @@ export function SettingsClientView({
         </div>
 
         {/* Default Payment Methods & Remittance Settings Card */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-5">
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-            <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-indigo-500" />
-              <span>Default Payment Methods & Remittance Settings</span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Configure company bank remittance details, domestic UPI ID & QR code (India), and international crypto payment wallets. These will be pre-filled on every new quotation automatically.
-            </p>
-          </div>
+        {(() => {
+          const isIndia = (org.business_country || '').toUpperCase() === 'IN' ||
+            (org.country || '').toLowerCase() === 'india' ||
+            (org.country || '').toUpperCase() === 'IN' ||
+            org.billing_region === 'INDIA' ||
+            org.default_currency === 'INR';
 
-          {/* Quick Selection Pills */}
-          <div className="flex items-center justify-between flex-wrap gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 text-xs">
-            <div>
-              <span className="font-bold text-slate-700 dark:text-slate-300 block">
-                Payment Option Selection
-              </span>
-              <p className="text-[11px] text-slate-400">
-                Turn switches ON to expand and enter payment details. Switched OFF methods remain hidden.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_show_bank_details: true,
-                    default_show_upi_details: true,
-                    default_show_cash_details: true,
-                    default_show_crypto_details: true,
-                    accepted_payment_methods: ['BANK_TRANSFER', 'UPI', 'CASH', 'CRYPTO'],
-                    default_payment_display_mode: 'ALL',
-                  }));
-                }}
-                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 shadow-2xs"
-              >
-                Select All
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_show_bank_details: true,
-                    default_show_upi_details: true,
-                    default_show_cash_details: false,
-                    default_show_crypto_details: false,
-                    accepted_payment_methods: ['BANK_TRANSFER', 'UPI'],
-                    default_payment_display_mode: 'BOTH',
-                  }));
-                }}
-                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 shadow-2xs"
-              >
-                Bank + UPI
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_show_bank_details: false,
-                    default_show_upi_details: false,
-                    default_show_cash_details: false,
-                    default_show_crypto_details: false,
-                    accepted_payment_methods: [],
-                    default_payment_display_mode: 'CUSTOM',
-                  }));
-                }}
-                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 hover:bg-slate-100 shadow-2xs"
-              >
-                Deselect All
-              </button>
-            </div>
-          </div>
+          return (
+            <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-5">
+              <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-indigo-500" />
+                  <span>Default Payment Methods & Remittance Settings</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {isIndia
+                    ? 'Configure company bank remittance details, domestic UPI ID & QR code (India), and cash payment options. These will be pre-filled on every new quotation automatically.'
+                    : 'Configure company bank remittance details (IBAN/SWIFT), online payment link (Stripe, PayPal, Wise), international crypto wallets, and cash instructions. These will be pre-filled on every new quotation automatically.'}
+                </p>
+              </div>
+
+              {/* Quick Selection Pills */}
+              <div className="flex items-center justify-between flex-wrap gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 text-xs">
+                <div>
+                  <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                    Payment Option Selection
+                  </span>
+                  <p className="text-[11px] text-slate-400">
+                    Turn switches ON to expand and enter payment details. Switched OFF methods remain hidden.
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_show_bank_details: true,
+                        default_show_upi_details: isIndia,
+                        default_show_payment_link: !isIndia,
+                        default_show_cash_details: true,
+                        default_show_crypto_details: true,
+                        accepted_payment_methods: isIndia
+                          ? ['BANK_TRANSFER', 'UPI', 'CASH', 'CRYPTO']
+                          : ['BANK_TRANSFER', 'PAYMENT_LINK', 'CASH', 'CRYPTO'],
+                        default_payment_display_mode: 'ALL',
+                      }));
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 shadow-2xs"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_show_bank_details: true,
+                        default_show_upi_details: isIndia,
+                        default_show_payment_link: !isIndia,
+                        default_show_cash_details: false,
+                        default_show_crypto_details: false,
+                        accepted_payment_methods: isIndia
+                          ? ['BANK_TRANSFER', 'UPI']
+                          : ['BANK_TRANSFER', 'PAYMENT_LINK'],
+                        default_payment_display_mode: 'BOTH',
+                      }));
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 shadow-2xs"
+                  >
+                    {isIndia ? 'Bank + UPI' : 'Bank + Payment Link'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrg((prev) => ({
+                        ...prev,
+                        default_show_bank_details: false,
+                        default_show_upi_details: false,
+                        default_show_payment_link: false,
+                        default_show_cash_details: false,
+                        default_show_crypto_details: false,
+                        accepted_payment_methods: [],
+                        default_payment_display_mode: 'CUSTOM',
+                      }));
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 hover:bg-slate-100 shadow-2xs"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
 
           {/* Option 1: Bank Transfer / Wire */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
@@ -1745,166 +2190,242 @@ export function SettingsClientView({
             )}
           </div>
 
-          {/* Option 2: UPI ID & QR Code */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
-            <div className="p-4 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
-                  <QrCode className="h-5 w-5" />
+          {/* Option 2: UPI ID & QR Code (India Only) OR Online Payment Link (International Only) */}
+          {isIndia ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
+              <div className="p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
+                    <QrCode className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <span>UPI ID &amp; QR Code (India)</span>
+                      {(org.default_show_upi_details ?? true) && (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                          Active
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Instant scan &amp; pay via Google Pay, PhonePe, Paytm, BHIM</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                    <span>UPI ID &amp; QR Code (India)</span>
-                    {(org.default_show_upi_details ?? true) && (
-                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
-                        Active
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-[11px] text-slate-400">Instant scan &amp; pay via Google Pay, PhonePe, Paytm, BHIM</p>
-                </div>
+
+                <IOSSwitch
+                  checked={org.default_show_upi_details ?? true}
+                  onChange={(checked) =>
+                    setOrg((prev) => ({
+                      ...prev,
+                      default_show_upi_details: checked,
+                      default_payment_display_mode: 'CUSTOM',
+                    }))
+                  }
+                  ariaLabel="Toggle UPI Payment"
+                />
               </div>
 
-              <IOSSwitch
-                checked={org.default_show_upi_details ?? true}
-                onChange={(checked) =>
-                  setOrg((prev) => ({
-                    ...prev,
-                    default_show_upi_details: checked,
-                    default_payment_display_mode: 'CUSTOM',
-                  }))
-                }
-                ariaLabel="Toggle UPI Payment"
-              />
-            </div>
+              {/* Collapsible UPI Fields */}
+              {(org.default_show_upi_details ?? true) && (
+                <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-3 animate-fade-in-up">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
+                    <div className="sm:col-span-7 space-y-3">
+                      <Input
+                        label="UPI ID / VPA"
+                        value={org.default_upi_details?.upi_id || ''}
+                        onChange={(e) =>
+                          setOrg((prev) => ({
+                            ...prev,
+                            default_upi_details: {
+                              ...(prev.default_upi_details || {}),
+                              upi_id: e.target.value,
+                            },
+                          }))
+                        }
+                        placeholder="e.g. yourbusiness@okhdfcbank"
+                      />
 
-            {/* Collapsible UPI Fields */}
-            {(org.default_show_upi_details ?? true) && (
-              <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-3 animate-fade-in-up">
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
-                  <div className="sm:col-span-7 space-y-3">
-                    <Input
-                      label="UPI ID / VPA"
-                      value={org.default_upi_details?.upi_id || ''}
-                      onChange={(e) =>
-                        setOrg((prev) => ({
-                          ...prev,
-                          default_upi_details: {
-                            ...(prev.default_upi_details || {}),
-                            upi_id: e.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="e.g. yourbusiness@okhdfcbank"
-                    />
+                      <Input
+                        label="Payee / Merchant Name"
+                        value={org.default_upi_details?.payee_name || ''}
+                        onChange={(e) =>
+                          setOrg((prev) => ({
+                            ...prev,
+                            default_upi_details: {
+                              ...(prev.default_upi_details || {}),
+                              payee_name: e.target.value,
+                            },
+                          }))
+                        }
+                        placeholder="e.g. SUBESH M LLC"
+                      />
+                    </div>
 
-                    <Input
-                      label="Payee / Merchant Name"
-                      value={org.default_upi_details?.payee_name || ''}
-                      onChange={(e) =>
-                        setOrg((prev) => ({
-                          ...prev,
-                          default_upi_details: {
-                            ...(prev.default_upi_details || {}),
-                            payee_name: e.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="e.g. SUBESH M LLC"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-5">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      UPI QR Code Image
-                    </label>
-                    {org.default_upi_details?.qr_code_url ? (
-                      <div className="relative p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 flex items-center gap-3">
-                        <img
-                          src={org.default_upi_details.qr_code_url}
-                          alt="UPI QR Code"
-                          className="h-16 w-16 object-contain rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1"
-                        />
-                        <div className="space-y-1">
-                          <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-                            <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
-                          </span>
-                          <div className="flex gap-2 items-center">
-                            <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
-                              {isUploadingDefaultUpiQr ? (
-                                <>
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  <span>Uploading...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span>Change</span>
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={handleDefaultUpiQrUpload}
-                                    className="hidden"
-                                    disabled={isUploadingDefaultUpiQr}
-                                  />
-                                </>
-                              )}
-                            </label>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const updated = {
-                                  ...(org.default_upi_details || {}),
-                                  qr_code_url: '',
-                                };
-                                setOrg((prev) => ({
-                                  ...prev,
-                                  default_upi_details: updated,
-                                }));
-                                await fetch('/api/settings', {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    ...org,
+                    <div className="sm:col-span-5">
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        UPI QR Code Image
+                      </label>
+                      {org.default_upi_details?.qr_code_url ? (
+                        <div className="relative p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 flex items-center gap-3">
+                          <img
+                            src={org.default_upi_details.qr_code_url}
+                            alt="UPI QR Code"
+                            className="h-16 w-16 object-contain rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1"
+                          />
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Attached
+                            </span>
+                            <div className="flex gap-2 items-center">
+                              <label className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1">
+                                {isUploadingDefaultUpiQr ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span>Uploading...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>Change</span>
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      onChange={handleDefaultUpiQrUpload}
+                                      className="hidden"
+                                      disabled={isUploadingDefaultUpiQr}
+                                    />
+                                  </>
+                                )}
+                              </label>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const updated = {
+                                    ...(org.default_upi_details || {}),
+                                    qr_code_url: '',
+                                  };
+                                  setOrg((prev) => ({
+                                    ...prev,
                                     default_upi_details: updated,
-                                  }),
-                                });
-                                setSuccessMsg('UPI QR code removed.');
-                                setTimeout(() => setSuccessMsg(null), 2500);
-                              }}
-                              className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
-                            >
-                              Remove
-                            </button>
+                                  }));
+                                  await fetch('/api/settings', {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      ...org,
+                                      default_upi_details: updated,
+                                    }),
+                                  });
+                                  setSuccessMsg('UPI QR code removed.');
+                                  setTimeout(() => setSuccessMsg(null), 2500);
+                                }}
+                                className="text-[10px] font-semibold text-rose-600 hover:text-rose-800"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                      <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30 ${isUploadingDefaultUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
-                        {isUploadingDefaultUpiQr ? (
-                          <>
-                            <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
-                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
-                          </>
-                        ) : (
-                          <>
-                            <QrCode className="h-6 w-6 text-slate-400 mb-1" />
-                            <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload UPI QR Code</span>
-                            <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleDefaultUpiQrUpload}
-                              className="hidden"
-                            />
-                          </>
-                        )}
-                      </label>
-                    )}
+                      ) : (
+                        <label className={`border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30 ${isUploadingDefaultUpiQr ? 'opacity-60 pointer-events-none' : ''}`}>
+                          {isUploadingDefaultUpiQr ? (
+                            <>
+                              <Loader2 className="h-6 w-6 text-emerald-600 animate-spin mb-1" />
+                              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Uploading QR Code...</span>
+                            </>
+                          ) : (
+                            <>
+                              <QrCode className="h-6 w-6 text-slate-400 mb-1" />
+                              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Upload UPI QR Code</span>
+                              <span className="text-[10px] text-slate-400">PNG, JPG, WebP up to 5MB</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleDefaultUpiQrUpload}
+                                className="hidden"
+                              />
+                            </>
+                          )}
+                        </label>
+                      )}
+                    </div>
                   </div>
                 </div>
+              )}
+            </div>
+          ) : (
+            /* Option 2 (International): Online Payment Link */
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
+              <div className="p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 shrink-0">
+                    <LinkIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <span>Online Payment Link (Card / Stripe / PayPal)</span>
+                      {(org.default_show_payment_link ?? false) && (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">
+                          Active
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Provide a direct checkout link (Stripe, PayPal, Wise, or custom checkout portal)</p>
+                  </div>
+                </div>
+
+                <IOSSwitch
+                  checked={org.default_show_payment_link ?? false}
+                  onChange={(checked) =>
+                    setOrg((prev) => ({
+                      ...prev,
+                      default_show_payment_link: checked,
+                      default_payment_display_mode: 'CUSTOM',
+                    }))
+                  }
+                  ariaLabel="Toggle Payment Link"
+                />
               </div>
-            )}
-          </div>
+
+              {/* Collapsible Payment Link Fields */}
+              {(org.default_show_payment_link ?? false) && (
+                <div className="p-4 pt-1 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-800/20 space-y-3 animate-fade-in-up">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
+                    <div className="sm:col-span-8 space-y-3">
+                      <Input
+                        label="Payment Link URL *"
+                        value={org.default_payment_link || ''}
+                        onChange={(e) =>
+                          setOrg((prev) => ({
+                            ...prev,
+                            default_payment_link: e.target.value,
+                          }))
+                        }
+                        placeholder="e.g. https://buy.stripe.com/abc... or https://paypal.me/yourbusiness"
+                      />
+                      <Input
+                        label="Button / Link Label"
+                        value={org.default_payment_link_label || ''}
+                        onChange={(e) =>
+                          setOrg((prev) => ({
+                            ...prev,
+                            default_payment_link_label: e.target.value,
+                          }))
+                        }
+                        placeholder="e.g. Pay Online (Card / Stripe / PayPal)"
+                      />
+                    </div>
+                    <div className="sm:col-span-4 flex flex-col justify-center p-3 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40 text-slate-600 dark:text-slate-300 space-y-1">
+                      <span className="text-[11px] font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-blue-600" /> Client Portal Pay Button
+                      </span>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        When active, your international customers will see a prominent <strong>Pay</strong> button on their client portal that directly opens this checkout link.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Option 3: Cash Payment */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 overflow-hidden shadow-2xs transition-all">
@@ -2138,143 +2659,20 @@ export function SettingsClientView({
             )}
           </div>
         </div>
-
-        {/* Team Members & Staff Accounts Card */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <UsersIcon className="h-5 w-5 text-indigo-500" />
-                <span>Team Accounts & Staff Members</span>
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Create staff accounts with a temporary password. When staff log in, they will be prompted to set up their own password.
-              </p>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2.5 py-1 rounded-lg">
-                {users.length} {users.length === 1 ? 'Member' : 'Members'}
-              </span>
-              {currentUserRole !== 'STAFF' && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setStaffError(null);
-                    setIsAddStaffOpen(true);
-                  }}
-                  className="gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
-                >
-                  <UserPlus className="h-3.5 w-3.5" />
-                  <span>Add Staff Member</span>
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {isLoadingUsers ? (
-            <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-              <span>Loading user accounts...</span>
-            </div>
-          ) : users.length === 0 ? (
-            <div className="text-center py-6 text-xs text-slate-400">
-              No registered user accounts found.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {users.map((user) => {
-                const isCurrentUser = user.id === currentUserId;
-                const canDelete = currentUserRole !== 'STAFF' && !isCurrentUser;
-
-                return (
-                  <div key={user.id} className="py-3.5 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-bold flex items-center justify-center text-sm shadow-xs">
-                        {(user.full_name?.[0] || user.email?.[0] || 'U').toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                            {user.full_name || 'Team Member'}
-                          </p>
-                          {isCurrentUser && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                              You
-                            </span>
-                          )}
-                          <span
-                            className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                              user.role === 'OWNER'
-                                ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
-                                : user.role === 'ADMIN'
-                                ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-                            }`}
-                          >
-                            {user.role || 'STAFF'}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-400 dark:text-slate-500">{user.email}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
-                          user.email_confirmed
-                            ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                            : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                        }`}
-                      >
-                        {user.email_confirmed ? 'Verified' : 'Temp Password'}
-                      </span>
-
-                      {canDelete && (
-                        <>
-                          {!user.email_confirmed && (
-                            <button
-                              type="button"
-                              onClick={() => handleResetStaffPassword(user.id, user.email)}
-                              disabled={deletingUserId === user.id}
-                              className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
-                              title="Set or Reset Temporary Password"
-                            >
-                              <span>Set Temp Password</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteUser(user.id, user.email)}
-                            disabled={deletingUserId === user.id}
-                            className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-colors"
-                            title="Delete User Account"
-                          >
-                            {deletingUserId === user.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3.5 w-3.5" />
-                            )}
-                            <span>Delete</span>
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      );
+    })()}
 
         {/* Save CTA */}
-        {currentUserRole !== 'STAFF' && (
-          <div className="flex justify-end pt-2">
+        {isOwnerOrAdminRole(currentUserRole) && (
+          <div className="flex items-center justify-end gap-3 pt-2">
+            {hasUnsavedChanges && (
+              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                Unsaved changes
+              </span>
+            )}
             <Button type="submit" variant="primary" isLoading={isLoading} className="gap-2 shadow-md">
               <Save className="h-4 w-4" />
-              <span>Save Settings</span>
+              <span>{hasUnsavedChanges ? 'Save Changes' : justSaved ? '✓ Saved' : 'Save Settings'}</span>
             </Button>
           </div>
         )}
@@ -2338,114 +2736,12 @@ export function SettingsClientView({
     </>
   )}
 
-      {/* Add Staff Member Modal (Direct Password Setup Only) */}
-      {isAddStaffOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850">
-              <div className="flex items-center gap-2">
-                <UserPlus className="h-5 w-5 text-indigo-500" />
-                <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base">Add Team Member</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddStaffOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleDirectCreateStaff} className="p-6 space-y-4">
-              {staffError && (
-                <div className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-3 rounded-xl">
-                  {staffError}
-                </div>
-              )}
-
-              <div className="rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 p-3 text-xs text-indigo-900 dark:text-indigo-300 flex items-start gap-2">
-                <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-                <span>
-                  Set a temporary password to create the account immediately. When the staff member logs in, they will be prompted to set up their own password.
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Full Name <span className="text-rose-500">*</span>
-                </label>
-                <Input
-                  value={newStaffName}
-                  onChange={(e) => setNewStaffName(e.target.value)}
-                  placeholder="e.g. Rahul Verma"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Email Address (Login ID) <span className="text-rose-500">*</span>
-                </label>
-                <Input
-                  type="email"
-                  value={newStaffEmail}
-                  onChange={(e) => setNewStaffEmail(e.target.value)}
-                  placeholder="rahul@example.com"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Temporary Password <span className="text-rose-500">*</span>
-                </label>
-                <Input
-                  type="password"
-                  value={newStaffPassword}
-                  onChange={(e) => setNewStaffPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  required
-                  minLength={6}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Account Role <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  value={newStaffRole}
-                  onChange={(e) => setNewStaffRole(e.target.value as 'STAFF' | 'ADMIN')}
-                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                >
-                  <option value="STAFF">Staff (Can create & manage quotations, customers, products)</option>
-                  <option value="ADMIN">Admin (Full organization access)</option>
-                </select>
-              </div>
-
-              <div className="pt-3 flex justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsAddStaffOpen(false)}
-                  disabled={isAddingStaff}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  isLoading={isAddingStaff}
-                  className="gap-2 shadow-sm"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  <span>Create Account</span>
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Settings Footer */}
+      <div className="pt-6 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center text-xs text-slate-500">
+        <p className="font-medium text-slate-600 dark:text-slate-400">
+          QuoteFlow 24/7 Workspace Settings
+        </p>
+      </div>
 
       {/* Interactive Workflow & Training Modal */}
       <TrainingGuideModal

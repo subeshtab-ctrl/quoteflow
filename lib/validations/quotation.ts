@@ -22,6 +22,8 @@ export const LineItemSchema = z.object({
   igst_amount: z.number().optional(),
   tax_category: z.string().nullish().or(z.literal('')),
   tax_mode: z.enum(['exclusive', 'inclusive']).optional(),
+  is_optional: z.boolean().optional(),
+  is_selected: z.boolean().optional(),
 }).passthrough();
 
 export const QuotationFormSchema = z.object({
@@ -30,12 +32,16 @@ export const QuotationFormSchema = z.object({
   title: z.string().min(2, 'Quotation title is required'),
   issue_date: z.string().min(1, 'Issue date is required'),
   valid_until: z.string().min(1, 'Valid until date is required'),
-  currency: z.enum(['INR', 'USD', 'AED', 'EUR', 'GBP']).default('INR'),
+  currency: z
+    .enum(['INR', 'USD', 'AED', 'EUR', 'GBP', 'SAR', 'KWD', 'CAD', 'AUD', 'SGD'])
+    .optional(),
   discount_type: z.enum(['PERCENTAGE', 'FIXED']).default('PERCENTAGE'),
   discount_value: z.coerce.number().min(0).default(0),
   tax_rate: z.coerce.number().min(0).max(100).default(0),
-  tax_mode: z.enum(['exclusive', 'inclusive']).optional().default('exclusive'),
+  tax_mode: z.enum(['exclusive', 'inclusive']).optional(),
   tax_name: z.string().nullish().or(z.literal('')),
+  country: z.string().nullish().or(z.literal('')),
+  supplier_state: z.string().nullish().or(z.literal('')),
   place_of_supply: z.string().nullish().or(z.literal('')),
   customer_gstin: z.string().nullish().or(z.literal('')),
   notes: z.string().optional(),
@@ -50,6 +56,7 @@ export const QuotationFormSchema = z.object({
       'VIEWED',
       'PENDING_APPROVAL',
       'APPROVED',
+      'IN_PROGRESS',
       'PAYMENT_COMPLETED',
       'COMPLETED',
       'REJECTED',
@@ -76,7 +83,7 @@ export const CustomerFormSchema = z
     shipping_address: z.string().optional(),
     city: z.string().optional(),
     state: z.string().optional(),
-    country: z.string().default('India'),
+    country: z.string().optional(),
     postal_code: z.string().optional(),
     tax_number: z.string().optional(),
     customer_gstin: z.string().optional(),
@@ -84,7 +91,11 @@ export const CustomerFormSchema = z
     state_code: z.string().optional(),
     place_of_supply: z.string().optional(),
     notes: z.string().optional(),
+    whatsapp_enabled: z.boolean().optional(),
+    email_enabled: z.boolean().optional(),
+    whatsapp_opt_in: z.boolean().optional(),
   })
+  .passthrough()
   .superRefine((data, ctx) => {
     const cleanPhone = (data.phone || '').replace(/[\s\-\(\)]/g, '');
     const cleanEmail = (data.email || '').trim();
@@ -126,25 +137,29 @@ export const ProductFormSchema = z.object({
   unit: z.string().nullish().or(z.literal('')).default('unit'),
   tax_rate: z.coerce.number().min(0).max(100).default(0),
   is_active: z.boolean().default(true),
+  hsn_code: z.string().nullish().or(z.literal('')),
+  classification_type: z.string().nullish().or(z.literal('')),
+  category: z.string().nullish().or(z.literal('')),
 });
 
 export const ApprovalSchema = z
   .object({
     token: z.string().min(10, 'Invalid approval token'),
     signer_name: z.string().min(2, 'Please enter your full name'),
-    signer_email: z.string().email('Please enter a valid email address').optional().or(z.literal('')),
-    signer_phone: z.string().optional().or(z.literal('')),
-    phone_country_code: z.string().optional(),
-    signer_company: z.string().optional(),
+    signer_email: z.string().email('Please enter a valid email address').nullish().or(z.literal('')),
+    signer_phone: z.string().nullish().or(z.literal('')),
+    phone_country_code: z.string().nullish().or(z.literal('')),
+    signer_company: z.string().nullish().or(z.literal('')),
     signature_data_url: z.string().min(20, 'Signature is required'),
     signature_type: z.enum(['DRAWN', 'TYPED']),
+    selected_optional_item_ids: z.array(z.string()).optional(),
     agree_terms: z.literal(true, {
       errorMap: () => ({ message: 'You must agree to the quotation terms and conditions' }),
     }),
   })
   .superRefine((data, ctx) => {
-    const hasEmail = Boolean(data.signer_email && data.signer_email.trim());
-    const hasPhone = Boolean(data.signer_phone && data.signer_phone.trim());
+    const hasEmail = Boolean(data.signer_email && (data.signer_email || '').trim());
+    const hasPhone = Boolean(data.signer_phone && (data.signer_phone || '').trim());
     if (!hasEmail && !hasPhone) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -181,7 +196,7 @@ export const OrganizationSettingsSchema = z.object({
   postal_code: z.string().nullish().or(z.literal('')),
   logo_url: z.string().nullish().or(z.literal('')),
   brand_color: z.string().nullish().or(z.literal('')).default('#4f46e5'),
-  default_currency: z.enum(['INR', 'USD', 'AED', 'EUR', 'GBP']).default('INR'),
+  default_currency: z.string().default('INR'),
   default_tax_rate: z.coerce.number().min(0).max(100).default(18),
   default_validity_days: z.coerce.number().int().default(30),
   quotation_prefix: z.string().default('Q-'),
@@ -193,14 +208,26 @@ export const OrganizationSettingsSchema = z.object({
   goods_classification_label: z.string().nullish().or(z.literal('')),
   service_classification_label: z.string().nullish().or(z.literal('')),
   tax_rate_type: z.string().nullish().or(z.literal('')),
-  default_tax_mode: z.enum(['exclusive', 'inclusive']).optional().default('exclusive'),
+  default_tax_mode: z.enum(['exclusive', 'inclusive']).optional(),
   gst_registered: z.boolean().optional(),
   gstin: z.string().nullish().or(z.literal('')),
   business_state: z.string().nullish().or(z.literal('')),
   state_code: z.string().nullish().or(z.literal('')),
   default_gst_rate: z.coerce.number().min(0).max(100).optional(),
   hsn_sac_enabled: z.boolean().optional(),
+  google_review_url: z.string().nullish().or(z.literal('')),
   require_full_payment_for_invoice: z.boolean().optional().default(true),
+  whatsapp_number: z.string().nullish().or(z.literal('')),
+  whatsapp_country_code: z.string().nullish().or(z.literal('')),
+  whatsapp_automation_enabled: z.boolean().optional(),
+  whatsapp_auto_reply_enabled: z.boolean().optional(),
+  whatsapp_quote_ready_template: z.string().nullish().or(z.literal('')),
+  whatsapp_quote_reminder_template: z.string().nullish().or(z.literal('')),
+  whatsapp_quote_approved_template: z.string().nullish().or(z.literal('')),
+  whatsapp_payment_reminder_template: z.string().nullish().or(z.literal('')),
+  whatsapp_template_chat_reply: z.string().nullish().or(z.literal('')),
+  whatsapp_linked_at: z.string().nullish().or(z.literal('')),
+  document_language: z.enum(['en', 'ar', 'both']).nullish().or(z.literal('')),
   mode: z.enum(['test', 'live']).optional(),
 }).passthrough();
 

@@ -5,17 +5,63 @@ import Link from 'next/link';
 import { SubscriptionAccess } from '@/types/database';
 import { AlertCircle, Clock, ShieldAlert, Lock, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SUBSCRIPTION_CONFIG } from '@/lib/billing/subscription-config';
+import { isOwnerOrAdminRole } from '@/types/staff';
 
-export function BillingBanner({ access }: { access: SubscriptionAccess | null }) {
+export function BillingBanner({
+  access,
+  businessCountry,
+  userRole,
+}: {
+  access: SubscriptionAccess | null;
+  businessCountry?: string | null;
+  userRole?: string;
+}) {
   if (!access) return null;
+
+  // For STAFF accounts (all non-Owner/Admin roles): only show expiration message without any payment buttons or pricing
+  const effectiveRole = (userRole || 'OWNER').toUpperCase();
+  const isStaff = effectiveRole !== 'OWNER' && effectiveRole !== 'ADMIN' && effectiveRole !== 'SUPER_ADMIN';
+  if (isStaff) {
+    if (
+      access.isRestricted ||
+      access.isExpired ||
+      access.isPastDue ||
+      access.isPaymentOverdue ||
+      access.accountAccess === 'restricted' ||
+      (access.isPaymentDue && !access.isPaid)
+    ) {
+      return (
+        <div className="w-full border-b px-4 py-3 sm:px-6 bg-rose-600/10 border-rose-600/30 text-rose-900 dark:text-rose-200">
+          <div className="max-w-7xl mx-auto flex items-center gap-2.5 text-xs sm:text-sm">
+            <Lock className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+            <p className="font-medium">
+              Your organization&apos;s QuoteFlow subscription has expired. Please contact your administrator.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    // Staff members do not see trial countdowns or pricing reminders
+    return null;
+  }
 
   // Don't show if active paid with no issues
   if (access.isPaid && !access.isRestricted && !access.isGracePeriod && !access.isPastDue) {
     return null;
   }
 
+  const isIndia = businessCountry
+    ? businessCountry.toUpperCase() === 'IN'
+    : access.currency
+    ? access.currency === 'INR'
+    : true;
+  const priceDisplay = access.priceDisplay || (isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedPrice : SUBSCRIPTION_CONFIG.GLOBAL.formattedPrice);
+  const pricePerMonth = isIndia ? SUBSCRIPTION_CONFIG.INDIA.formattedMonthly : SUBSCRIPTION_CONFIG.GLOBAL.formattedMonthly;
+  const locale = isIndia ? 'en-IN' : 'en-US';
+
   const trialEndDate = access.trialEndsAt
-    ? new Date(access.trialEndsAt).toLocaleDateString('en-IN', {
+    ? new Date(access.trialEndsAt).toLocaleDateString(locale, {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
@@ -31,7 +77,7 @@ export function BillingBanner({ access }: { access: SubscriptionAccess | null })
             <Lock className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
             <p className="font-medium">
               <span className="font-bold mr-1.5">🔒 Billing Required:</span>
-              Your ₹99 subscription payment is overdue. Please complete payment to restore full QuoteFlow access.
+              Your {priceDisplay} subscription payment is overdue. Please complete payment to restore full QuoteFlow access.
             </p>
           </div>
           <Link href="/billing" className="shrink-0">
@@ -54,13 +100,13 @@ export function BillingBanner({ access }: { access: SubscriptionAccess | null })
     const overdueDay = Math.min(3, Math.max(1, 4 - daysLeft));
 
     let title = `⚠️ Payment Overdue:`;
-    let msg = `Your ₹99 QuoteFlow payment is overdue. Please complete payment to avoid interruption.`;
+    let msg = `Your ${priceDisplay} QuoteFlow payment is overdue. Please complete payment to avoid interruption.`;
 
     if (overdueDay === 2) {
-      msg = `Your ₹99 payment is 2 days overdue. Please pay now to keep your account active.`;
+      msg = `Your ${priceDisplay} payment is 2 days overdue. Please pay now to keep your account active.`;
     } else if (overdueDay === 3) {
       title = `🚨 Final Payment Reminder:`;
-      msg = `Your ₹99 QuoteFlow payment is 3 days overdue. Please complete payment today to avoid account restrictions.`;
+      msg = `Your ${priceDisplay} QuoteFlow payment is 3 days overdue. Please complete payment today to avoid account restrictions.`;
     }
 
     return (
@@ -96,7 +142,7 @@ export function BillingBanner({ access }: { access: SubscriptionAccess | null })
             <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <p className="font-medium">
               <span className="font-bold mr-1.5">⚠️ Free Trial Expired:</span>
-              Subscribe to QuoteFlow Pro for ₹99/month to maintain full access to quotations and invoices.
+              Subscribe to QuoteFlow Pro for {pricePerMonth} to maintain full access to quotations and invoices.
             </p>
           </div>
           <Link href="/billing" className="shrink-0">
@@ -123,7 +169,7 @@ export function BillingBanner({ access }: { access: SubscriptionAccess | null })
             <Clock className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
             <p className="font-medium">
               <span className="font-bold mr-1.5">⚠️ Trial Reminder:</span>
-              Your free trial ends in {days} {days === 1 ? 'day' : 'days'}. After your trial: ₹99/month.
+              Your free trial ends in {days} {days === 1 ? 'day' : 'days'}. After your trial: {pricePerMonth}.
             </p>
           </div>
           <Link href="/billing" className="shrink-0">

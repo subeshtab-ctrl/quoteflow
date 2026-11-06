@@ -11,13 +11,15 @@ export interface UserAuthContext {
   orgId: string;
   role: UserRole;
   organization: Organization;
+  isStaff: boolean;
+  isOwner: boolean;
 }
 
 // 30-second in-memory cache for resolved user membership to eliminate redundant DB roundtrips
 // across rapid API/page requests and reduce Vercel Fluid Active CPU usage.
 const membershipCache = new Map<
   string,
-  { orgId: string; role: UserRole; expiresAt: number }
+  { orgId: string; role: UserRole; isStaff: boolean; isOwner: boolean; expiresAt: number }
 >();
 const MEMBERSHIP_CACHE_TTL_MS = 30_000;
 
@@ -30,7 +32,12 @@ export function invalidateAuthContextCache(userId?: string) {
 }
 
 async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null> {
-  const supabase = await createServerSupabaseClient();
+  let supabase = null;
+  try {
+    supabase = await createServerSupabaseClient();
+  } catch {
+    return null;
+  }
   if (!supabase) return null;
 
   const {
@@ -61,32 +68,52 @@ async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null
         orgId: cachedMember.orgId,
         role: cachedMember.role,
         organization,
+        isStaff: cachedMember.isStaff,
+        isOwner: cachedMember.isOwner,
       };
     }
   }
 
   const admin = createAdminClient();
   let orgId = (user.user_metadata?.organization_id as string) || '';
-  // IMPORTANT: role is ALWAYS read from the organization_members table, never from user_metadata.
-  // user_metadata.role is untrusted and may be stale or wrong (e.g. staff showing as OWNER).
-  let role: UserRole = 'STAFF'; // safest default — escalated only when DB confirms a higher role
+  const isExplicitStaff = Boolean(
+    user.user_metadata?.role === 'STAFF' ||
+    user.user_metadata?.is_staff === true ||
+    user.user_metadata?.is_staff_invite === true ||
+    user.user_metadata?.invited_by
+  );
+  // Account owners default to OWNER; only explicit staff accounts default to STAFF
+  let role: UserRole = isExplicitStaff
+    ? ((user.user_metadata?.role as UserRole) || 'STAFF')
+    : ((user.user_metadata?.role as UserRole) || 'OWNER');
 
   // 1. If user has a designated organization_id in user_metadata, verify it's valid & get DB role
   if (orgId && admin) {
     try {
       const { data: member } = await admin
         .from('organization_members')
-        .select('organization_id, role')
+        .select('organization_id, role, is_active')
         .eq('user_id', user.id)
         .eq('organization_id', orgId)
-        .eq('is_active', true)
         .maybeSingle();
 
-      if (member?.role) {
-        role = member.role as UserRole; // DB role is authoritative
-      }
-      // If no member record found for this orgId, fall through to lookup below
-      if (!member) {
+      if (member) {
+        if (member.is_active === false) {
+          // User has been deactivated by company administrator - strictly block access
+          return null;
+        }
+        if (member.role) {
+          role = member.role as UserRole; // DB role is authoritative
+        }
+      } else if (!isExplicitStaff && role === 'OWNER') {
+        // Backfill missing owner membership in DB
+        await admin.from('organization_members').upsert({
+          organization_id: orgId,
+          user_id: user.id,
+          role: 'OWNER',
+          is_active: true,
+        }).catch(() => {});
+      } else {
         orgId = ''; // force re-lookup
       }
     } catch {
@@ -99,16 +126,24 @@ async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null
     try {
       const { data: members } = await admin
         .from('organization_members')
-        .select('organization_id, role')
+        .select('organization_id, role, is_active')
         .eq('user_id', user.id)
-        .eq('is_active', true)
         .order('created_at', { ascending: false });
+
+      // If user only has deactivated memberships, block access immediately
+      const allDeactivated = (members || []).length > 0 && (members || []).every((m) => m.is_active === false);
+      if (allDeactivated) {
+        return null;
+      }
+
+      const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase() || '';
+      const isAdminUser = Boolean(adminEmail && user.email?.toLowerCase() === adminEmail);
 
       // Prefer non-default org if multiple memberships exist
       const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
       const activeMember =
-        (members || []).find((m) => m.organization_id !== DEFAULT_ORG_ID) ||
-        (user.email?.toLowerCase() === 'subeshtab@gmail.com' || user.email?.toLowerCase() === 'm.subesh@outlook.com' ? members?.[0] : null);
+        (members || []).find((m) => m.is_active !== false && m.organization_id !== DEFAULT_ORG_ID) ||
+        (isAdminUser ? members?.[0] : null);
 
       if (activeMember?.organization_id) {
         orgId = activeMember.organization_id;
@@ -132,15 +167,17 @@ async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null
     }
   }
 
-  // 3. If user is Subesh M, link to primary org with OWNER role
+  // 3. Link designated admin account to primary org if not yet associated
   const DEFAULT_ORG_ID = 'a0000000-0000-0000-0000-000000000001';
-  if (user.email?.toLowerCase() === 'subeshtab@gmail.com' || user.email?.toLowerCase() === 'm.subesh@outlook.com') {
+  const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase() || '';
+  if (adminEmail && user.email?.toLowerCase() === adminEmail) {
     if (!orgId) orgId = DEFAULT_ORG_ID;
     role = 'OWNER';
   }
 
   // 4. For any other user without an organization, auto-provision an isolated workspace
-  if (!orgId && admin) {
+  // IMPORTANT: Staff accounts must NEVER auto-provision their own workspace or trial.
+  if (!orgId && admin && !isExplicitStaff) {
     try {
       const newOrgId = crypto.randomUUID();
       const compName =
@@ -200,19 +237,46 @@ async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null
     }
   }
 
-  // Absolute fallback
+  // Absolute fallback: Ensure tenant isolation by assigning a distinct isolated workspace UUID
   if (!orgId) {
-    orgId = DEFAULT_ORG_ID;
+    orgId = crypto.randomUUID();
   }
+
+  let organization = await store.getOrganization(orgId);
+
+  // Only non-invited primary account holders can be OWNER
+  if (
+    !isExplicitStaff &&
+    organization &&
+    organization.email &&
+    user.email &&
+    organization.email.toLowerCase() === user.email.toLowerCase()
+  ) {
+    role = 'OWNER';
+  }
+
+  // Strict role boundaries:
+  // An owner is the primary workspace creator who is NOT an invited staff member.
+  const isOwner =
+    !isExplicitStaff &&
+    (role === 'OWNER' ||
+      Boolean(
+        organization?.email &&
+          user.email &&
+          organization.email.toLowerCase() === user.email.toLowerCase()
+      ));
+
+  // Any invited user, or non-owner, is staff
+  const isStaff = !isOwner || isExplicitStaff;
 
   // Cache resolved membership for 30s
   membershipCache.set(user.id, {
     orgId,
     role,
+    isStaff,
+    isOwner,
     expiresAt: Date.now() + MEMBERSHIP_CACHE_TTL_MS,
   });
-
-  let organization = await store.getOrganization(orgId);
 
   // If organization record doesn't exist in cache/db, initialize safe defaults
   if (!organization) {
@@ -248,6 +312,8 @@ async function resolveAuthenticatedUserContext(): Promise<UserAuthContext | null
     orgId,
     role,
     organization,
+    isStaff,
+    isOwner,
   };
 }
 

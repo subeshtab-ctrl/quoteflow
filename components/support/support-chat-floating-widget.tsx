@@ -42,6 +42,7 @@ export function SupportChatFloatingWidget({
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [notifyViaWhatsApp, setNotifyViaWhatsApp] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -120,6 +121,7 @@ export function SupportChatFloatingWidget({
         body: JSON.stringify({
           message: text || '(Attachment enclosed)',
           attachments,
+          sendWhatsAppNotification: senderType === 'developer' && notifyViaWhatsApp,
         }),
       });
 
@@ -392,6 +394,33 @@ export function SupportChatFloatingWidget({
               </button>
             </span>
           ))}
+        </div>
+      )}
+
+      {/* Developer Admin WhatsApp Notification Toggle Bar */}
+      {senderType === 'developer' && (
+        <div className="px-3 py-1.5 bg-emerald-50/70 dark:bg-emerald-950/40 border-t border-emerald-100 dark:border-emerald-900/50 flex items-center justify-between text-[11px] shrink-0">
+          <label className="flex items-center gap-1.5 cursor-pointer text-emerald-800 dark:text-emerald-300 font-semibold select-none">
+            <input
+              type="checkbox"
+              checked={notifyViaWhatsApp}
+              onChange={(e) => setNotifyViaWhatsApp(e.target.checked)}
+              className="rounded text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5"
+            />
+            <span className="flex items-center gap-1">
+              <span>Notify user via WhatsApp (Meta API)</span>
+            </span>
+          </label>
+          {ticket.callback_phone && (
+            <a
+              href={`https://wa.me/${ticket.callback_phone.replace(/[^\d]/g, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-0.5 font-bold"
+            >
+              <span>Direct Chat</span> &rarr;
+            </a>
+          )}
         </div>
       )}
 

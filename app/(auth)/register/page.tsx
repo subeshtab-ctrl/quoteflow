@@ -19,11 +19,13 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
+import { CountrySelect } from '@/components/billing/country-select';
 
 export default function RegisterPage() {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [countryCode, setCountryCode] = useState('IN');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -52,6 +54,7 @@ export default function RegisterPage() {
           companyName: companyName.trim(),
           email: email.trim(),
           password,
+          countryCode,
         }),
       });
 
@@ -79,9 +82,13 @@ export default function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-[#0b0f19] p-4 py-8 transition-colors">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--brand-color,#4f46e5)] text-white font-black text-2xl shadow-lg shadow-indigo-200 dark:shadow-none">
-            Q
-          </div>
+          <Link href="/" className="inline-block">
+            <img
+              src="/quoteflow-icon.png"
+              alt="QuoteFlow"
+              className="h-14 w-14 rounded-2xl shadow-md object-contain mx-auto hover:scale-105 transition-transform"
+            />
+          </Link>
           <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">
             Create Company Workspace
           </h1>
@@ -227,6 +234,12 @@ export default function RegisterPage() {
                   required
                 />
 
+                <CountrySelect
+                  value={countryCode}
+                  onChange={setCountryCode}
+                  required
+                />
+
                 <Input
                   label="Work Email *"
                   type="email"
@@ -272,6 +285,16 @@ export default function RegisterPage() {
             </div>
           )}
         </Card>
+
+        <div className="flex items-center justify-center gap-4 text-[11px] text-slate-400">
+          <Link href="/privacy" className="hover:text-slate-600 dark:hover:text-slate-300 hover:underline">
+            Privacy Policy
+          </Link>
+          <span>•</span>
+          <Link href="/terms" className="hover:text-slate-600 dark:hover:text-slate-300 hover:underline">
+            Terms of Service
+          </Link>
+        </div>
       </div>
     </div>
   );

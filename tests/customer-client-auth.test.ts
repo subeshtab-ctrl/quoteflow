@@ -230,8 +230,8 @@ describe('Customer Client Authentication & Details', () => {
         organization_id: DEFAULT_ORG_ID,
         customer_id: customer.id,
         title: 'Network Modernization',
-        issue_date: '2026-09-27',
-        valid_until: '2026-10-27',
+        issue_date: new Date().toISOString().split('T')[0],
+        valid_until: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
         currency: 'INR',
         items: [
           {
@@ -286,8 +286,8 @@ describe('Customer Client Authentication & Details', () => {
         organization_id: DEFAULT_ORG_ID,
         customer_id: customer.id,
         title: 'Security Audit',
-        issue_date: '2026-09-27',
-        valid_until: '2026-10-27',
+        issue_date: new Date().toISOString().split('T')[0],
+        valid_until: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
         currency: 'INR',
         items: [
           {

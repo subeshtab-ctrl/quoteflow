@@ -8,6 +8,8 @@ import { MobileBottomNav } from '@/components/dashboard/mobile-nav';
 import { TestModeBanner } from '@/components/dashboard/test-mode-banner';
 import { BillingBanner } from '@/components/billing/billing-banner';
 import { WelcomeTrialTrigger } from '@/components/billing/welcome-trial-trigger';
+import { BusinessCountryModal } from '@/components/dashboard/business-country-modal';
+import { isOwnerOrAdminRole } from '@/types/staff';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { subscriptionService } from '@/lib/billing/subscription-service';
 import { store } from '@/lib/supabase/data-store';
@@ -64,6 +66,8 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
         logoUrl={auth.organization.logo_url || undefined}
         mode={auth.organization.mode || 'live'}
         userRole={auth.role}
+        isStaff={auth.isStaff}
+        isOwner={auth.isOwner}
         initialSubStatus={subscriptionAccess?.isPaid ? 'pro' : 'trial'}
         className="hidden md:flex shrink-0 sticky top-0 h-screen"
       />
@@ -72,12 +76,31 @@ export async function DashboardLayout({ children }: { children: React.ReactNode 
       <div className="flex flex-1 flex-col min-w-0">
         <TestModeBanner isTestMode={isTestMode} userRole={auth.role} />
         <DashboardHeader initialUser={userProfile} initialNotifications={initialNotifications} />
-        <BillingBanner access={subscriptionAccess} />
-        <WelcomeTrialTrigger
-          orgId={auth.orgId}
-          trialEndsAt={subscriptionAccess?.trialEndsAt}
-          isTrial={subscriptionAccess?.isTrial}
+        <BillingBanner
+          access={subscriptionAccess}
+          businessCountry={auth.organization.business_country}
+          userRole={auth.role}
         />
+        {auth.isOwner && !auth.isStaff && (
+          <WelcomeTrialTrigger
+            orgId={auth.orgId}
+            userId={auth.userId}
+            trialEndsAt={subscriptionAccess?.trialEndsAt}
+            isTrial={subscriptionAccess?.isTrial}
+            businessCountry={auth.organization.business_country}
+            billingCurrency={auth.organization.billing_currency}
+            userRole={auth.role}
+            isStaff={auth.isStaff}
+            isOwner={auth.isOwner}
+          />
+        )}
+        {isOwnerOrAdminRole(auth.role) && (
+          <BusinessCountryModal
+            orgId={auth.orgId}
+            hasSavedCountry={Boolean(auth.organization.business_country)}
+            userRole={auth.role}
+          />
+        )}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto pb-24 md:pb-8">
           {children}
         </main>

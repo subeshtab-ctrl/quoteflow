@@ -38,14 +38,14 @@ export function DashboardTabs({
   const recentInvoices = invoices.slice(0, 7);
 
   return (
-    <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 shadow-sm space-y-5">
+    <div className="rounded-3xl border border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900/90 p-6 sm:p-7 shadow-sm space-y-5">
       {/* Tab Switcher Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-100 dark:border-slate-800">
-        <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800/70 rounded-xl">
+        <div className="flex items-center gap-2 p-1 bg-slate-100/80 dark:bg-slate-800/70 rounded-2xl">
           <button
             type="button"
             onClick={() => setActiveTab('QUOTATIONS')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'QUOTATIONS'
                 ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -58,7 +58,7 @@ export function DashboardTabs({
           <button
             type="button"
             onClick={() => setActiveTab('INVOICES')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'INVOICES'
                 ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
@@ -74,13 +74,13 @@ export function DashboardTabs({
             <>
               <Link
                 href="/quotations"
-                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1"
+                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1"
               >
                 <span>View All ({quotations.length})</span>
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
               <Link href="/quotations/new">
-                <Button size="sm" variant="primary" className="gap-1.5 text-xs shadow-xs">
+                <Button size="sm" className="gap-1.5 text-xs font-bold rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:opacity-95 text-white shadow-md shadow-indigo-500/20">
                   <PlusCircle className="h-3.5 w-3.5" />
                   <span>Create Quotation</span>
                 </Button>
@@ -90,13 +90,13 @@ export function DashboardTabs({
             <>
               <Link
                 href="/invoices"
-                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1"
+                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1"
               >
                 <span>View All ({invoices.length})</span>
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
               <Link href="/invoices/new">
-                <Button size="sm" variant="primary" className="gap-1.5 text-xs shadow-xs">
+                <Button size="sm" className="gap-1.5 text-xs font-bold rounded-2xl bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20">
                   <PlusCircle className="h-3.5 w-3.5" />
                   <span>Create Invoice</span>
                 </Button>
@@ -149,9 +149,9 @@ export function DashboardTabs({
                           className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline flex items-center gap-1"
                         >
                           <span>{quote.quotation_number}</span>
-                          {quote.revision_number > 1 && (
-                            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 px-1 rounded">
-                              v{quote.revision_number}
+                          {(quote.revision_number > 1 || quote.quotation_number.includes('-REV')) && (
+                            <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-200/80 dark:border-indigo-800 uppercase font-bold">
+                              {quote.quotation_number.match(/[-_](REV|rev)[-_]?(\d+)/i)?.[0]?.replace(/^[-_]/, '') || `REV ${quote.revision_number - 1}`}
                             </span>
                           )}
                         </Link>
@@ -171,6 +171,7 @@ export function DashboardTabs({
                           completedUnpaid={quote.completed_unpaid}
                           paymentStatus={quote.payment_status}
                           paidAmount={quote.paid_amount}
+                          quotation={quote}
                         />
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-500">

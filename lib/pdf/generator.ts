@@ -1,14 +1,35 @@
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Quotation } from '@/types/database';
 import {
   formatCurrency,
   calculateQuotationTotals,
   isValidDocumentText,
+  sanitizeTaxBreakdown,
+  getDocumentTitle,
+  harmonizePaymentTerms,
+  harmonizeTermsAndConditions,
 } from '@/lib/quotations/calculations';
+import { getCountryProfile } from '@/lib/tax/country-config';
 import { format } from 'date-fns';
 
-import { registerPdfFonts, loadPdfLogoImage } from '@/lib/pdf/font-loader';
+import { registerPdfFonts, ensurePdfFontsLoaded, loadPdfLogoImage, runAutoTable } from '@/lib/pdf/font-loader';
+
+function parseHexColor(hex?: string | null, defaultRgb: [number, number, number] = [79, 70, 229]): [number, number, number] {
+  if (!hex || typeof hex !== 'string') return defaultRgb;
+  const clean = hex.replace('#', '').trim();
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) return [r, g, b];
+  } else if (clean.length === 6) {
+    const r = parseInt(clean.substring(0, 2), 16);
+    const g = parseInt(clean.substring(2, 4), 16);
+    const b = parseInt(clean.substring(4, 6), 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) return [r, g, b];
+  }
+  return defaultRgb;
+}
 
 function getCompanyInitials(name?: string): string {
   if (!name) return 'QF';
@@ -36,27 +57,25 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     format: 'a4',
   });
 
+  await ensurePdfFontsLoaded();
   const fontsLoaded = registerPdfFonts(doc);
   const fontName = fontsLoaded ? 'Roboto' : 'helvetica';
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 14;
+  const margin = 10.5;
   const contentWidth = pageWidth - margin * 2;
 
+  const isAdvanceRequired = Boolean(
+    quotation.enable_advance === true &&
+    quotation.payment_terms_type !== 'FULL' &&
+    quotation.advance_percentage !== null &&
+    quotation.advance_percentage !== undefined &&
+    Number(quotation.advance_percentage) > 0 &&
+    Number(quotation.advance_percentage) < 100
+  );
+
   let org: any = quotation.organization;
-  if (!org || !org.name || org.name === 'QuoteFlow Technologies') {
-    try {
-      const { getDataStore } = await import('@/lib/supabase/data-store');
-      const store = getDataStore();
-      const dbOrg = await store.getOrganization(quotation.organization_id);
-      if (dbOrg) {
-        org = dbOrg;
-      }
-    } catch {
-      // fallback
-    }
-  }
 
   if (!org) {
     org = {
@@ -76,18 +95,6 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   }
 
   let customer: any = quotation.customer;
-  if (!customer || !customer.name || customer.name === 'Valued Client') {
-    try {
-      const { getDataStore } = await import('@/lib/supabase/data-store');
-      const store = getDataStore();
-      const dbCustomer = await store.getCustomer(quotation.customer_id);
-      if (dbCustomer) {
-        customer = dbCustomer;
-      }
-    } catch {
-      // fallback
-    }
-  }
 
   if (!customer) {
     customer = {
@@ -111,40 +118,76 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     customer?.billing_state ||
     customer?.state ||
     null;
-  const isIndiaGst = Boolean(
-    org?.country === 'India' ||
-      currency === 'INR' ||
-      org?.gst_registered ||
-      org?.gstin ||
-      org?.gst_vat_number
+  const countryNameOrCode =
+    quotation.organization?.country ||
+    org?.country ||
+    quotation.organization?.business_country ||
+    org?.business_country ||
+    '';
+
+  const isIndia = Boolean(
+    (quotation.organization?.business_country || org?.business_country || '').toUpperCase() === 'IN' ||
+    (quotation.organization?.country || org?.country || '').toLowerCase() === 'india' ||
+    (quotation.organization?.country || org?.country || '').toUpperCase() === 'IN' ||
+    quotation.organization?.billing_region === 'INDIA' ||
+    org?.billing_region === 'INDIA' ||
+    currency === 'INR' ||
+    org?.default_currency === 'INR'
   );
+
+  const isUAE = Boolean(
+    (quotation.organization?.business_country || org?.business_country || '').toUpperCase() === 'AE' ||
+    (quotation.organization?.country || org?.country || '').toLowerCase().includes('emirates') ||
+    (quotation.organization?.country || org?.country || '').toLowerCase() === 'uae' ||
+    currency === 'AED' ||
+    org?.default_currency === 'AED'
+  );
+
+  const countryProfile = getCountryProfile(countryNameOrCode || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US')));
+
+  const effectiveTaxName = !isIndia
+    ? (quotation.tax_name && !quotation.tax_name.toUpperCase().includes('GST')
+        ? quotation.tax_name
+        : (isUAE ? 'VAT' : (org?.tax_label && !org?.tax_label.toUpperCase().includes('GST') ? org.tax_label : 'Tax')))
+    : (quotation.tax_name || org?.tax_label || 'GST');
 
   // Centralized calculation engine (single source of truth matching Preview)
   const calculated = calculateQuotationTotals(
     (quotation.items || []).map((it) => ({
       quantity: Number(it.quantity) || 0,
       unit_price: Number(it.unit_price) || 0,
-      tax_rate: Number(it.tax_rate) || 0,
+      tax_rate: (it.tax_rate !== undefined && it.tax_rate !== null && it.tax_rate !== '')
+        ? Number(it.tax_rate)
+        : Number(quotation.tax_rate || 0),
     })),
     quotation.discount_type || null,
     Number(quotation.discount_value) || 0,
     {
       taxMode,
-      taxName: quotation.tax_name || org?.tax_label || 'GST',
-      isIndiaGst,
+      currency,
+      country: countryNameOrCode || (isUAE ? 'AE' : (isIndia ? 'IN' : 'US')),
+      taxName: effectiveTaxName,
+      isIndiaGst: isIndia,
+      taxRate: Number(quotation.tax_rate || 0),
       businessState: org?.business_state || org?.state || null,
       placeOfSupply,
     }
   );
 
-  const displaySubtotal = calculated.subtotal;
-  const displayDiscount = calculated.discount_amount;
-  const displayTax = calculated.tax_amount;
-  const displayTotal = calculated.grand_total;
-  const displayTaxBreakdown =
+  const displaySubtotal = (Number(quotation.subtotal) > 0) ? Number(quotation.subtotal) : calculated.subtotal;
+  const displayDiscount = (Number(quotation.discount_amount) > 0) ? Number(quotation.discount_amount) : calculated.discount_amount;
+  const displayTax = (Number(quotation.tax_amount) > 0) ? Number(quotation.tax_amount) : calculated.tax_amount;
+  const displayTotal = (Number(quotation.grand_total) > 0) ? Number(quotation.grand_total) : calculated.grand_total;
+
+  const displayTaxBreakdown = sanitizeTaxBreakdown(
     quotation.tax_breakdown && quotation.tax_breakdown.length > 0
       ? quotation.tax_breakdown
-      : calculated.tax_breakdown;
+      : calculated.tax_breakdown,
+    isIndia,
+    effectiveTaxName,
+    displayTax,
+    quotation.tax_rate || calculated.tax_rate || (isUAE ? 5 : 0)
+  );
 
   // Validity days calculation matching Preview
   const validityDays = (() => {
@@ -159,8 +202,10 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     return diffDays >= 0 ? diffDays : 0;
   })();
 
+  const brandColor = parseHexColor(org.brand_color, [79, 70, 229]);
+
   // 1. Top Decorative Brand Bar
-  doc.setFillColor(79, 70, 229); // Brand Indigo
+  doc.setFillColor(brandColor[0], brandColor[1], brandColor[2]);
   doc.rect(0, 0, pageWidth, 4, 'F');
 
   // 2. Company Logo, Name & Details (Left)
@@ -184,7 +229,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     }
   } else {
     const initials = getCompanyInitials(org.name);
-    doc.setFillColor(79, 70, 229);
+    doc.setFillColor(brandColor[0], brandColor[1], brandColor[2]);
     doc.roundedRect(margin, headerStartY, 12, 12, 2.5, 2.5, 'F');
     doc.setFont(fontName, 'bold');
     doc.setFontSize(9);
@@ -225,8 +270,13 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   let rightY = headerStartY;
   doc.setFont(fontName, 'bold');
   doc.setFontSize(8.5);
-  doc.setTextColor(79, 70, 229);
-  doc.text('OFFICIAL ESTIMATE / QUOTATION', pageWidth - margin, rightY + 3, { align: 'right' });
+  doc.setTextColor(brandColor[0], brandColor[1], brandColor[2]);
+  const docTitle = getDocumentTitle(
+    (quotation as any).document_type || 'quotation',
+    quotation.status,
+    isIndia && org.gst_registered !== false
+  );
+  doc.text(docTitle, pageWidth - margin, rightY + 3, { align: 'right' });
 
   doc.setFont(fontName, 'bold');
   doc.setFontSize(18);
@@ -383,8 +433,11 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   const tableData = (quotation.items || []).map((item, index) => {
     const calcItem = calculated.items[index];
     const lineTotal = calcItem ? calcItem.line_total : item.line_total;
+    const fallbackCodeLabel = isIndia
+      ? (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')
+      : (item.item_type === 'SERVICE' ? countryProfile.serviceClassificationLabel : countryProfile.goodsClassificationLabel);
     const codeLabel = item.classification_code
-      ? `\n${item.classification_type || (item.item_type === 'SERVICE' ? 'SAC' : 'HSN')}: ${item.classification_code}`
+      ? `\n${item.classification_type || fallbackCodeLabel}: ${item.classification_code}`
       : '';
     return [
       (index + 1).toString(),
@@ -398,9 +451,9 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     ];
   });
 
-  autoTable(doc, {
-    startY: clientBoxY + clientBoxHeight + 5,
-    margin: { left: margin, right: margin, bottom: 20 },
+  runAutoTable(doc, {
+    startY: clientBoxY + clientBoxHeight + 4,
+    margin: { left: margin, right: margin, bottom: 15 },
     showHead: 'everyPage',
     head: [['#', 'Description', 'Qty', 'Unit Price', 'Tax', 'Total']],
     body: tableData,
@@ -417,15 +470,15 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
       fontStyle: 'bold',
       lineWidth: { top: 0.2, bottom: 0.25 },
       lineColor: [226, 232, 240],
-      cellPadding: 3,
+      cellPadding: 2.2,
     },
     bodyStyles: {
       textColor: [30, 41, 59],
       font: fontName,
-      fontSize: 8.5,
+      fontSize: 8,
       lineWidth: { bottom: 0.15 },
       lineColor: [241, 245, 249],
-      cellPadding: 3.2,
+      cellPadding: 2.5,
     },
     columnStyles: {
       0: { cellWidth: 10, halign: 'center', textColor: [148, 163, 184] },
@@ -437,22 +490,22 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     },
   });
 
-  // 6. Summary Totals Box & Left Notes/Terms (Prevent page-break splitting)
-  let sectionStartY = (doc as any).lastAutoTable.finalY + 6;
+  // 6. Summary Totals Box & Left Notes/Terms (Prevent unnecessary page-break splitting)
+  let sectionStartY = (doc as any).lastAutoTable.finalY + 4;
   const neededSummaryHeight =
-    24 +
-    (displayDiscount > 0 ? 5 : 0) +
-    displayTaxBreakdown.length * 5 +
-    (quotation.paid_amount && quotation.paid_amount > 0 ? 12 : 0);
+    18 +
+    (displayDiscount > 0 ? 4.2 : 0) +
+    displayTaxBreakdown.length * 4.2 +
+    (quotation.paid_amount && quotation.paid_amount > 0 ? 9 : 0);
 
-  if (sectionStartY + neededSummaryHeight > pageHeight - 20) {
+  if (sectionStartY + neededSummaryHeight > pageHeight - 14) {
     doc.addPage();
     sectionStartY = margin + 4;
   }
 
   const summaryWidth = 78;
   const summaryX = pageWidth - margin - summaryWidth;
-  let curY = sectionStartY + 4;
+  let curY = sectionStartY + 3.5;
 
   // Draw subtle background card for totals matching Preview
   doc.setFillColor(248, 250, 252);
@@ -460,7 +513,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.setLineWidth(0.25);
   doc.roundedRect(summaryX - 3, sectionStartY - 1, summaryWidth + 3, neededSummaryHeight + 2, 2, 2, 'FD');
 
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setFont(fontName, 'normal');
   doc.setTextColor(100, 116, 139);
   doc.text(
@@ -473,7 +526,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   doc.text(formatCurrency(displaySubtotal, currency), pageWidth - margin - 3, curY, {
     align: 'right',
   });
-  curY += 5;
+  curY += 4.2;
 
   if (displayDiscount > 0) {
     doc.setFont(fontName, 'normal');
@@ -487,20 +540,20 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     doc.text(`-${formatCurrency(displayDiscount, currency)}`, pageWidth - margin - 3, curY, {
       align: 'right',
     });
-    curY += 5;
+    curY += 4.2;
   }
 
   if (displayTaxBreakdown.length > 0) {
     for (const tb of displayTaxBreakdown) {
       doc.setFont(fontName, 'normal');
       doc.setTextColor(100, 116, 139);
-      doc.text(tb.label, summaryX, curY);
+      doc.text(tb.label || tb.name || 'Tax', summaryX, curY);
       doc.setFont(fontName, 'bold');
       doc.setTextColor(30, 41, 59);
       doc.text(formatCurrency(tb.amount, currency), pageWidth - margin - 3, curY, {
         align: 'right',
       });
-      curY += 5;
+      curY += 4.2;
     }
   } else if (displayTax > 0) {
     doc.setFont(fontName, 'normal');
@@ -515,24 +568,24 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     doc.text(formatCurrency(displayTax, currency), pageWidth - margin - 3, curY, {
       align: 'right',
     });
-    curY += 5;
+    curY += 4.2;
   }
 
   // Divider before Grand Total
   doc.setDrawColor(226, 232, 240);
-  doc.line(summaryX, curY - 2, pageWidth - margin - 3, curY - 2);
-  curY += 2.5;
+  doc.line(summaryX, curY - 1.5, pageWidth - margin - 3, curY - 1.5);
+  curY += 2;
 
   doc.setFont(fontName, 'bold');
-  doc.setFontSize(9.5);
+  doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
   doc.text('Total Quotation Value', summaryX, curY);
-  doc.setFontSize(11);
+  doc.setFontSize(10.5);
   doc.setTextColor(67, 56, 202);
   doc.text(formatCurrency(displayTotal, currency), pageWidth - margin - 3, curY, {
     align: 'right',
   });
-  curY += 5.5;
+  curY += 4.8;
 
   const hasPaymentRecorded = Boolean(
     quotation.is_paid || ((quotation.paid_amount ?? 0) > 0)
@@ -552,17 +605,17 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
           : Math.max(0, displayTotal - paidAmt);
 
     doc.setFont(fontName, 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(5, 150, 105);
     doc.text(
-      `Amount Paid${quotation.advance_percentage ? ` (${quotation.advance_percentage}% Adv)` : ''}`,
+      `Amount Paid${isAdvanceRequired && quotation.advance_percentage ? ` (${quotation.advance_percentage}% Adv)` : ''}`,
       summaryX,
       curY
     );
     doc.text(`-${formatCurrency(paidAmt, currency)}`, pageWidth - margin - 3, curY, {
       align: 'right',
     });
-    curY += 4.5;
+    curY += 4;
 
     doc.setFont(fontName, 'bold');
     doc.setTextColor(15, 23, 42);
@@ -571,11 +624,11 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     doc.text(formatCurrency(balAmt, currency), pageWidth - margin - 3, curY, {
       align: 'right',
     });
-    curY += 4.5;
+    curY += 4;
   }
 
   // 7. Left Side: Notes & Terms & Conditions (Strictly hidden if empty/whitespace/N/A/Nil)
-  let notesY = sectionStartY + 2;
+  let notesY = sectionStartY + 1.5;
   const leftMaxWidth = summaryX - margin - 8;
 
   const hasQuotationNotes = isValidDocumentText(quotation.notes);
@@ -584,57 +637,64 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
   if (hasQuotationNotes) {
     const notesText = quotation.notes!.trim();
     const splitNotes = doc.splitTextToSize(notesText, leftMaxWidth);
-    const blockH = splitNotes.length * 3.6 + 8;
-    if (notesY + blockH > pageHeight - 18) {
+    const blockH = splitNotes.length * 3.4 + 6;
+    if (notesY + blockH > pageHeight - 14) {
       doc.addPage();
       notesY = margin + 4;
     }
 
     doc.setFont(fontName, 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(71, 85, 105);
     doc.text('NOTES & SPECIFICATIONS', margin, notesY);
-    notesY += 4;
+    notesY += 3.5;
 
     doc.setFont(fontName, 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(71, 85, 105);
     doc.text(splitNotes, margin, notesY);
-    notesY += splitNotes.length * 3.6 + 5;
+    notesY += splitNotes.length * 3.4 + 4;
   }
 
   if (hasQuotationTerms) {
-    const termsText = quotation.terms_conditions!
-      .trim()
-      .replace(
-        /Quotation valid for \d+ days?/gi,
-        `Quotation valid for ${validityDays} ${validityDays === 1 ? 'day' : 'days'}`
-      );
+    const rawTerms = quotation.terms_conditions!.trim();
+    const validityPhrase = validityDays > 0
+      ? `Quotation valid for ${validityDays} ${validityDays === 1 ? 'day' : 'days'}`
+      : 'Quotation valid on date of issue';
+    const termsWithValidity = rawTerms.replace(
+      /Quotation valid for \d+ days?/gi,
+      validityPhrase
+    );
+    const termsText = harmonizeTermsAndConditions(isAdvanceRequired ? quotation.advance_percentage : 0, termsWithValidity);
     const splitTerms = doc.splitTextToSize(termsText, leftMaxWidth);
-    const blockH = splitTerms.length * 3.6 + 8;
-    if (notesY + blockH > pageHeight - 18) {
+    const blockH = splitTerms.length * 3.4 + 6;
+    if (notesY + blockH > pageHeight - 14) {
       doc.addPage();
       notesY = margin + 4;
     }
 
     doc.setFont(fontName, 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(71, 85, 105);
     doc.text('TERMS & CONDITIONS', margin, notesY);
-    notesY += 4;
+    notesY += 3.5;
 
     doc.setFont(fontName, 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(71, 85, 105);
     doc.text(splitTerms, margin, notesY);
-    notesY += splitTerms.length * 3.6 + 5;
+    notesY += splitTerms.length * 3.4 + 4;
   }
 
   // 8. Payment Instructions & Remittance Details
-  let afterSummaryY = Math.max(notesY, curY + 6);
+  let afterSummaryY = Math.max(notesY, curY + 4);
+
   const bankInfo = quotation.bank_details || org?.default_bank_details;
   const upiInfo = quotation.upi_details || org?.default_upi_details;
   const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
+  const paymentLinkUrl = quotation.payment_link || org?.default_payment_link;
+  const paymentLinkLabel = quotation.payment_link_label || org?.default_payment_link_label || 'Pay Online';
+  let showPaymentLink = quotation.show_payment_link ?? org?.default_show_payment_link ?? Boolean(paymentLinkUrl);
 
   const mode = quotation.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
   let showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
@@ -645,51 +705,63 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
     showBank = false;
     showUpi = false;
     showCrypto = true;
+    showPaymentLink = false;
   } else if (mode === 'BANK_ONLY') {
     showBank = true;
     showUpi = false;
     showCrypto = false;
+    showPaymentLink = false;
   } else if (mode === 'UPI_ONLY') {
     showBank = false;
     showUpi = true;
     showCrypto = false;
+    showPaymentLink = false;
+  } else if (mode === 'PAYMENT_LINK_ONLY') {
+    showBank = false;
+    showUpi = false;
+    showCrypto = false;
+    showPaymentLink = true;
   } else if (mode === 'ALL') {
     showBank = true;
     showUpi = true;
     showCrypto = true;
+    showPaymentLink = true;
+  }
+
+  // Country enforcement:
+  if (!isIndia) {
+    showUpi = false;
+  }
+  if (isIndia) {
+    showPaymentLink = false;
   }
 
   const hasPaymentDetails =
     isValidDocumentText(quotation.payment_terms_instructions) ||
-    (quotation.advance_percentage !== undefined &&
-      quotation.advance_percentage !== null &&
-      quotation.advance_percentage > 0) ||
+    isAdvanceRequired ||
     Boolean(quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
     Boolean(showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
     Boolean(showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+    Boolean(!isIndia && showPaymentLink && paymentLinkUrl) ||
     Boolean(showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url));
 
   if (hasPaymentDetails) {
-    if (afterSummaryY + 32 > pageHeight - 18) {
+    if (afterSummaryY + 24 > pageHeight - 14) {
       doc.addPage();
       afterSummaryY = margin + 4;
     }
 
     doc.setFont(fontName, 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(30, 41, 59);
     doc.text('PAYMENT & REMITTANCE INSTRUCTIONS', margin, afterSummaryY);
-    afterSummaryY += 4.5;
+    afterSummaryY += 3.8;
 
     doc.setFont(fontName, 'normal');
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(71, 85, 105);
 
-    if (
-      quotation.advance_percentage !== undefined &&
-      quotation.advance_percentage !== null &&
-      quotation.advance_percentage > 0
-    ) {
+    if (isAdvanceRequired) {
       doc.setFont(fontName, 'bold');
       doc.text(
         `• Advance Required: ${quotation.advance_percentage}% to commence work`,
@@ -697,16 +769,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
         afterSummaryY
       );
       doc.setFont(fontName, 'normal');
-      afterSummaryY += 4;
-    }
-
-    if (quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) {
-      doc.text(
-        `• Accepted Payment Modes: ${quotation.accepted_payment_methods.join(', ')}`,
-        margin,
-        afterSummaryY
-      );
-      afterSummaryY += 4;
+      afterSummaryY += 3.5;
     }
 
     if (showBank && (bankInfo?.bank_name || bankInfo?.account_number)) {
@@ -717,14 +780,14 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
         afterSummaryY
       );
       doc.setFont(fontName, 'normal');
-      afterSummaryY += 3.8;
+      afterSummaryY += 3.2;
 
       let bankLine = '';
       if (bankInfo.account_number) bankLine += `A/C: ${bankInfo.account_number}  `;
       if (bankInfo.account_name) bankLine += `Name: ${bankInfo.account_name}  `;
       if (bankLine) {
         doc.text(`   ${bankLine.trim()}`, margin, afterSummaryY);
-        afterSummaryY += 3.8;
+        afterSummaryY += 3.2;
       }
 
       let codeLine = '';
@@ -733,11 +796,24 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
       if (bankInfo.branch_name) codeLine += `Branch: ${bankInfo.branch_name}`;
       if (codeLine) {
         doc.text(`   ${codeLine.trim()}`, margin, afterSummaryY);
-        afterSummaryY += 3.8;
+        afterSummaryY += 3.2;
       }
     }
 
-    if (showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) {
+    if (!isIndia && showPaymentLink && paymentLinkUrl) {
+      doc.setFont(fontName, 'bold');
+      doc.text(
+        `• Online Payment Link: ${paymentLinkLabel || 'Checkout'}`,
+        margin,
+        afterSummaryY
+      );
+      doc.setFont(fontName, 'normal');
+      afterSummaryY += 3.2;
+      doc.text(`   Link: ${paymentLinkUrl}`, margin, afterSummaryY);
+      afterSummaryY += 3.2;
+    }
+
+    if (showUpi && isIndia && (upiInfo?.upi_id || upiInfo?.qr_code_url)) {
       doc.setFont(fontName, 'bold');
       doc.text(
         `• UPI Payment (India): ${upiInfo.upi_id || ''}${upiInfo.payee_name ? ` (${upiInfo.payee_name})` : ''}`,
@@ -745,7 +821,7 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
         afterSummaryY
       );
       doc.setFont(fontName, 'normal');
-      afterSummaryY += 3.8;
+      afterSummaryY += 3.2;
     }
 
     if (showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url)) {
@@ -756,61 +832,56 @@ export async function generateQuotationPdf(quotation: Quotation): Promise<Uint8A
         afterSummaryY
       );
       doc.setFont(fontName, 'normal');
-      afterSummaryY += 3.8;
+      afterSummaryY += 3.2;
 
       if (cryptoInfo.wallet_address) {
         doc.text(`   Wallet: ${cryptoInfo.wallet_address}`, margin, afterSummaryY);
-        afterSummaryY += 3.8;
+        afterSummaryY += 3.2;
       }
     }
 
     if (isValidDocumentText(quotation.payment_terms_instructions)) {
+      const harmonizedPaymentNotes = harmonizePaymentTerms(
+        isAdvanceRequired ? quotation.advance_percentage : 0,
+        quotation.payment_terms_instructions
+      );
       const splitPayNotes = doc.splitTextToSize(
-        quotation.payment_terms_instructions!.trim(),
+        harmonizedPaymentNotes.trim(),
         contentWidth
       );
       doc.text(splitPayNotes, margin, afterSummaryY);
-      afterSummaryY += splitPayNotes.length * 3.5 + 2;
+      afterSummaryY += splitPayNotes.length * 3.2 + 2;
     }
   }
 
   // 9. Digital Signature Seal (if Approved)
   if (quotation.status === 'APPROVED' && quotation.signature) {
     const sig = quotation.signature;
-    let sigBoxY = afterSummaryY + 6;
-    if (sigBoxY + 36 > pageHeight - 16) {
+    let sigBoxY = afterSummaryY + 4;
+    if (sigBoxY + 26 > pageHeight - 14) {
       doc.addPage();
-      sigBoxY = margin + 6;
+      sigBoxY = margin + 4;
     }
 
     doc.setFillColor(240, 253, 244);
     doc.setDrawColor(187, 247, 208);
-    doc.roundedRect(pageWidth - margin - 85, sigBoxY, 85, 32, 2, 2, 'FD');
+    doc.roundedRect(pageWidth - margin - 85, sigBoxY, 85, 24, 2, 2, 'FD');
 
     doc.setFont(fontName, 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(22, 101, 52);
-    doc.text('DIGITALLY APPROVED & SIGNED', pageWidth - margin - 80, sigBoxY + 6);
+    doc.text('DIGITALLY APPROVED & SIGNED', pageWidth - margin - 80, sigBoxY + 5);
 
     doc.setFont(fontName, 'normal');
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(51, 65, 85);
-    doc.text(`Signer: ${sig.signer_name}`, pageWidth - margin - 80, sigBoxY + 12);
-    doc.text(`Email: ${sig.signer_email}`, pageWidth - margin - 80, sigBoxY + 17);
+    doc.text(`Signer: ${sig.signer_name}`, pageWidth - margin - 80, sigBoxY + 10);
+    doc.text(`Email: ${sig.signer_email}`, pageWidth - margin - 80, sigBoxY + 14.5);
     doc.text(
       `Date: ${format(new Date(sig.signed_at), 'dd MMM yyyy, hh:mm a')}`,
       pageWidth - margin - 80,
-      sigBoxY + 22
+      sigBoxY + 19
     );
-    if (sig.document_hash) {
-      doc.setFontSize(6.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text(
-        `Hash: ${sig.document_hash.substring(0, 24)}...`,
-        pageWidth - margin - 80,
-        sigBoxY + 27.5
-      );
-    }
   }
 
   // 10. Document Footer & Watermarks on every page

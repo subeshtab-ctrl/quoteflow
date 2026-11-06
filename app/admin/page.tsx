@@ -24,7 +24,12 @@ import Link from 'next/link';
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [hasPassword, setHasPassword] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [adminActor, setAdminActor] = useState<any>(null);
+  const [customerConflict, setCustomerConflict] = useState<{ conflict: boolean; email: string | null }>({
+    conflict: false,
+    email: null,
+  });
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
 
   useEffect(() => {
     const saved = localStorage.getItem('quoteflow_admin_theme') as 'dark' | 'light';
@@ -54,6 +59,11 @@ export default function AdminPage() {
       const data = await res.json();
       setIsAuthenticated(Boolean(data.authenticated));
       setHasPassword(Boolean(data.hasPassword));
+      if (data.actor) setAdminActor(data.actor);
+      setCustomerConflict({
+        conflict: Boolean(data.customerSessionConflict),
+        email: data.customerEmail || null,
+      });
     } catch {
       setIsAuthenticated(false);
     }
@@ -129,6 +139,8 @@ export default function AdminPage() {
     return (
       <DeveloperAdminGate
         initialHasPassword={hasPassword}
+        customerSessionConflict={customerConflict.conflict}
+        customerEmail={customerConflict.email}
         onAuthenticated={() => {
           setIsAuthenticated(true);
           checkSession();
@@ -141,40 +153,40 @@ export default function AdminPage() {
   return (
     <div
       className={`min-h-screen transition-colors duration-200 ${
-        theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+        theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-[#f8fafc] text-slate-900'
       } flex flex-col selection:bg-indigo-500 selection:text-white`}
     >
       {/* Developer Admin Header Bar */}
       <header
-        className={`sticky top-0 z-50 border-b backdrop-blur-md px-4 sm:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4 transition-colors ${
+        className={`sticky top-0 z-50 border-b backdrop-blur-md px-4 sm:px-8 py-3 flex flex-wrap items-center justify-between gap-4 transition-colors ${
           theme === 'dark'
-            ? 'border-slate-800 bg-slate-900/90 text-white'
-            : 'border-slate-200 bg-white/90 text-slate-900 shadow-xs'
+            ? 'border-slate-800 bg-slate-900/95 text-white'
+            : 'border-slate-200/80 bg-white/95 text-slate-900 shadow-xs'
         }`}
       >
         {/* Brand & Badge */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center h-9 w-9 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 shadow-md">
+          <div className="flex items-center justify-center h-9 w-9 rounded-xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-xs">
             <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span
                 className={`font-bold text-sm tracking-tight ${
                   theme === 'dark' ? 'text-white' : 'text-slate-900'
                 }`}
               >
-                QuoteFlow Developer Console
+                QuoteFlow SaaS Control Center
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30">
-                www.blendandbold.com/admin
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25">
+                {adminActor?.roleLabel || 'Super Admin'}
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
               <Lock className="h-3 w-3 text-emerald-500 dark:text-emerald-400" />
-              <span>Developer Account:</span>
+              <span>Authenticated Staff:</span>
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                m.subesh@outlook.com
+                {adminActor?.name || 'Developer Admin'}
               </span>
             </div>
           </div>
@@ -251,7 +263,7 @@ export default function AdminPage() {
         >
           <form onSubmit={handleUpdatePassword} className="space-y-4 pt-2">
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Configure or update the master password for <strong className="text-slate-700 dark:text-slate-200">m.subesh@outlook.com</strong> to unlock this console directly.
+              Configure or update the master password for <strong className="text-slate-700 dark:text-slate-200">Developer Admin</strong> to unlock this console directly.
             </p>
 
             {passwordError && (

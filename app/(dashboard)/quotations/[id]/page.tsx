@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 import { DashboardLayout } from '@/components/dashboard/dashboard-layout';
 import { store } from '@/lib/supabase/data-store';
-import { formatCurrency } from '@/lib/quotations/calculations';
+import { formatCurrency, harmonizePaymentTerms, harmonizeTermsAndConditions } from '@/lib/quotations/calculations';
+import { getEffectiveDocumentLanguage, getLocalizedTerm } from '@/lib/tax/gcc-translations';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,7 +33,10 @@ import {
   QrCode,
   Bitcoin,
   Banknote,
+  Link as LinkIcon,
+  AlertTriangle,
 } from 'lucide-react';
+import { checkQuotationInProgressOverdue } from '@/lib/quotations/timeline';
 import {
   parseLogoUrl,
   getLogoShapeClass,
@@ -69,9 +73,14 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
   }
 
   // Mark customer chat as read ONLY when this quotation is opened from the dashboard
-  await store.markQuotationChatRead(id, quotation.organization_id, auth?.fullName || auth?.email || 'Staff');
+  try {
+    await store.markQuotationChatRead(id, quotation.organization_id, auth?.fullName || auth?.email || 'Staff');
+  } catch (chatErr) {
+    console.error('Failed to mark quotation chat as read:', chatErr);
+  }
 
   const org = quotation.organization;
+  const docLang = getEffectiveDocumentLanguage(org);
   const customer = quotation.customer;
   const grandTotalFormatted = formatCurrency(quotation.grand_total, quotation.currency);
 
@@ -80,16 +89,16 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
   return (
     <DashboardLayout>
       <div className="space-y-3 sm:space-y-4">
-        {/* Top Header & Breadcrumb */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+        {/* Top Header & Toolbar (Apple-Style Minimal & Compact) */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200/90 dark:border-slate-800">
           <div className="space-y-0.5 shrink-0">
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 whitespace-nowrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
                 {quotation.quotation_number}
               </h1>
-              {quotation.revision_number > 1 && (
-                <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">
-                  v{quotation.revision_number}
+              {(quotation.revision_number > 1 || quotation.quotation_number.includes('-REV')) && (
+                <span className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800 px-1.5 py-0.2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wide">
+                  {quotation.quotation_number.match(/[-_](REV|rev)[-_]?(\d+)/i)?.[0]?.replace(/^[-_]/, '') || `REV ${quotation.revision_number - 1}`}
                 </span>
               )}
               <StatusBadge
@@ -98,10 +107,11 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 completedUnpaid={quotation.completed_unpaid}
                 paymentStatus={quotation.payment_status}
                 paidAmount={quotation.paid_amount}
-                className="text-[11px] px-2 py-0.5"
+                quotation={quotation}
+                className="text-[10.5px] px-2 py-0.5"
               />
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[10.5px] text-slate-500 dark:text-slate-400">
               Created on {formatDate(quotation.created_at)} • Valid until {formatDate(quotation.valid_until)}
             </p>
           </div>
@@ -124,38 +134,117 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
         {/* Visual Lifecycle Flow Chart */}
         <QuotationFlowChart quotation={quotation} />
 
-        {/* Draft Notice Banner */}
+        {/* Draft Notice Banner (Compact) */}
         {quotation.status === 'DRAFT' && (
-          <div className="rounded-2xl bg-amber-50 border border-amber-200 p-5 shadow-sm space-y-1 text-amber-900">
-            <div className="flex items-center gap-2 font-bold text-sm">
-              <Clock className="h-5 w-5 text-amber-600" />
+          <div className="rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-3 shadow-2xs space-y-0.5 text-amber-900 dark:text-amber-200 text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-xs">
+              <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
               <span>Draft Mode • Customer Approval Link Inactive</span>
             </div>
-            <p className="text-xs text-amber-700 leading-relaxed">
+            <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-snug">
               This quotation is currently saved as a draft. Customer approval links and online signing are hidden. Click <strong>&ldquo;Save &amp; Generate Approval Link&rdquo;</strong> above to issue this quotation and generate approval links for your client.
             </p>
           </div>
         )}
 
-        {/* In Progress Banner */}
-        {quotation.status === 'IN_PROGRESS' && (
-          <div className="rounded-2xl bg-sky-50 border border-sky-200 p-5 shadow-sm space-y-2 text-sky-950">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2 font-bold text-sm text-sky-900">
-                <span className="h-2.5 w-2.5 rounded-full bg-sky-500 animate-ping" />
-                <span>Work In Progress • Delivery Tracking Active</span>
+        {/* Compact Overdue / In Progress Warning Bar */}
+        {quotation.status === 'IN_PROGRESS' && (() => {
+          const overdueStatus = checkQuotationInProgressOverdue(quotation);
+          return overdueStatus.isOverdue ? (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-gradient-to-r from-rose-50/90 via-amber-50/60 to-white dark:from-rose-950/40 dark:via-slate-900 dark:to-slate-900 shadow-2xs text-xs">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400 shrink-0 border border-rose-200 dark:border-rose-800">
+                  <AlertTriangle className="h-4 w-4 animate-pulse" />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-slate-900 dark:text-white">Work In Progress</span>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 font-extrabold text-[10px] border border-rose-300 dark:border-rose-800">
+                    <span>Timeline Overdue</span>
+                    <span>({overdueStatus.overdueText})</span>
+                  </span>
+                  <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                    Target delivery timeline has passed. (Client portal safely displays normal in-progress status).
+                  </span>
+                </div>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-bold border border-sky-300">
-                {quotation.estimated_days || 7} Days Estimated
-              </span>
-            </div>
-            <p className="text-xs text-sky-800 leading-relaxed">
-              This quotation is actively in progress.
+
               {quotation.estimated_completion_date && (
-                <> Target completion date: <strong>{formatDate(quotation.estimated_completion_date)}</strong>.</>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 shrink-0 text-[11px] self-end sm:self-auto font-medium">
+                  <Calendar className="h-3.5 w-3.5 text-rose-600" />
+                  <span className="text-slate-400">Target:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    {formatDate(quotation.estimated_completion_date)}
+                  </span>
+                </div>
               )}
-              {' '}Your client can monitor live progress and timeline updates directly on their portal.
-            </p>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl border border-sky-200/90 dark:border-sky-900/60 bg-gradient-to-r from-sky-50/90 via-indigo-50/40 to-white dark:from-slate-900 dark:to-slate-850 shadow-2xs text-xs">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-400 shrink-0 border border-sky-200 dark:border-sky-800">
+                  <Clock className="h-4 w-4" />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-slate-900 dark:text-white">Work In Progress</span>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 font-bold text-[10px] border border-sky-300 dark:border-sky-800">
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-ping" />
+                    {quotation.estimated_days === 0
+                      ? 'Same Day (Today)'
+                      : typeof quotation.estimated_days === 'number'
+                      ? `${quotation.estimated_days} Days Scheduled`
+                      : 'Active Timeline'}
+                  </span>
+                  <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                    {quotation.estimated_days === 0
+                      ? `Target completion is scheduled for Today${quotation.estimated_time_text ? ` (${quotation.estimated_time_text})` : ''}.`
+                      : quotation.estimated_completion_date
+                      ? `Target delivery date: ${formatDate(quotation.estimated_completion_date)}.`
+                      : 'Execution actively underway.'}
+                  </span>
+                </div>
+              </div>
+
+              {quotation.estimated_completion_date && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 shrink-0 text-[11px] self-end sm:self-auto font-medium">
+                  <Calendar className="h-3.5 w-3.5 text-sky-600" />
+                  <span className="text-slate-400">Target:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    {formatDate(quotation.estimated_completion_date)}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Work Completed Banner (Compact) */}
+        {quotation.status === 'COMPLETED' && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl border border-emerald-200/90 dark:border-emerald-900/60 bg-gradient-to-r from-emerald-50/90 via-teal-50/40 to-white dark:from-slate-900 dark:to-slate-850 shadow-2xs text-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 shrink-0 border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle2 className="h-4 w-4" />
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-slate-900 dark:text-white">
+                  Work Completed • Deliverables Finished
+                </span>
+                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                  quotation.is_paid 
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800' 
+                    : 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800'
+                }`}>
+                  {quotation.is_paid ? '✓ Fully Settled' : 'Payment Due from Client'}
+                </span>
+              </div>
+            </div>
+
+            {quotation.completed_at && (
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 self-end sm:self-auto font-medium">
+                Completed on {formatDate(quotation.completed_at)}
+              </div>
+            )}
           </div>
         )}
 
@@ -171,7 +260,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 Digitally approved and signed by <strong>{quotation.signature.signer_name}</strong> ({quotation.signature.signer_email}) on{' '}
                 {formatDateTime(quotation.signature.signed_at)}. Verification hash:{' '}
                 <span className="font-mono text-[11px] bg-emerald-100/80 px-1.5 py-0.5 rounded">
-                  {quotation.signature.document_hash.substring(0, 24)}...
+                  {quotation.signature.document_hash ? `${quotation.signature.document_hash.substring(0, 24)}...` : 'Verified'}
                 </span>
               </p>
             ) : (
@@ -252,7 +341,11 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
         {/* Two Column Layout: Left Quotation Document (8 cols), Right Audit Log Timeline (4 cols) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Main Quotation Sheet */}
-          <div className="lg:col-span-8 rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-sm space-y-8">
+          <div
+            id="quotation-sheet"
+            dir={docLang === 'ar' ? 'rtl' : 'ltr'}
+            className="lg:col-span-8 rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-sm space-y-8 printable-document-sheet"
+          >
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between gap-6 pb-6 border-b border-slate-100">
               <div className="space-y-2">
@@ -291,7 +384,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   {org?.gst_vat_number && (
                     <>
                       <br />
-                      GST/Tax ID: {org?.gst_vat_number}
+                      {getLocalizedTerm('trn_tax_id', docLang)}: {org?.gst_vat_number}
                     </>
                   )}
                 </p>
@@ -299,12 +392,12 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
               <div className="text-left sm:text-right space-y-1">
                 <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">
-                  Quotation
+                  {getLocalizedTerm('quotation', docLang)}
                 </span>
                 <h2 className="text-xl font-black text-slate-900">{quotation.quotation_number}</h2>
                 <div className="text-xs text-slate-500">
-                  <p>Issue Date: {formatDate(quotation.issue_date)}</p>
-                  <p>Valid Until: {formatDate(quotation.valid_until)}</p>
+                  <p>{getLocalizedTerm('issue_date', docLang)}: {formatDate(quotation.issue_date)}</p>
+                  <p>{getLocalizedTerm('valid_until', docLang)}: {formatDate(quotation.valid_until)}</p>
                 </div>
               </div>
             </div>
@@ -313,13 +406,13 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4 border border-slate-100 text-xs">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Customer
+                  {getLocalizedTerm('quoted_to', docLang, 'Customer')}
                 </span>
                 <p className="font-bold text-slate-900 mt-1">
                   {customer?.company_name || customer?.name}
                 </p>
                 {customer?.company_name && customer?.name && (
-                  <p className="text-slate-600">Attn: {customer.name}</p>
+                  <p className="text-slate-600">{getLocalizedTerm('attn', docLang)}: {customer.name}</p>
                 )}
                 <p className="text-slate-500 mt-0.5">
                   {customer?.email} {customer?.phone ? `| ${customer.phone}` : ''}
@@ -355,12 +448,12 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-600 border-b border-slate-200">
                   <tr>
-                    <th className="py-3 px-4 w-10 text-center">#</th>
-                    <th className="py-3 px-4">Description</th>
-                    <th className="py-3 px-4 text-center">Qty</th>
-                    <th className="py-3 px-4 text-right">Unit Price</th>
-                    <th className="py-3 px-4 text-center">Tax %</th>
-                    <th className="py-3 px-4 text-right">Line Total</th>
+                    <th className="py-3 px-4 w-10 text-center">{getLocalizedTerm('hash', docLang)}</th>
+                    <th className="py-3 px-4">{getLocalizedTerm('item_description', docLang, 'Description')}</th>
+                    <th className="py-3 px-4 text-center">{getLocalizedTerm('quantity', docLang)}</th>
+                    <th className="py-3 px-4 text-right">{getLocalizedTerm('rate', docLang, 'Unit Price')}</th>
+                    <th className="py-3 px-4 text-center">{getLocalizedTerm('tax', docLang)} %</th>
+                    <th className="py-3 px-4 text-right">{getLocalizedTerm('total', docLang, 'Line Total')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -441,14 +534,27 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                   <div>
                     <span className="font-bold text-slate-700">Terms & Conditions:</span>
                     <p className="text-slate-500 whitespace-pre-line leading-relaxed">
-                      {quotation.terms_conditions}
+                      {harmonizeTermsAndConditions(quotation.advance_percentage, quotation.terms_conditions)}
                     </p>
                   </div>
                 )}
                 {(() => {
+                  const isIndia = Boolean(
+                    (quotation.organization?.business_country || org?.business_country || '').toUpperCase() === 'IN' ||
+                    (quotation.organization?.country || org?.country || '').toLowerCase() === 'india' ||
+                    (quotation.organization?.country || org?.country || '').toUpperCase() === 'IN' ||
+                    quotation.organization?.billing_region === 'INDIA' ||
+                    org?.billing_region === 'INDIA' ||
+                    quotation.currency === 'INR' ||
+                    org?.default_currency === 'INR'
+                  );
+
                   const bankInfo = quotation.bank_details || org?.default_bank_details;
                   const upiInfo = quotation.upi_details || org?.default_upi_details;
                   const cryptoInfo = quotation.crypto_details || org?.default_crypto_details;
+                  const paymentLinkUrl = quotation.payment_link || org?.default_payment_link;
+                  const paymentLinkLabel = quotation.payment_link_label || org?.default_payment_link_label || 'Pay Online';
+                  let showPaymentLink = quotation.show_payment_link ?? org?.default_show_payment_link ?? Boolean(paymentLinkUrl);
 
                   const mode = quotation.payment_display_mode || org?.default_payment_display_mode || 'BOTH';
                   let showBank = quotation.show_bank_details ?? org?.default_show_bank_details ?? true;
@@ -462,21 +568,39 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                     showUpi = false;
                     showCash = false;
                     showCrypto = true;
+                    showPaymentLink = false;
                   } else if (mode === 'BANK_ONLY') {
                     showBank = true;
                     showUpi = false;
                     showCash = false;
                     showCrypto = false;
+                    showPaymentLink = false;
                   } else if (mode === 'UPI_ONLY') {
                     showBank = false;
                     showUpi = true;
                     showCash = false;
                     showCrypto = false;
+                    showPaymentLink = false;
+                  } else if (mode === 'PAYMENT_LINK_ONLY') {
+                    showBank = false;
+                    showUpi = false;
+                    showCash = false;
+                    showCrypto = false;
+                    showPaymentLink = true;
                   } else if (mode === 'ALL') {
                     showBank = true;
                     showUpi = true;
                     showCash = true;
                     showCrypto = true;
+                    showPaymentLink = true;
+                  }
+
+                  // Country enforcement:
+                  if (!isIndia) {
+                    showUpi = false;
+                  }
+                  if (isIndia) {
+                    showPaymentLink = false;
                   }
 
                   const hasPaymentInfo =
@@ -485,6 +609,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                     Boolean(quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0) ||
                     Boolean(showBank && (bankInfo?.bank_name || bankInfo?.account_number)) ||
                     Boolean(showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url)) ||
+                    Boolean(!isIndia && showPaymentLink && paymentLinkUrl) ||
                     Boolean(showCash && cashInstructions) ||
                     Boolean(showCrypto && (cryptoInfo?.wallet_address || cryptoInfo?.qr_code_url));
 
@@ -497,18 +622,12 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                           <CreditCard className="h-3.5 w-3.5 text-indigo-600" />
                           <span>Payment Details & Instructions</span>
                         </span>
-                        {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && (
+                        {quotation.advance_percentage !== undefined && quotation.advance_percentage !== null && quotation.advance_percentage > 0 && (
                           <span className="text-indigo-600 bg-indigo-100/60 px-2 py-0.5 rounded text-[11px] font-semibold">
                             {quotation.advance_percentage}% Advance
                           </span>
                         )}
                       </div>
-
-                      {quotation.accepted_payment_methods && quotation.accepted_payment_methods.length > 0 && (
-                        <p className="text-[11px] text-slate-600">
-                          <strong className="text-slate-700">Accepted:</strong> {quotation.accepted_payment_methods.join(', ')}
-                        </p>
-                      )}
 
                       {/* Bank Details */}
                       {showBank && (bankInfo?.bank_name || bankInfo?.account_number) && (
@@ -528,8 +647,30 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                         </div>
                       )}
 
-                      {/* UPI Details & QR */}
-                      {showUpi && (upiInfo?.upi_id || upiInfo?.qr_code_url) && (
+                      {/* Online Payment Link (International) */}
+                      {!isIndia && showPaymentLink && paymentLinkUrl && (
+                        <div className="rounded-lg bg-white p-3 border border-blue-100 flex items-center justify-between text-xs">
+                          <div className="space-y-1 max-w-[70%]">
+                            <div className="flex items-center gap-1.5 font-bold text-blue-900">
+                              <LinkIcon className="h-3.5 w-3.5 text-blue-600" />
+                              <span>Online Payment Link ({paymentLinkLabel || 'Checkout'})</span>
+                            </div>
+                            <p className="font-mono text-[11px] text-slate-700 truncate">{paymentLinkUrl}</p>
+                          </div>
+                          <a
+                            href={paymentLinkUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-[11px] hover:bg-blue-700 shrink-0"
+                          >
+                            <span>Open Link</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
+
+                      {/* UPI Details & QR (India Only) */}
+                      {showUpi && isIndia && (upiInfo?.upi_id || upiInfo?.qr_code_url) && (
                         <div className="rounded-lg bg-white p-3 border border-emerald-100 flex items-center justify-between text-xs">
                           <div className="space-y-1">
                             <div className="flex items-center gap-1.5 font-bold text-emerald-900">
@@ -607,7 +748,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
                       {quotation.payment_terms_instructions && (
                         <p className="text-[11px] text-slate-600 italic whitespace-pre-line leading-relaxed">
-                          {quotation.payment_terms_instructions}
+                          {harmonizePaymentTerms(quotation.advance_percentage, quotation.payment_terms_instructions)}
                         </p>
                       )}
                     </div>
@@ -617,14 +758,14 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
 
               <div className="w-full sm:w-5/12 space-y-2 text-xs rounded-xl bg-slate-50 p-4 border border-slate-200">
                 <div className="flex justify-between text-slate-600">
-                  <span>Subtotal</span>
+                  <span>{getLocalizedTerm('subtotal', docLang)}</span>
                   <span className="font-semibold text-slate-800">
                     {formatCurrency(quotation.subtotal, quotation.currency)}
                   </span>
                 </div>
                 {quotation.discount_amount > 0 && (
                   <div className="flex justify-between text-rose-600">
-                    <span>Discount</span>
+                    <span>{getLocalizedTerm('discount', docLang)}</span>
                     <span className="font-semibold">
                       -{formatCurrency(quotation.discount_amount, quotation.currency)}
                     </span>
@@ -632,14 +773,14 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 )}
                 {quotation.tax_amount > 0 && (
                   <div className="flex justify-between text-slate-600">
-                    <span>Tax ({quotation.tax_rate}%)</span>
+                    <span>{getLocalizedTerm('tax_amount', docLang, 'Tax')} ({quotation.tax_rate}%)</span>
                     <span className="font-semibold text-slate-800">
                       {formatCurrency(quotation.tax_amount, quotation.currency)}
                     </span>
                   </div>
                 )}
                 <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm">
-                  <span className="font-bold text-slate-900">Total Value</span>
+                  <span className="font-bold text-slate-900">{getLocalizedTerm('grand_total', docLang, 'Total Value')}</span>
                   <span className="text-lg font-black text-indigo-700">
                     {grandTotalFormatted}
                   </span>
@@ -647,7 +788,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 {Boolean(quotation.paid_amount && quotation.paid_amount > 0) && (
                   <div className="flex justify-between text-emerald-600 font-semibold text-xs pt-1">
                     <span>
-                      Amount Paid
+                      {getLocalizedTerm('paid_amount', docLang)}
                       {quotation.advance_percentage ? ` (${quotation.advance_percentage}% Advance)` : ''}
                     </span>
                     <span>-{formatCurrency(quotation.paid_amount || 0, quotation.currency)}</span>
@@ -655,7 +796,7 @@ export default async function QuotationDetailPage({ params }: QuotationDetailPag
                 )}
                 {Boolean(quotation.paid_amount && quotation.balance_amount !== undefined) && (
                   <div className="flex justify-between items-baseline pt-1 border-t border-slate-200 text-xs">
-                    <span className="font-bold text-slate-900">Remaining Balance Due</span>
+                    <span className="font-bold text-slate-900">{getLocalizedTerm('balance_due', docLang, 'Remaining Balance Due')}</span>
                     <span
                       className={`font-black ${
                         quotation.balance_amount === 0 ? 'text-emerald-600' : 'text-amber-600'

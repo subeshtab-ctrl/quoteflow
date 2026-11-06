@@ -30,13 +30,13 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       const start = new Date(trialSub.trial_start_at!).getTime();
       const end = new Date(trialSub.trial_end_at!).getTime();
       const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
-      expect(diffDays).toBe(30);
+      expect(diffDays).toBe(14);
 
       // Verify entitlement
       const access = await subscriptionService.getBusinessSubscriptionAccess(trialBusinessId);
       expect(access.allowed).toBe(true);
       expect(access.isTrial).toBe(true);
-      expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(29);
+      expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(13);
       expect(access.planName).toBe('QuoteFlow Free Trial');
     });
 
@@ -65,11 +65,11 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
         planSlug: 'monthly_99',
       });
 
-      expect(checkout.amount).toBe(9900); // 9900 paise = ₹99
-      expect(checkout.planSlug).toBe('monthly_99');
+      expect(checkout.amount).toBe(14900); // 14900 paise = ₹149
+      expect(checkout.planSlug).toBe('monthly_149');
 
       const pendingSub = await store.getBusinessSubscription(promoBusinessId);
-      expect(pendingSub?.amount).toBe(9900);
+      expect(pendingSub?.amount).toBe(14900);
 
       const rzpSubId = pendingSub!.razorpay_subscription_id!;
 
@@ -77,21 +77,21 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       const month1 = await subscriptionService.handleSuccessfulPayment({
         subscriptionId: rzpSubId,
         paymentId: 'pay_test_month_1',
-        amount: 9900,
+        amount: 14900,
         businessId: promoBusinessId,
       });
       expect(month1.status).toBe('active');
-      expect(month1.amount).toBe(9900);
+      expect(month1.amount).toBe(14900);
 
-      // 3. Month 2 payment confirmed remains ₹99 (NO ₹199 plan)
+      // 3. Month 2 payment confirmed remains ₹149 (NO ₹199 plan)
       const month2 = await subscriptionService.handleSuccessfulPayment({
         subscriptionId: rzpSubId,
         paymentId: 'pay_test_month_2',
-        amount: 9900,
+        amount: 14900,
         businessId: promoBusinessId,
       });
       expect(month2.status).toBe('active');
-      expect(month2.amount).toBe(9900);
+      expect(month2.amount).toBe(14900);
       expect(month2.plan_id).toBe(DEFAULT_PLANS.PRO_99.id);
     });
   });
@@ -271,23 +271,23 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
   });
 
   describe('7. Strict Developer Admin Authentication & Password Verification', () => {
-    it('generates, verifies, and rejects expired/tampered OTP for m.subesh@outlook.com', () => {
-      const otp = generateAdminOtp();
+    it('generates, verifies, and rejects expired/tampered OTP for master admin', async () => {
+      const otp = await generateAdminOtp();
       expect(otp).toMatch(/^\d{6}$/);
 
       // Verify wrong code fails
-      expect(verifyAdminOtp('000000')).toBe(false);
+      expect(await verifyAdminOtp('000000')).toBe(false);
 
       // Verify correct code succeeds
-      expect(verifyAdminOtp(otp)).toBe(true);
+      expect(await verifyAdminOtp(otp)).toBe(true);
 
       // Cannot reuse already verified OTP
-      expect(verifyAdminOtp(otp)).toBe(false);
+      expect(await verifyAdminOtp(otp)).toBe(false);
     });
 
-    it('sets, hashes with salt, and verifies developer admin password', () => {
+    it('sets, hashes with salt, and verifies developer admin password', async () => {
       const testPw = 'SuperSecretDevAdmin2026!';
-      setDeveloperAdminPassword(testPw);
+      await setDeveloperAdminPassword(testPw);
 
       expect(hasDeveloperAdminPassword()).toBe(true);
       const cfg = getDeveloperAdminConfig();
@@ -302,7 +302,7 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       expect(verifyPassword('WrongPassword123', cfg.passwordHash!, cfg.salt!)).toBe(false);
 
       // Restore default developer admin credentials
-      setDeveloperAdminPassword(DEFAULT_DEVELOPER_ADMIN_PASSWORD);
+      await setDeveloperAdminPassword(DEFAULT_DEVELOPER_ADMIN_PASSWORD);
     });
 
     it('creates tamper-proof developer session token and rejects forged tokens', () => {
@@ -337,7 +337,7 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       const sub = await subscriptionService.handleSuccessfulPayment({
         subscriptionId: checkout.subscriptionId,
         paymentId: 'pay_test_trial_prepaid',
-        amount: 9900,
+        amount: 14900,
         businessId: trialBizId,
       });
 
@@ -347,7 +347,7 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       // Access should still show remaining trial days anchored (Requirements 7, 8)
       const access = await subscriptionService.getBusinessSubscriptionAccess(trialBizId);
       expect(access.isPaid).toBe(true);
-      expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(29);
+      expect(access.daysRemainingInTrial).toBeGreaterThanOrEqual(13);
       expect(access.allowed).toBe(true);
     });
 
@@ -377,6 +377,106 @@ describe('QuoteFlow SaaS Subscription Billing & Lifecycle Test Suite', () => {
       const retrieved = await store.getSupportTicket(ticket.id);
       expect(retrieved?.status).toBe('resolved');
       expect(retrieved?.resolved_at).toBeDefined();
+    });
+  });
+
+  describe('8. Automated & On-Demand Trial Expiration Reminders (Email & WhatsApp)', () => {
+    it('compiles user responsive trial reminder HTML template with dynamic placeholders and regional pricing', async () => {
+      const { compileTrialReminderHtml, generateTrialReminderEmail } = await import('@/lib/email/service');
+      
+      // 1. Indian Business -> Only ₹149 / month (no $12)
+      const indiaHtml = compileTrialReminderHtml({
+        customer_name: 'Apex Industrial Solutions',
+        days_remaining: 5,
+        trial_end_date: 'November 15, 2026',
+        renew_url: 'https://blendandbold.com/billing',
+        current_year: 2026,
+        is_india: true,
+      });
+
+      expect(indiaHtml).toContain('Apex Industrial Solutions');
+      expect(indiaHtml).toContain('5 days');
+      expect(indiaHtml).toContain('November 15, 2026');
+      expect(indiaHtml).toContain('https://blendandbold.com/billing');
+      expect(indiaHtml).toContain('2026 QuoteFlow. All rights reserved.');
+      expect(indiaHtml).toContain('₹149 / month');
+      expect(indiaHtml).not.toContain('$12 / month');
+
+      // 2. International Business -> Only $12 / month (no ₹149)
+      const intlHtml = compileTrialReminderHtml({
+        customer_name: 'Global Corp LLC',
+        days_remaining: 5,
+        trial_end_date: 'November 15, 2026',
+        renew_url: 'https://blendandbold.com/billing',
+        current_year: 2026,
+        is_india: false,
+      });
+
+      expect(intlHtml).toContain('Global Corp LLC');
+      expect(intlHtml).toContain('$12 / month');
+      expect(intlHtml).not.toContain('₹149 / month');
+
+      const emailPayload = generateTrialReminderEmail({
+        companyName: 'Apex Industrial Solutions',
+        daysRemaining: 5,
+        trialEndDate: 'November 15, 2026',
+        subscribeUrl: 'https://blendandbold.com/billing',
+        planPrice: '₹149 / month',
+        currency: 'INR',
+        isIndia: true,
+      });
+
+      expect(emailPayload.subject).toBe('⏳ Your QuoteFlow free trial ends in 5 days — Please renew');
+      expect(emailPayload.html).toContain('5 days');
+      expect(emailPayload.html).toContain('₹149 / month');
+      expect(emailPayload.html).not.toContain('$12 / month');
+    });
+
+    it('dispatches on-demand trial reminder with email, whatsapp link, and deduplication', async () => {
+      const testBizId = crypto.randomUUID();
+      await store.updateOrganization(testBizId, {
+        name: 'Omni Retail Ltd',
+        email: 'billing@omniretail.example.com',
+        phone: '+919988776655',
+        business_country: 'IN',
+      });
+
+      await subscriptionService.startFreeTrial(testBizId);
+
+      // 1. Dispatch reminder
+      const result = await subscriptionService.sendTrialExpirationReminder(testBizId, {
+        daysRemaining: 3,
+        channel: 'both',
+        force: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.daysRemaining).toBe(3);
+      expect(result.waLink).toBeDefined();
+      expect(result.waLink).toContain('https://wa.me/919988776655');
+
+      // 2. Verify reminder is marked in deduplication store
+      const isSent = await store.isReminderSent(testBizId, `reminder_${testBizId}_trial_3d`);
+      expect(isSent).toBe(true);
+
+      // 3. Second call without force should skip email due to deduplication
+      const duplicateResult = await subscriptionService.sendTrialExpirationReminder(testBizId, {
+        daysRemaining: 3,
+        channel: 'email',
+        force: false,
+      });
+      expect(duplicateResult.emailSent).toBe(false);
+    });
+
+    it('evaluates all businesses for automated milestone reminders without crashing', async () => {
+      const batchResult = await subscriptionService.processAllAutomatedTrialReminders({
+        simulateOnly: true,
+        forceMilestoneDays: [7, 5, 3, 2, 1, 0],
+      });
+
+      expect(batchResult.success).toBe(true);
+      expect(batchResult.totalBusinessesEvaluated).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray(batchResult.details)).toBe(true);
     });
   });
 });

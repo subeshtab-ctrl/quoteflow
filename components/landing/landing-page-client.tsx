@@ -36,8 +36,109 @@ import {
   Bot,
   Copy,
   ExternalLink,
+  Star,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AnimatedCurrencyTicker } from '@/components/landing/animated-currency-ticker';
+import { SUBSCRIPTION_CONFIG } from '@/lib/billing/subscription-config';
+
+const DEMO_CURRENCIES = [
+  {
+    code: 'INR',
+    symbol: '₹',
+    flag: '🇮🇳',
+    name: 'INR (India)',
+    prompt: 'Create a quote for Glass 500 and Battery 600 for ABC Customer.',
+    glassUnit: '₹500',
+    glassTotal: '₹5,000',
+    batteryUnit: '₹600',
+    batteryTotal: '₹3,000',
+    subtotal: '₹8,000',
+    taxLabel: 'GST (18%)',
+    taxAmount: '₹1,440',
+    totalAmount: '₹9,440',
+    receivedPayments: '₹84,500',
+    pendingPayments: '₹38,200',
+    overdueInvoices: '₹9,440',
+    totalInvoiced: '₹1,32,140',
+  },
+  {
+    code: 'USD',
+    symbol: '$',
+    flag: '🇺🇸',
+    name: 'USD (Global)',
+    prompt: 'Create a quote for Glass $50 and Battery $60 for ABC Customer.',
+    glassUnit: '$50',
+    glassTotal: '$500',
+    batteryUnit: '$60',
+    batteryTotal: '$300',
+    subtotal: '$800',
+    taxLabel: 'Tax (10%)',
+    taxAmount: '$80',
+    totalAmount: '$880',
+    receivedPayments: '$84,500',
+    pendingPayments: '$38,200',
+    overdueInvoices: '$880',
+    totalInvoiced: '$123,580',
+  },
+  {
+    code: 'EUR',
+    symbol: '€',
+    flag: '🇪🇺',
+    name: 'EUR (Europe)',
+    prompt: 'Create a quote for Glass €50 and Battery €60 for ABC Customer.',
+    glassUnit: '€50',
+    glassTotal: '€500',
+    batteryUnit: '€60',
+    batteryTotal: '€300',
+    subtotal: '€800',
+    taxLabel: 'VAT (20%)',
+    taxAmount: '€160',
+    totalAmount: '€960',
+    receivedPayments: '€84,500',
+    pendingPayments: '€38,200',
+    overdueInvoices: '€960',
+    totalInvoiced: '€123,660',
+  },
+  {
+    code: 'GBP',
+    symbol: '£',
+    flag: '🇬🇧',
+    name: 'GBP (UK)',
+    prompt: 'Create a quote for Glass £45 and Battery £55 for ABC Customer.',
+    glassUnit: '£45',
+    glassTotal: '£450',
+    batteryUnit: '£55',
+    batteryTotal: '£275',
+    subtotal: '£725',
+    taxLabel: 'VAT (20%)',
+    taxAmount: '£145',
+    totalAmount: '£870',
+    receivedPayments: '£75,000',
+    pendingPayments: '£32,000',
+    overdueInvoices: '£870',
+    totalInvoiced: '£107,870',
+  },
+  {
+    code: 'AED',
+    symbol: '⃃',
+    flag: '🇦🇪',
+    name: 'AED (UAE)',
+    prompt: 'Create a quote for Glass 150 and Battery 200 for ABC Customer.',
+    glassUnit: '⃃150',
+    glassTotal: '⃃1,500',
+    batteryUnit: '⃃200',
+    batteryTotal: '⃃1,000',
+    subtotal: '⃃2,500',
+    taxLabel: 'VAT (5%)',
+    taxAmount: '⃃125',
+    totalAmount: '⃃2,625',
+    receivedPayments: '⃃84,500',
+    pendingPayments: '⃃38,200',
+    overdueInvoices: '⃃2,625',
+    totalInvoiced: '⃃125,325',
+  },
+];
 
 interface LandingPageProps {
   isAuthenticated: boolean;
@@ -45,12 +146,69 @@ interface LandingPageProps {
 }
 
 export function LandingPageClient({ isAuthenticated, userEmail }: LandingPageProps) {
+  const [isAuthed, setIsAuthed] = useState(isAuthenticated);
+  const [email, setEmail] = useState(userEmail || '');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
   const [demoStep, setDemoStep] = useState(0);
   const [copiedLink, setCopiedLink] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [activeAiQuery, setActiveAiQuery] = useState<'pending' | 'reminders' | 'monthly' | 'create'>('pending');
+
+  // Dynamic Flashing / Cycling Multi-Currency State for Live Previews
+  const [demoCurrencyIndex, setDemoCurrencyIndex] = useState(0);
+  const [isCurrencyTransitioning, setIsCurrencyTransitioning] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIsCurrencyTransitioning(true);
+      setTimeout(() => {
+        setDemoCurrencyIndex((prev) => (prev + 1) % DEMO_CURRENCIES.length);
+        setIsCurrencyTransitioning(false);
+      }, 200);
+    }, 3200);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const activeCurrency = DEMO_CURRENCIES[demoCurrencyIndex];
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setIsAuthed(true);
+      if (userEmail) {
+        setEmail(userEmail);
+        return;
+      }
+    }
+
+    // Client-side authentication check: detects Supabase session cookies without triggering heavy server-side SSR
+    if (typeof document !== 'undefined') {
+      const hasAuthCookie = document.cookie.split(';').some(
+        (c) =>
+          c.trim().startsWith('sb-') ||
+          c.trim().includes('auth-token') ||
+          c.trim().includes('session')
+      );
+      if (hasAuthCookie) {
+        setIsAuthed(true);
+      }
+    }
+
+    import('@/lib/supabase/client').then(({ createClientSupabaseClient }) => {
+      try {
+        const client = createClientSupabaseClient();
+        client.auth.getUser().then(({ data: { user } }) => {
+          if (user?.email) {
+            setEmail(user.email);
+            setIsAuthed(true);
+          }
+        });
+      } catch {
+        // Ignore client auth inspection errors
+      }
+    });
+  }, [isAuthenticated, userEmail]);
 
   // Customer Mobile View interactive state
   const [customerApproved, setCustomerApproved] = useState(false);
@@ -59,8 +217,8 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
   // FAQ Items
   const faqItems = [
     {
-      q: 'How does the 30-day free trial work?',
-      a: 'You get full, unrestricted access to all QuoteFlow features for 30 days without entering any credit card. Create unlimited quotations, send them to clients, convert to invoices, and test AI Copilot. After 30 days, keep all features for just ₹99 per month.',
+      q: 'How does the 14-day free trial work?',
+      a: `You get full, unrestricted access to all QuoteFlow features for 14 days without entering any credit card. Create unlimited quotations, send them to clients, convert to invoices, and test AI Copilot. After 14 days, continue seamlessly with transparent pricing (${SUBSCRIPTION_CONFIG.INDIA.formattedPrice}/mo in India or ${SUBSCRIPTION_CONFIG.GLOBAL.formattedPrice}/mo globally) tailored to your registered business location.`,
     },
     {
       q: 'Can I create and send quotes from mobile?',
@@ -157,28 +315,40 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
       ========================================================================= */}
       <header className="sticky top-0 z-40 backdrop-blur-md bg-white/85 border-b border-slate-200/80 transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between">
-          {/* Brand Logo with Q */}
-          <Link href="/" className="flex items-center gap-3 group focus:outline-none">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center font-black text-xl text-white shadow-md shadow-indigo-500/25 border border-white/40 group-hover:scale-105 transition-transform duration-200">
-              Q
-            </div>
-            <div className="flex flex-col">
-              <span className="font-extrabold text-xl tracking-tight text-slate-900 leading-tight">
-                QuoteFlow
-              </span>
-              <span className="text-[10px] font-bold text-slate-600 tracking-wide">
-                Powered by BlendAndBold
-              </span>
-            </div>
+          {/* Brand Logo */}
+          <Link href="/" className="flex items-center group focus:outline-none">
+            <picture>
+              <source srcSet="/quoteflow-logo.webp" type="image/webp" />
+              <img
+                src="/quoteflow-logo.png"
+                alt="QuoteFlow by blendandbold"
+                width={180}
+                height={44}
+                fetchPriority="high"
+                decoding="async"
+                className="h-10 sm:h-11 w-auto object-contain group-hover:scale-102 transition-transform duration-200"
+              />
+            </picture>
           </Link>
 
           {/* Desktop Navigation Links */}
           <nav className="hidden lg:flex items-center gap-7 text-xs font-semibold text-slate-600">
+            <Link
+              href="/ai-business-operator"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-50 text-violet-700 hover:bg-violet-100 font-bold border border-violet-200 transition-colors"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-violet-600" />
+              <span>AI Operator</span>
+              <span className="text-[9px] uppercase font-black bg-violet-600 text-white px-1.5 py-0.5 rounded-full">New</span>
+            </Link>
             <a href="#features" className="hover:text-indigo-600 transition-colors">
               Features
             </a>
             <a href="#ai-copilot" className="hover:text-indigo-600 transition-colors">
               AI Copilot
+            </a>
+            <a href="#compare" className="hover:text-indigo-600 transition-colors">
+              Why QuoteFlow
             </a>
             <a href="#flow" className="hover:text-indigo-600 transition-colors">
               How It Works
@@ -189,6 +359,9 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
             <a href="#industries" className="hover:text-indigo-600 transition-colors">
               Industries
             </a>
+            <Link href="/guides" className="hover:text-indigo-600 transition-colors">
+              Guides
+            </Link>
             <a href="#faq" className="hover:text-indigo-600 transition-colors">
               FAQ
             </a>
@@ -196,11 +369,13 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
 
           {/* Right Action Buttons */}
           <div className="hidden sm:flex items-center gap-3">
-            {isAuthenticated ? (
+            {isAuthed ? (
               <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-500 hidden xl:inline">
-                  Signed in as <span className="font-semibold text-slate-800">{userEmail}</span>
-                </span>
+                {email ? (
+                  <span className="text-xs text-slate-500 hidden xl:inline">
+                    Signed in as <span className="font-semibold text-slate-800">{email}</span>
+                  </span>
+                ) : null}
                 <Link href="/dashboard">
                   <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold shadow-md shadow-indigo-600/20 gap-2 rounded-xl px-5 h-10 border border-indigo-500/30">
                     <span>Go to Dashboard</span>
@@ -245,6 +420,17 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
         {mobileMenuOpen && (
           <div className="lg:hidden border-b border-slate-200 bg-white/98 backdrop-blur-xl px-5 py-4 space-y-3 shadow-lg">
             <div className="flex flex-col space-y-2 text-sm font-semibold text-slate-700">
+              <Link
+                href="/ai-business-operator"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-1.5 text-violet-600 font-bold flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-violet-600" />
+                  AI Business Operator
+                </span>
+                <span className="text-[10px] uppercase font-black bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">New</span>
+              </Link>
               <a
                 href="#features"
                 onClick={() => setMobileMenuOpen(false)}
@@ -258,6 +444,13 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                 className="py-1.5 hover:text-indigo-600 transition-colors"
               >
                 AI Copilot
+              </a>
+              <a
+                href="#compare"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-1.5 hover:text-indigo-600 transition-colors"
+              >
+                Why QuoteFlow
               </a>
               <a
                 href="#flow"
@@ -280,6 +473,13 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
               >
                 Industries
               </a>
+              <Link
+                href="/guides"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-1.5 hover:text-indigo-600 transition-colors"
+              >
+                Guides
+              </Link>
               <a
                 href="#faq"
                 onClick={() => setMobileMenuOpen(false)}
@@ -290,7 +490,7 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-              {isAuthenticated ? (
+              {isAuthed ? (
                 <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)}>
                   <Button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl h-10">
                     Go to Dashboard
@@ -320,12 +520,21 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
       ========================================================================= */}
       <section className="relative z-10 pt-12 pb-16 sm:pt-20 sm:pb-24 px-4 sm:px-6 max-w-7xl mx-auto w-full">
         <div className="flex flex-col items-center text-center space-y-6 max-w-4xl mx-auto">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-200/80 shadow-xs">
-            <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
-            <span className="text-xs font-bold text-indigo-900 tracking-wide">
-              ✦ AI Powered Quotation &amp; Payment Platform
-            </span>
+          {/* Badges & Multi-Currency Animation */}
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            <Link
+              href="/ai-business-operator"
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-violet-50 to-indigo-50 hover:from-violet-100 hover:to-indigo-100 border border-violet-200/90 shadow-xs transition-colors group cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-violet-600 animate-pulse" />
+              <span className="text-xs font-bold text-violet-900 tracking-wide">
+                Meet QuoteFlow AI Business Operator →
+              </span>
+              <span className="text-[10px] font-black uppercase bg-violet-600 text-white px-2 py-0.5 rounded-full">
+                New
+              </span>
+            </Link>
+            <AnimatedCurrencyTicker />
           </div>
 
           {/* Heading */}
@@ -380,6 +589,65 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
               Payment tracking
             </span>
           </div>
+
+          {/* Social Proof & Platform Trust Badges */}
+          <div className="pt-3 flex flex-wrap items-center justify-center gap-3 animate-in fade-in">
+            {/* Product Hunt Badge */}
+            <a
+              href="https://www.producthunt.com/products/quoteflow-2?launch=quoteflow-2"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-orange-300 shadow-2xs hover:shadow-xs transition-all group"
+              title="Featured on Product Hunt"
+            >
+              <div className="h-5 w-5 rounded-full bg-[#ff6154] flex items-center justify-center text-white font-black text-xs font-serif leading-none shadow-2xs">
+                P
+              </div>
+              <div className="text-left">
+                <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 group-hover:text-orange-600 leading-none">
+                  Featured On
+                </div>
+                <div className="text-xs font-bold text-slate-800 leading-tight">
+                  Product Hunt
+                </div>
+              </div>
+            </a>
+
+            {/* AlternativeTo Badge */}
+            <a
+              href="https://alternativeto.net/software/quoteflow-1/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-sky-300 shadow-2xs hover:shadow-xs transition-all group"
+              title="Find us on AlternativeTo"
+            >
+              <div className="h-5 w-5 rounded-full bg-[#1b88e8] flex items-center justify-center text-white font-black text-[11px] leading-none shadow-2xs">
+                A
+              </div>
+              <div className="text-left">
+                <div className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 group-hover:text-sky-600 leading-none">
+                  Find Us On
+                </div>
+                <div className="text-xs font-bold text-slate-800 leading-tight">
+                  AlternativeTo
+                </div>
+              </div>
+            </a>
+
+            {/* 4.9 Rating Pill */}
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-amber-200/90 bg-amber-50/70 text-amber-950 text-xs font-semibold shadow-2xs">
+              <div className="flex items-center text-amber-500">
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+              </div>
+              <span>
+                <strong className="font-extrabold">4.9/5</strong> rating from 250+ teams
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* =========================================================================
@@ -418,9 +686,28 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                {/* Multi-Currency Flashing / Ticker Pills */}
+                <div className="flex items-center gap-1 bg-slate-100/90 rounded-full p-0.5 border border-slate-200/80">
+                  {DEMO_CURRENCIES.map((cur, idx) => (
+                    <button
+                      key={cur.code}
+                      type="button"
+                      onClick={() => setDemoCurrencyIndex(idx)}
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 ${
+                        idx === demoCurrencyIndex
+                          ? 'bg-white text-indigo-600 shadow-2xs scale-105'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                      title={`Preview in ${cur.name}`}
+                    >
+                      <span>{cur.flag}</span>
+                      <span className="font-mono">{cur.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Draft • Ready to send
+                  Draft • Ready
                 </span>
               </div>
             </div>
@@ -429,8 +716,8 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
             <div className="space-y-4">
               {/* User Prompt */}
               <div className="flex justify-end">
-                <div className="bg-indigo-600 text-white rounded-2xl rounded-tr-xs px-4 py-2.5 text-xs sm:text-sm font-medium shadow-xs max-w-md">
-                  Create a quote for Glass 500 and Battery 600 for ABC Customer.
+                <div className={`bg-indigo-600 text-white rounded-2xl rounded-tr-xs px-4 py-2.5 text-xs sm:text-sm font-medium shadow-xs max-w-md transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
+                  {activeCurrency.prompt}
                 </div>
               </div>
 
@@ -452,37 +739,37 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                   </div>
 
                   {/* Items Table */}
-                  <div className="divide-y divide-slate-200/60 text-xs">
+                  <div className={`divide-y divide-slate-200/60 text-xs transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
                     <div className="py-2.5 flex items-center justify-between font-medium text-slate-700">
                       <div>
                         <p className="font-bold text-slate-900">Glass Panel (12mm Toughened)</p>
-                        <p className="text-[11px] text-slate-400">Qty 10 × ₹500</p>
+                        <p className="text-[11px] text-slate-400">Qty 10 × {activeCurrency.glassUnit}</p>
                       </div>
-                      <span className="font-bold text-slate-900">₹5,000</span>
+                      <span className="font-bold text-slate-900">{activeCurrency.glassTotal}</span>
                     </div>
 
                     <div className="py-2.5 flex items-center justify-between font-medium text-slate-700">
                       <div>
                         <p className="font-bold text-slate-900">Heavy-Duty Battery (150Ah)</p>
-                        <p className="text-[11px] text-slate-400">Qty 5 × ₹600</p>
+                        <p className="text-[11px] text-slate-400">Qty 5 × {activeCurrency.batteryUnit}</p>
                       </div>
-                      <span className="font-bold text-slate-900">₹3,000</span>
+                      <span className="font-bold text-slate-900">{activeCurrency.batteryTotal}</span>
                     </div>
                   </div>
 
                   {/* Totals Summary */}
-                  <div className="pt-2 border-t border-slate-200/80 space-y-1.5 text-xs text-slate-600">
+                  <div className={`pt-2 border-t border-slate-200/80 space-y-1.5 text-xs text-slate-600 transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
                     <div className="flex justify-between">
                       <span>Subtotal</span>
-                      <span className="font-semibold text-slate-800">₹8,000</span>
+                      <span className="font-semibold text-slate-800">{activeCurrency.subtotal}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>GST (18%)</span>
-                      <span className="font-semibold text-slate-800">₹1,440</span>
+                      <span>{activeCurrency.taxLabel}</span>
+                      <span className="font-semibold text-slate-800">{activeCurrency.taxAmount}</span>
                     </div>
                     <div className="flex justify-between text-sm sm:text-base font-extrabold text-slate-900 pt-1 border-t border-slate-200/60">
                       <span>Total Amount</span>
-                      <span className="text-indigo-600">₹9,440</span>
+                      <span className="text-indigo-600 font-black">{activeCurrency.totalAmount}</span>
                     </div>
                   </div>
 
@@ -682,22 +969,22 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
 
               {activeAiQuery === 'pending' || activeAiQuery === 'monthly' ? (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className={`grid grid-cols-2 gap-2.5 transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
                     <div className="p-3 bg-white rounded-xl border border-slate-200/80">
                       <span className="text-[11px] text-slate-500 font-medium">Received Payments</span>
-                      <p className="text-lg font-black text-emerald-600 mt-0.5">₹84,500</p>
+                      <p className="text-lg font-black text-emerald-600 mt-0.5">{activeCurrency.receivedPayments}</p>
                     </div>
                     <div className="p-3 bg-white rounded-xl border border-slate-200/80">
                       <span className="text-[11px] text-slate-500 font-medium">Pending Payments</span>
-                      <p className="text-lg font-black text-amber-600 mt-0.5">₹38,200</p>
+                      <p className="text-lg font-black text-amber-600 mt-0.5">{activeCurrency.pendingPayments}</p>
                     </div>
                     <div className="p-3 bg-white rounded-xl border border-slate-200/80">
                       <span className="text-[11px] text-slate-500 font-medium">Overdue Invoices</span>
-                      <p className="text-lg font-black text-rose-600 mt-0.5">₹9,440</p>
+                      <p className="text-lg font-black text-rose-600 mt-0.5">{activeCurrency.overdueInvoices}</p>
                     </div>
                     <div className="p-3 bg-white rounded-xl border border-slate-200/80">
                       <span className="text-[11px] text-slate-500 font-medium">Total Invoiced</span>
-                      <p className="text-lg font-black text-slate-900 mt-0.5">₹1,32,140</p>
+                      <p className="text-lg font-black text-slate-900 mt-0.5">{activeCurrency.totalInvoiced}</p>
                     </div>
                   </div>
 
@@ -717,8 +1004,8 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                   <p className="font-semibold text-slate-900 flex items-center gap-1.5 text-amber-600">
                     <Clock className="h-4 w-4" /> Overdue reminder ready for dispatch
                   </p>
-                  <p className="text-slate-600">
-                    Client <strong>ABC Customer</strong> has 1 invoice (INV-001042) overdue by 5 days (₹9,440).
+                  <p className={`text-slate-600 transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
+                    Client <strong>ABC Customer</strong> has 1 invoice (INV-001042) overdue by 5 days ({activeCurrency.overdueInvoices}).
                   </p>
                   <div className="pt-2 flex gap-2">
                     <span className="px-3 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg border border-indigo-200">
@@ -734,8 +1021,8 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                   <p className="font-semibold text-slate-900 flex items-center gap-1.5 text-emerald-600">
                     <CheckCircle2 className="h-4 w-4" /> Quotation QT-2026-0049 created
                   </p>
-                  <p className="text-slate-600">
-                    Draft saved with 2 line items for ABC Corp totaling ₹9,440 including GST.
+                  <p className={`text-slate-600 transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
+                    Draft saved with 2 line items for ABC Corp totaling {activeCurrency.totalAmount} including tax.
                   </p>
                   <span className="inline-block mt-1 text-[11px] font-mono text-indigo-600">
                     Ready to send to client portal
@@ -782,7 +1069,7 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                       <p className="text-[10px] text-slate-400">Quotation QT-1048</p>
                     </div>
                   </div>
-                  <span className="text-xs font-extrabold text-indigo-600">₹9,440</span>
+                  <span className={`text-xs font-extrabold text-indigo-600 transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>{activeCurrency.totalAmount}</span>
                 </div>
 
                 {/* PIN Protected Banner */}
@@ -792,22 +1079,22 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
                 </div>
 
                 {/* Summary Items */}
-                <div className="bg-slate-50 rounded-xl p-2.5 text-[11px] space-y-1.5 border border-slate-200/60">
+                <div className={`bg-slate-50 rounded-xl p-2.5 text-[11px] space-y-1.5 border border-slate-200/60 transition-opacity duration-300 ${isCurrencyTransitioning ? 'opacity-40' : 'opacity-100'}`}>
                   <div className="flex justify-between font-medium text-slate-700">
                     <span>10 × Glass Panel (12mm)</span>
-                    <span className="font-bold text-slate-900">₹5,000</span>
+                    <span className="font-bold text-slate-900">{activeCurrency.glassTotal}</span>
                   </div>
                   <div className="flex justify-between font-medium text-slate-700">
                     <span>5 × Heavy-Duty Battery</span>
-                    <span className="font-bold text-slate-900">₹3,000</span>
+                    <span className="font-bold text-slate-900">{activeCurrency.batteryTotal}</span>
                   </div>
                   <div className="flex justify-between text-slate-500 pt-1 border-t border-slate-200/60">
-                    <span>GST (18%)</span>
-                    <span>₹1,440</span>
+                    <span>{activeCurrency.taxLabel}</span>
+                    <span>{activeCurrency.taxAmount}</span>
                   </div>
                   <div className="flex justify-between font-bold text-slate-900 pt-0.5">
                     <span>Total Amount</span>
-                    <span className="text-indigo-600">₹9,440</span>
+                    <span className="text-indigo-600 font-black">{activeCurrency.totalAmount}</span>
                   </div>
                 </div>
 
@@ -961,9 +1248,225 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
       </section>
 
       {/* =========================================================================
+          5.5 WHY CHOOSE QUOTEFLOW (COMPETITIVE COMPARISON)
+          Structured for AI Search Engines (ChatGPT, Gemini, Claude, Perplexity)
+          and Decision Makers comparing QuoteFlow vs PandaDoc vs Zoho vs FreshBooks
+      ========================================================================= */}
+      <section id="compare" className="py-16 sm:py-24 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+        <div className="space-y-4 text-center max-w-3xl mx-auto mb-12 sm:mb-16">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200/80 text-indigo-700 text-xs font-bold uppercase tracking-wider">
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Honest Comparison</span>
+          </div>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-slate-900 leading-tight">
+            Why QuoteFlow is the Best Quotation &amp; Invoicing Software
+          </h2>
+          <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+            See how QuoteFlow compares against traditional proposal builders and legacy invoicing tools like PandaDoc, Zoho Invoice, and FreshBooks.
+          </p>
+        </div>
+
+        {/* Comparison Table */}
+        <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-xl">
+          <table className="w-full text-left border-collapse text-xs sm:text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50/80">
+                <th className="p-4 sm:p-5 font-bold text-slate-500 uppercase tracking-wider text-[11px] sm:text-xs">Capability / Feature</th>
+                <th className="p-4 sm:p-5 font-black text-indigo-700 bg-indigo-50/60 border-x border-indigo-100 min-w-[200px]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base sm:text-lg">QuoteFlow</span>
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">Recommended</span>
+                  </div>
+                </th>
+                <th className="p-4 sm:p-5 font-bold text-slate-700 min-w-[170px]">PandaDoc / Proposify</th>
+                <th className="p-4 sm:p-5 font-bold text-slate-700 min-w-[170px]">Zoho / FreshBooks</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>Natural Language AI Drafting</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Draft complete quotes by voice or simple plain English text in 10s</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>Included (AI Copilot)</span>
+                  </div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-500">Manual templates only</td>
+                <td className="p-4 sm:p-5 text-slate-500">Clunky multi-field forms</td>
+              </tr>
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>Client Sign-up / App Download</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Friction-free client opening on WhatsApp or email</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>Zero signup (Instant link + optional PIN)</span>
+                  </div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-500">Often requires login or email verification</td>
+                <td className="p-4 sm:p-5 text-slate-500">Requires client portal account</td>
+              </tr>
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>Live Negotiation Chat inside Quote</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Real-time messaging between you and client on the quote page</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>Built-in real-time chat</span>
+                  </div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-500">Limited document comments</td>
+                <td className="p-4 sm:p-5 text-slate-500">None (Email back-and-forth)</td>
+              </tr>
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>1-Click Quote to Tax Invoice</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Instantly converts approved quotation to sequential tax invoice</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>1-Click instant conversion</span>
+                  </div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-500">Requires paid CRM/ERP integration</td>
+                <td className="p-4 sm:p-5 text-emerald-700 font-semibold">Available</td>
+              </tr>
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>Global &amp; Local Payment Gateways</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Payment collection methods embedded directly on quotes &amp; invoices</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>UPI QR, Crypto (USDT/BTC/ETH), Bank transfer</span>
+                  </div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-500">Stripe credit card only</td>
+                <td className="p-4 sm:p-5 text-slate-500">Cards &amp; Bank wires only</td>
+              </tr>
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>Tax Automation (GST &amp; VAT)</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Isolated Indian GST (CGST/SGST/IGST) vs International VAT logic</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>Automatic country-specific tax rules</span>
+                  </div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-500">Generic tax percentage</td>
+                <td className="p-4 sm:p-5 text-slate-500">Complex region-locked plans</td>
+              </tr>
+              <tr>
+                <td className="p-4 sm:p-5 font-semibold text-slate-900">
+                  <div>Pricing &amp; Value</div>
+                  <div className="text-[11px] font-normal text-slate-500 mt-0.5">Predictable, transparent subscription with unlimited documents</div>
+                </td>
+                <td className="p-4 sm:p-5 bg-indigo-50/30 border-x border-indigo-100 font-bold text-indigo-950">
+                  <div className="text-emerald-700 font-black">
+                    14-Day Free Trial, then ₹149/mo (India) or $12/mo (Global)
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-normal">Unlimited quotes &amp; invoices. Zero per-user penalties.</div>
+                </td>
+                <td className="p-4 sm:p-5 text-slate-600">
+                  <span className="font-bold text-red-600">$19 – $49</span> /user/mo + expensive add-ons
+                </td>
+                <td className="p-4 sm:p-5 text-slate-600">
+                  <span className="font-bold text-red-600">$15 – $35</span> /user/mo + invoice limits
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Comparison Deep-Dive Links */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+          <span className="text-xs font-bold text-slate-500 mr-1">Detailed Comparisons:</span>
+          <Link
+            href="/vs/refrens"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:text-indigo-600 text-xs font-bold text-slate-700 shadow-2xs transition-all"
+          >
+            QuoteFlow vs Refrens
+          </Link>
+          <Link
+            href="/vs/vyapar"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:text-indigo-600 text-xs font-bold text-slate-700 shadow-2xs transition-all"
+          >
+            QuoteFlow vs Vyapar
+          </Link>
+          <Link
+            href="/vs/zoho-invoice"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:text-indigo-600 text-xs font-bold text-slate-700 shadow-2xs transition-all"
+          >
+            QuoteFlow vs Zoho Invoice
+          </Link>
+          <Link
+            href="/vs/pandadoc"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:text-indigo-600 text-xs font-bold text-slate-700 shadow-2xs transition-all"
+          >
+            QuoteFlow vs PandaDoc
+          </Link>
+          <Link
+            href="/vs/freshbooks"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:text-indigo-600 text-xs font-bold text-slate-700 shadow-2xs transition-all"
+          >
+            QuoteFlow vs FreshBooks
+          </Link>
+        </div>
+
+        {/* Trademark & Data Disclaimer */}
+        <p className="text-[11px] text-slate-400 text-center mt-4 max-w-4xl mx-auto leading-relaxed">
+          <strong>Disclaimer:</strong> Refrens, Vyapar, PandaDoc, Proposify, Zoho, and FreshBooks are trademarks or registered trademarks of their respective owners. Comparison details are compiled from publicly available pricing and documentation as of October 2026 for informational purposes only. QuoteFlow has no affiliation with, sponsorship by, or endorsement from these companies.
+        </p>
+
+        {/* 3 Value Pillars */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2.5">
+            <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <h4 className="text-base font-bold text-slate-900">Close Deals 3x Faster</h4>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Clients sign quotes in under 30 seconds on their smartphones via WhatsApp. No PDF downloading, no printing, and no signing app installation.
+            </p>
+          </div>
+
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2.5">
+            <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+              <Bot className="h-5 w-5" />
+            </div>
+            <h4 className="text-base font-bold text-slate-900">AI Handles All the Tedium</h4>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Speak or paste a brief note. QuoteFlow AI detects quantities, item names, computes subtotal and applicable taxes, and readies a quote instantly.
+            </p>
+          </div>
+
+          <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2.5">
+            <div className="h-10 w-10 rounded-xl bg-violet-50 border border-violet-100 flex items-center justify-center text-violet-600">
+              <CreditCard className="h-5 w-5" />
+            </div>
+            <h4 className="text-base font-bold text-slate-900">Modern Payment Flexibility</h4>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Get paid via instant UPI QR codes in India, or USDT / Crypto and direct international bank transfers across 150+ countries.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
           6. BOTTOM MULTI-SECTION GRID (3 COLUMNS)
           Col 1: Works for Your Business (Industries)
-          Col 2: Simple & Transparent Pricing (Free for 30 days, then ₹99/month)
+          Col 2: Simple & Transparent Pricing (14-Day Free Trial, then ₹149/month or $12/month)
           Col 3: Frequently Asked Questions (FAQ Accordion)
       ========================================================================= */}
       <section id="bottom-grid" className="py-16 sm:py-24 px-4 sm:px-6 max-w-7xl mx-auto w-full">
@@ -1022,25 +1525,31 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
             </div>
 
             {/* Big Pricing Highlight */}
-            <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200/80 space-y-2">
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl sm:text-4xl font-black text-slate-900">₹0</span>
-                <span className="text-xs font-bold text-slate-500">for first 30 days</span>
+            <div className="p-5 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wider text-indigo-600">Full Access Plan</div>
+                  <div className="text-3xl font-black text-slate-900 tracking-tight">14-Day Free Trial</div>
+                </div>
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 w-fit">
+                  No credit card required
+                </span>
               </div>
-              <div className="flex items-center gap-1.5 text-xs font-extrabold text-indigo-700">
-                <span>then only</span>
-                <span className="text-base text-indigo-900 font-black">₹99</span>
-                <span>/ month</span>
+
+              <div className="pt-2 border-t border-indigo-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                <span>Then <strong className="text-slate-900 font-bold">₹149/mo</strong> (India) · <strong className="text-slate-900 font-bold">$12/mo</strong> (Global)</span>
+                <span className="text-indigo-600 font-semibold">Cancel anytime</span>
               </div>
-              <p className="text-[11px] text-slate-500 leading-tight">
-                Includes full access to AI Copilot, unlimited quotes &amp; invoices.
+
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Includes full access to AI Copilot, unlimited quotes &amp; invoices. Automatically matches your business country.
               </p>
             </div>
 
             {/* Feature List */}
             <div className="space-y-2.5 text-xs text-slate-700">
               {[
-                '30-Day Full Access Free Trial',
+                '14-Day Full Access Free Trial',
                 'No credit card required to start',
                 'Unlimited AI Quotations & Invoices',
                 'WhatsApp & Email Secure Sharing',
@@ -1059,7 +1568,7 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
             {/* CTA Button */}
             <Link href="/register" className="block w-full">
               <Button className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-black text-xs shadow-md shadow-indigo-600/25 border border-indigo-500/20 gap-1.5">
-                <span>Start Free 30-Day Trial</span>
+                <span>Start Free 14-Day Trial</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </Link>
@@ -1133,14 +1642,14 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
               Your next quote is one conversation away.
             </h2>
             <p className="text-sm sm:text-base text-indigo-200 font-normal">
-              Join modern businesses closing deals 3x faster with QuoteFlow. Free for 30 days, then just ₹99/month.
+              Join modern businesses closing deals 3x faster with QuoteFlow. Start your 14-day free trial today.
             </p>
           </div>
 
           <div className="pt-2 relative z-10">
             <Link href="/register">
               <Button className="h-12 px-8 rounded-xl bg-white hover:bg-slate-100 text-indigo-950 font-black text-sm shadow-xl gap-2">
-                <span>Start Free 30-Day Trial</span>
+                <span>Start Free 14-Day Trial</span>
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -1151,49 +1660,159 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
       {/* =========================================================================
           8. FOOTER
       ========================================================================= */}
-      <footer className="border-t border-slate-200 bg-white py-12 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          {/* Logo & Brand Info */}
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center font-black text-lg text-white shadow-sm">
-              Q
+      <footer className="border-t border-slate-200 bg-white pt-14 pb-10 px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto space-y-10">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8">
+            {/* Column 1: Brand Info */}
+            <div className="col-span-2 space-y-4">
+              <Link href="/" className="inline-block">
+                <picture>
+                  <source srcSet="/quoteflow-logo.webp" type="image/webp" />
+                  <img
+                    src="/quoteflow-logo.png"
+                    alt="QuoteFlow by blendandbold"
+                    width={154}
+                    height={36}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-9 w-auto object-contain"
+                  />
+                </picture>
+              </Link>
+              <p className="text-xs text-slate-500 leading-relaxed max-w-sm">
+                The modern AI quotation maker and customer approval platform. Create proposals in seconds, share instant WhatsApp approval links with touch digital signatures, and convert approved quotes to tax invoices in 1 click.
+              </p>
+              <div className="flex items-center gap-3 pt-1">
+                <a
+                  href="https://www.producthunt.com/products/quoteflow-2?launch=quoteflow-2"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-slate-600 hover:text-orange-600 transition-colors"
+                >
+                  Product Hunt
+                </a>
+                <span className="text-slate-300">•</span>
+                <a
+                  href="https://alternativeto.net/software/quoteflow-1/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-slate-600 hover:text-sky-600 transition-colors"
+                >
+                  AlternativeTo
+                </a>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="font-extrabold text-base tracking-tight text-slate-900">
-                QuoteFlow
-              </span>
-              <span className="text-[10px] font-semibold text-slate-600">
-                by BlendAndBold
-              </span>
+
+            {/* Column 2: Solutions */}
+            <div className="space-y-3">
+              <h5 className="text-xs font-black uppercase tracking-wider text-slate-900">
+                Solutions
+              </h5>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                <li>
+                  <Link href="/ai-business-operator" className="text-violet-600 hover:text-violet-700 font-bold transition-colors flex items-center gap-1.5">
+                    <span>AI Business Operator</span>
+                    <span className="text-[9px] uppercase font-black bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full">New</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/free-quotation-maker" className="hover:text-indigo-600 transition-colors">
+                    Free Quotation Maker
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/invoice-maker-for-freelancers" className="hover:text-indigo-600 transition-colors">
+                    Invoice Maker for Freelancers
+                  </Link>
+                </li>
+                <li>
+                  <a href="#features" className="hover:text-indigo-600 transition-colors">
+                    WhatsApp Approval Portal
+                  </a>
+                </li>
+                <li>
+                  <a href="#ai-copilot" className="hover:text-indigo-600 transition-colors">
+                    AI Quotation Assistant
+                  </a>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 3: Compare Alternatives */}
+            <div className="space-y-3">
+              <h5 className="text-xs font-black uppercase tracking-wider text-slate-900">
+                Comparisons
+              </h5>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                <li>
+                  <Link href="/vs/refrens" className="hover:text-indigo-600 transition-colors">
+                    QuoteFlow vs Refrens
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/vs/vyapar" className="hover:text-indigo-600 transition-colors">
+                    QuoteFlow vs Vyapar
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/vs/zoho-invoice" className="hover:text-indigo-600 transition-colors">
+                    QuoteFlow vs Zoho Invoice
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/vs/pandadoc" className="hover:text-indigo-600 transition-colors">
+                    QuoteFlow vs PandaDoc
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/vs/freshbooks" className="hover:text-indigo-600 transition-colors">
+                    QuoteFlow vs FreshBooks
+                  </Link>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 4: Platform & Legal */}
+            <div className="space-y-3">
+              <h5 className="text-xs font-black uppercase tracking-wider text-slate-900">
+                Company &amp; Legal
+              </h5>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                <li>
+                  <Link href="/guides" className="hover:text-indigo-600 transition-colors">
+                    Guides &amp; Articles
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-indigo-600 transition-colors">
+                    Privacy Policy
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/terms" className="hover:text-indigo-600 transition-colors">
+                    Terms of Service
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/login" className="hover:text-indigo-600 transition-colors">
+                    Sign In
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/register" className="hover:text-indigo-600 transition-colors font-bold text-indigo-600">
+                    Create Free Account
+                  </Link>
+                </li>
+              </ul>
             </div>
           </div>
 
-          {/* Quick Footer Links */}
-          <div className="flex flex-wrap items-center justify-center gap-6 text-xs font-semibold text-slate-600">
-            <a href="#features" className="hover:text-indigo-600 transition-colors">
-              Features
-            </a>
-            <a href="#ai-copilot" className="hover:text-indigo-600 transition-colors">
-              AI Copilot
-            </a>
-            <a href="#pricing" className="hover:text-indigo-600 transition-colors">
-              Pricing
-            </a>
-            <a href="#faq" className="hover:text-indigo-600 transition-colors">
-              FAQ
-            </a>
-            <Link href="/login" className="hover:text-indigo-600 transition-colors">
-              Login
-            </Link>
-            <Link href="/register" className="hover:text-indigo-600 transition-colors">
-              Sign Up
-            </Link>
+          <div className="border-t border-slate-200/80 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+            <p>© 2026 QuoteFlow by blendandbold. All rights reserved.</p>
+            <p className="flex items-center gap-2">
+              <span>Made with ❤️ for modern businesses worldwide</span>
+            </p>
           </div>
-
-          {/* Copyright */}
-          <p className="text-xs text-slate-600 font-medium text-center md:text-right">
-            © 2026 QuoteFlow by blendandbold. All rights reserved.
-          </p>
         </div>
       </footer>
 
@@ -1260,7 +1879,7 @@ export function LandingPageClient({ isAuthenticated, userEmail }: LandingPagePro
               ) : (
                 <Link href="/register" onClick={() => setIsDemoModalOpen(false)}>
                   <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold text-xs rounded-xl px-5 h-9">
-                    <span>Start Free 30-Day Trial</span>
+                    <span>Start Free 14-Day Trial</span>
                     <ArrowRight className="h-3.5 w-3.5 ml-1" />
                   </Button>
                 </Link>

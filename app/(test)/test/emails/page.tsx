@@ -183,9 +183,11 @@ export default function TestEmailsPage() {
               {/* HTML Preview */}
               <div className="flex-1 overflow-auto p-4">
                 {selected.html_preview ? (
-                  <div
-                    className="text-sm max-w-2xl mx-auto"
-                    dangerouslySetInnerHTML={{ __html: selected.html_preview }}
+                  <iframe
+                    srcDoc={selected.html_preview}
+                    sandbox=""
+                    title="Email Preview"
+                    className="w-full h-full min-h-[500px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white"
                   />
                 ) : selected.text_preview ? (
                   <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-sans">

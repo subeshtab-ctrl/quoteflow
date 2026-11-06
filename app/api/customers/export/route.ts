@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { store } from '@/lib/supabase/data-store';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
+import { staffService } from '@/lib/staff/staff-service';
+import { isOwnerOrAdminRole } from '@/types/staff';
 
 function escapeCsvCell(val: any): string {
   if (val === null || val === undefined) return '';
@@ -14,13 +16,29 @@ function escapeCsvCell(val: any): string {
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUserContext();
-    const orgId = auth?.orgId || 'a0000000-0000-0000-0000-000000000001';
+    if (!auth || !auth.orgId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const orgId = auth.orgId;
 
-    const [organization, customers, quotes] = await Promise.all([
+    const canExport =
+      isOwnerOrAdminRole(auth.role) ||
+      staffService.hasPermission(auth.role, undefined, 'customers_export');
+    if (!canExport) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient permissions to export customers' }, { status: 403 });
+    }
+
+    const [organization, allCustomers, quotes] = await Promise.all([
       store.getOrganization(orgId),
       store.getCustomers(orgId),
       store.getQuotations(orgId),
     ]);
+
+    // Exclude master developer admin account from customer exports
+    const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+    const customers = adminEmail
+      ? allCustomers.filter((c) => (c.email || '').trim().toLowerCase() !== adminEmail)
+      : allCustomers;
 
     // Group quotations by customer ID for stats
     const quoteStatsByCustomer = new Map<string, { count: number; totalValue: number; currency: string }>();
@@ -105,6 +123,20 @@ export async function GET(request: NextRequest) {
     const dateStr = new Date().toISOString().split('T')[0];
     const orgSlug = organization?.slug || 'customers';
     const filename = `${orgSlug}_customers_${dateStr}.csv`;
+
+    // Log staff export activity
+    await staffService.logStaffActivity({
+      organization_id: orgId,
+      user_id: auth.userId,
+      user_name: auth.fullName || auth.email,
+      user_email: auth.email,
+      user_role: auth.role,
+      action: 'EXPORT',
+      action_key: 'customers_exported',
+      module: 'CUSTOMER',
+      target_identifier: `${customers.length} records`,
+      details: `Exported ${customers.length} customer records to CSV`,
+    }).catch((err) => console.warn('Failed to log customer export activity:', err));
 
     return new NextResponse(csvContent, {
       status: 200,
