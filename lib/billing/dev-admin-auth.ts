@@ -6,15 +6,27 @@ import { NextRequest } from 'next/server';
 import { getAuthenticatedUserContext } from '@/lib/supabase/auth-context';
 import { createAdminClient } from '@/lib/supabase/service-role';
 
+export const AUTHORIZED_MASTER_ADMIN_EMAILS = [
+  'm.subesh@outlook.com',
+  'admin@blendandbold.com',
+];
+
 export function getDeveloperAdminEmail(): string {
   return (
     process.env.ADMIN_EMAIL ||
     process.env.DEVELOPER_ADMIN_EMAIL ||
     (typeof globalThis !== 'undefined' && globalThis.__devAdminConfig__?.email) ||
-    'admin@blendandbold.com'
+    'm.subesh@outlook.com'
   )
     .trim()
     .toLowerCase();
+}
+
+export function isAuthorizedMasterAdmin(email: string): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  const configured = getDeveloperAdminEmail();
+  return clean === configured || AUTHORIZED_MASTER_ADMIN_EMAILS.includes(clean);
 }
 
 export const DEVELOPER_ADMIN_EMAIL = getDeveloperAdminEmail();

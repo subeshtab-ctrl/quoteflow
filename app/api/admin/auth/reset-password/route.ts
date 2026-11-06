@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getDeveloperAdminEmail,
+  isAuthorizedMasterAdmin,
   setDeveloperAdminPassword,
   updateSupportStaffMember,
   syncCloudAdminConfig,
@@ -85,8 +86,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Verify admin account exists
     const cfg = await syncCloudAdminConfig();
-    const masterAdminEmail = getDeveloperAdminEmail();
-    const isMaster = Boolean(masterAdminEmail && email === masterAdminEmail);
+    const isMaster = isAuthorizedMasterAdmin(email);
     const staff = (cfg.staffMembers || []).find(
       (s) => s.email.toLowerCase() === email && s.status !== 'inactive'
     );

@@ -5,6 +5,7 @@ import {
   hashPassword,
   recordAdminSecurityEvent,
   getDeveloperAdminEmail,
+  isAuthorizedMasterAdmin,
   ADMIN_PRE_AUTH_COOKIE_NAME,
   createAdminPreAuthToken,
 } from '@/lib/billing/dev-admin-auth';
@@ -55,8 +56,7 @@ export async function POST(req: NextRequest) {
     }
 
     const cfg = await syncCloudAdminConfig();
-    const masterAdminEmail = getDeveloperAdminEmail();
-    const isMaster = Boolean(masterAdminEmail && email === masterAdminEmail);
+    const isMaster = isAuthorizedMasterAdmin(email);
 
     let isValid = false;
     let staffName = 'Master Developer Admin';

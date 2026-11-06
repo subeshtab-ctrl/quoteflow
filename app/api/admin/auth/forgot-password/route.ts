@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getDeveloperAdminEmail,
+  isAuthorizedMasterAdmin,
   syncCloudAdminConfig,
   recordAdminSecurityEvent,
 } from '@/lib/billing/dev-admin-auth';
@@ -35,12 +36,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Email-specific rate limit (max 3 requests / 15m, 60s cooldown)
+    // 2. Email-specific rate limit (max 5 requests / 15m, 30s cooldown)
     const emailLimit = checkRateLimit(
       `admin:forgot:email:${email}`,
-      3,
+      5,
       15 * 60 * 1000,
-      60 * 1000
+      30 * 1000
     );
     if (!emailLimit.allowed) {
       return NextResponse.json(
@@ -51,8 +52,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Verify authorized recipient server-side (master admin or active staff)
     const cfg = await syncCloudAdminConfig();
-    const masterAdminEmail = getDeveloperAdminEmail();
-    const isMaster = Boolean(masterAdminEmail && email === masterAdminEmail);
+    const isMaster = isAuthorizedMasterAdmin(email);
     const isStaff = (cfg.staffMembers || []).some(
       (s) => s.email.toLowerCase() === email && s.status !== 'inactive'
     );
@@ -75,9 +75,14 @@ export async function POST(req: NextRequest) {
       otpCode: otp,
     });
 
-    await sendEmail(emailPayload).catch((err) => {
-      console.warn('[ADMIN AUTH] Failed to deliver password reset OTP email:', err);
-    });
+    const emailResult = await sendEmail(emailPayload);
+    if (!emailResult.success) {
+      console.error('[ADMIN AUTH] Failed to deliver password reset OTP email via Resend:', emailResult.error);
+      return NextResponse.json(
+        { error: emailResult.error || 'Failed to dispatch verification email. Please try again.' },
+        { status: 500 }
+      );
+    }
 
     recordAdminSecurityEvent({
       eventType: 'Admin Password Reset Initiated',

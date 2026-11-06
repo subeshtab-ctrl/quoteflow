@@ -6,6 +6,7 @@ import {
   createAdminSessionToken,
   registerAdminLoginSession,
   getDeveloperAdminEmail,
+  isAuthorizedMasterAdmin,
   syncCloudAdminConfig,
   normalizeAdminRoleLabel,
 } from '@/lib/billing/dev-admin-auth';
@@ -69,8 +70,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Resolve role and register new session ID
     const cfg = await syncCloudAdminConfig();
-    const masterAdminEmail = getDeveloperAdminEmail();
-    const isMaster = Boolean(masterAdminEmail && email === masterAdminEmail);
+    const isMaster = isAuthorizedMasterAdmin(email);
 
     let authenticatedName = 'Master Developer Admin';
     let authenticatedRole = 'SUPER_ADMIN';
