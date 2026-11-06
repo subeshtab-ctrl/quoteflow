@@ -30,9 +30,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Read and verify pre-auth token cookie from Step 1
-    const preAuthCookie = req.cookies.get(ADMIN_PRE_AUTH_COOKIE_NAME)?.value;
-    const preAuth = verifyAdminPreAuthToken(preAuthCookie || '');
+    // 1. Read and verify pre-auth token (cookie or fallback header/body)
+    const preAuthRaw = req.cookies.get(ADMIN_PRE_AUTH_COOKIE_NAME)?.value || body.preAuthToken || '';
+    const preAuth = verifyAdminPreAuthToken(preAuthRaw);
 
     // Allow fallback to body.email for legacy test suites only if in test environment
     const email = preAuth.valid && preAuth.email

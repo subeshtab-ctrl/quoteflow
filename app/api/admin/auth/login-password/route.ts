@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
     const response = NextResponse.json({
       success: true,
       requireOtp: true,
+      preAuthToken,
       message: 'Credentials verified. A 6-digit security code has been dispatched.',
     });
 

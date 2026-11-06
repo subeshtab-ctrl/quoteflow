@@ -13,8 +13,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const preAuthCookie = req.cookies.get(ADMIN_PRE_AUTH_COOKIE_NAME)?.value;
-    const preAuth = verifyAdminPreAuthToken(preAuthCookie || '');
+    const preAuthRaw = req.cookies.get(ADMIN_PRE_AUTH_COOKIE_NAME)?.value || body.preAuthToken || '';
+    const preAuth = verifyAdminPreAuthToken(preAuthRaw);
 
     // Allow fallback for test environment
     const targetEmail = preAuth.valid && preAuth.email

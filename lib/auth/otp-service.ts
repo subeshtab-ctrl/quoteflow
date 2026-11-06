@@ -53,10 +53,13 @@ function cleanupExpiredRecords(): void {
   });
 }
 
-// Run periodic cleanup every 5 minutes if in Node runtime
-if (typeof setInterval !== 'undefined') {
-  const timer = setInterval(cleanupExpiredRecords, 5 * 60 * 1000);
-  if (timer.unref) timer.unref();
+// Lazy cleanup periodically during active operations (avoids timers in global scope)
+let lastCleanup = 0;
+function lazyCleanupExpiredRecords(): void {
+  const now = Date.now();
+  if (now - lastCleanup < 60 * 1000) return; // at most once a minute
+  lastCleanup = now;
+  cleanupExpiredRecords();
 }
 
 export const DEFAULT_OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
@@ -71,6 +74,7 @@ export function generateSecureOtp(
   maxAttempts: number = 5,
   expiryMs: number = DEFAULT_OTP_EXPIRY_MS
 ): { otp: string; expiresAt: number } {
+  lazyCleanupExpiredRecords();
   const key = getOtpKey(target, type);
 
   // Generate 6-digit numeric OTP via CSPRNG (100000 - 999999)
@@ -112,6 +116,7 @@ export function verifySecureOtp(
   reason?: 'NOT_FOUND' | 'EXPIRED' | 'MAX_ATTEMPTS' | 'ALREADY_USED' | 'INVALID';
   remainingAttempts?: number;
 } {
+  lazyCleanupExpiredRecords();
   const key = getOtpKey(target, type);
   const record = otpStore.get(key);
 

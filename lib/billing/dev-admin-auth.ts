@@ -155,11 +155,20 @@ declare global {
   var __devAdminOtp__: OtpRecord | null | undefined;
 }
 
+function isEdgeOrWorker(): boolean {
+  return Boolean(
+    process.env.CLOUDFLARE_WORKER ||
+    process.env.NEXT_RUNTIME === 'edge' ||
+    typeof process?.cwd !== 'function'
+  );
+}
+
 /**
  * Resolve a writable directory for admin configuration & OTP
  * Handles read-only filesystems on Vercel/serverless by falling back to os.tmpdir()
  */
 function getStorageDir(): string {
+  if (isEdgeOrWorker()) return '';
   try {
     const localDir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(localDir)) {
@@ -181,23 +190,28 @@ function getStorageDir(): string {
 }
 
 function getConfigPath(): string {
-  return path.join(getStorageDir(), 'admin-config.json');
+  if (isEdgeOrWorker()) return '';
+  const dir = getStorageDir();
+  return dir ? path.join(dir, 'admin-config.json') : '';
 }
 
 function getOtpPath(): string {
-  return path.join(getStorageDir(), 'admin-otp.json');
+  if (isEdgeOrWorker()) return '';
+  const dir = getStorageDir();
+  return dir ? path.join(dir, 'admin-otp.json') : '';
 }
 
 /**
  * Safely save admin config to disk cache without exposing secret credentials
  */
 function saveConfigToDisk(cfg: DeveloperAdminConfig): void {
-  // Never overwrite persistent config during automated test runs
-  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+  // Never overwrite persistent config during automated test runs or in Cloudflare Workers
+  if (process.env.VITEST || process.env.NODE_ENV === 'test' || isEdgeOrWorker()) {
     return;
   }
   try {
     const p = getConfigPath();
+    if (!p) return;
     // Security: Never save secret keys to disk in tracked repository files
     const sanitized: DeveloperAdminConfig = {
       ...cfg,
@@ -249,7 +263,7 @@ export function getDeveloperAdminConfig(): DeveloperAdminConfig {
 
   try {
     const p = getConfigPath();
-    if (fs.existsSync(p)) {
+    if (p && !isEdgeOrWorker() && fs.existsSync(p)) {
       const raw = fs.readFileSync(p, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed.passwordHash && parsed.salt) {
@@ -970,10 +984,14 @@ export async function syncCloudAdminConfig(): Promise<DeveloperAdminConfig> {
   }
 
   // Ensure razorpayService is refreshed with the latest credentials
-  try {
-    const { razorpayService } = require('@/lib/billing/razorpay');
-    razorpayService.reloadCredentials();
-  } catch {}
+  if (typeof require === 'function') {
+    try {
+      const { razorpayService } = require('@/lib/billing/razorpay');
+      if (razorpayService && typeof razorpayService.reloadCredentials === 'function') {
+        razorpayService.reloadCredentials();
+      }
+    } catch {}
+  }
 
   return cfg;
 }
@@ -1280,7 +1298,9 @@ declare global {
 }
 
 function getOpsStorePath(): string {
-  return path.join(getStorageDir(), 'admin-ops.json');
+  if (isEdgeOrWorker()) return '';
+  const dir = getStorageDir();
+  return dir ? path.join(dir, 'admin-ops.json') : '';
 }
 
 function createDefaultOpsStore(): AdminOpsStore {
@@ -1440,7 +1460,7 @@ export function getAdminOpsStore(): AdminOpsStore {
   }
   try {
     const p = getOpsStorePath();
-    if (fs.existsSync(p)) {
+    if (p && !isEdgeOrWorker() && fs.existsSync(p)) {
       const raw = fs.readFileSync(p, 'utf-8');
       const parsed = JSON.parse(raw);
       const defaults = createDefaultOpsStore();
@@ -1477,7 +1497,9 @@ export function saveAdminOpsStore(store: AdminOpsStore): AdminOpsStore {
   globalThis.__adminOpsStore__ = store;
   try {
     const p = getOpsStorePath();
-    fs.writeFileSync(p, JSON.stringify(store, null, 2), 'utf-8');
+    if (p && !isEdgeOrWorker()) {
+      fs.writeFileSync(p, JSON.stringify(store, null, 2), 'utf-8');
+    }
   } catch {}
 
   // Also persist to Supabase notifications row 00000000-0000-0000-0000-000000000098

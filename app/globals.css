@@ -27,6 +27,17 @@ html.dark body {
   background: #0b0f19;
 }
 
+/* Dark mode input & autofill high-contrast text fix */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover, 
+.dark input:-webkit-autofill:focus,
+input[data-force-dark-autofill]:-webkit-autofill {
+  -webkit-text-fill-color: #ffffff !important;
+  -webkit-box-shadow: 0 0 0px 1000px #090d16 inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+  caret-color: #ffffff !important;
+}
+
 /* QuoteFlow Modern SaaS Theme Utility Classes */
 .card-theme {
   border-radius: 1.5rem;
